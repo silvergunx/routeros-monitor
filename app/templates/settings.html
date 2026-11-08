@@ -25,17 +25,20 @@ document.getElementById('ivno').onclick=()=>{s.value=cur;d.close()};})();</scrip
 <label class="fl">{{ t('set.sp.router') }}
 <select name="rid"><option value="">{{ t('set.sp.none') }}</option>{% for x in routers %}<option value="{{x.id}}" {{'selected' if speed_router == x.id|string}}>{{x.name}}</option>{% endfor %}</select></label>
 <label class="fl">{{ t('set.sp.engine') }}
-<select name="engine"><option value="ookla" {{'selected' if speed_engine != 'cloudflare'}}>{{ t('set.sp.ookla') }}{{ t('set.sp.unavail') if not ookla }}</option>
+<select name="engine" id="spdeng"><option value="librespeed" {{'selected' if speed_engine == 'librespeed'}}>{{ t('set.sp.ls') }}{{ t('set.sp.unavail') if not librespeed }}</option>
+<option value="ookla" {{'selected' if speed_engine == 'ookla'}}>{{ t('set.sp.ookla') }}{{ t('set.sp.unavail') if not ookla }}</option>
 <option value="cloudflare" {{'selected' if speed_engine == 'cloudflare'}}>{{ t('set.sp.cf') }}</option></select></label>
 <label class="fl">{{ t('set.sp.server') }}
 <span class="row"><select name="server" id="spdsrv" style="flex:1"><option value="">{{ t('set.sp.auto') }}</option>{% if speed_server %}<option value="{{speed_server}}" selected>{{ t('set.sp.server_n', id=speed_server) }}</option>{% endif %}</select>
 <button type="button" id="spdlist">{{ t('set.sp.list') }}</button></span></label>
 <div class="row" style="justify-content:flex-end"><button class="p">{{ t('common.save') }}</button></div></form>
-<p><small class="mut">{% if ookla %}{{ t('set.sp.help_ookla') }}{% else %}{{ th('set.sp.help_no.html') }}{% endif %}
+<p><small class="mut">{{ t('set.sp.help_ls') }}
+{% if ookla %}{{ t('set.sp.help_ookla') }}{% else %}{{ th('set.sp.help_no.html') }}{% endif %}
 {{ t('set.sp.help_tail', time=speed_time) }}</small></p></div>
 <script>(function(){const L={load:{{ t('set.sp.loading')|tojson }},list:{{ t('set.sp.list')|tojson }},na:{{ t('set.sp.na')|tojson }},auto:{{ t('set.sp.auto')|tojson }},srv:{{ t('set.sp.server_n', id='{id}')|tojson }}};
-const b=document.getElementById('spdlist'),s=document.getElementById('spdsrv');if(!b)return;
-b.onclick=async()=>{b.disabled=true;b.textContent=L.load;try{const d=await(await fetch('/api/speedtest/servers')).json();
+const b=document.getElementById('spdlist'),s=document.getElementById('spdsrv'),e=document.getElementById('spdeng'),e0=e.value,s0=s.value;if(!b)return;
+e.onchange=()=>{s.replaceChildren(new Option(L.auto,''));if(e.value===e0&&s0)s.append(new Option(L.srv.replace('{id}',s0),s0,true,true))};
+b.onclick=async()=>{b.disabled=true;b.textContent=L.load;try{const d=await(await fetch('/api/speedtest/servers?engine='+encodeURIComponent(e.value))).json();
  if(!d.available){alert(L.na)}else{const cur=s.value;s.replaceChildren(new Option(L.auto,''),...d.servers.map(x=>new Option(x.name+' #'+x.id,x.id)));s.value=cur;if(s.value!==cur&&cur)s.append(new Option(L.srv.replace('{id}',cur),cur,true,true))}}catch(e){}
  b.disabled=false;b.textContent=L.list}})();</script>
 <div class="card" id="order"><h2>{{ t('set.order.title') }}</h2>

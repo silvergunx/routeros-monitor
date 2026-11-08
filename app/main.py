@@ -2,6 +2,7 @@ import os, re, csv, io, json, math, asyncio, socket, hashlib, hmac, secrets, tim
 from urllib.parse import quote, urlparse
 import i18n
 import version as appver
+import speedengines
 import httpx
 from fastapi import FastAPI, Request, Form, Depends, HTTPException, Body
 from fastapi.responses import RedirectResponse, PlainTextResponse, Response, FileResponse, StreamingResponse
@@ -1980,6 +1981,13 @@ import shutil
 
 OOKLA_BIN = shutil.which("speedtest")
 OOKLA_ARGS = ["--accept-license", "--accept-gdpr"]
+LS_BIN = shutil.which("librespeed-cli")  # LibreSpeed CLI (LGPL-3.0), dołączony do obrazu
+SPEED_ENGINES = ("librespeed", "ookla", "cloudflare")
+
+
+def default_engine():
+    """Silnik, gdy nic nie zapisano: Ookla (jeśli jest, zachowanie jak dawniej), inaczej LibreSpeed, inaczej Cloudflare."""
+    return "ookla" if OOKLA_BIN else "librespeed" if LS_BIN else "cloudflare"
 
 
 async def _run(args, timeout):
@@ -2011,8 +2019,29 @@ async def ookla_test(server_id=""):
             "server": ", ".join(x for x in (srv.get("name"), srv.get("location")) if x)[:120] or None}
 
 
+async def librespeed_test(server_id=""):
+    """Test LibreSpeed (librespeed.org): pobieranie, wysyłanie, ping, jitter. Bez --share, więc nic nie jest wysyłane do LibreSpeed."""
+    args = [LS_BIN, "--json", "--duration", "10", "--timeout", "15"]
+    if server_id.isdigit():
+        args += ["--server", server_id]
+    code, out, err = await _run(args, 180)
+    try:
+        return speedengines.parse_librespeed_json(out)
+    except (ValueError, TypeError) as e:
+        msg = (err or out).strip().splitlines()
+        raise RuntimeError((msg[-1] if msg else "%s (kod %s)" % (e, code))[:180])
+
+
 @app.get("/api/speedtest/servers", dependencies=[Depends(admin)])
-async def ookla_servers():
+async def speed_servers(engine: str = "ookla"):
+    if engine == "librespeed":
+        if not LS_BIN:
+            return {"available": False, "servers": []}
+        try:
+            code, out, err = await _run([LS_BIN, "--list"], 40)
+            return {"available": True, "servers": speedengines.parse_librespeed_list(out)}
+        except Exception as e:
+            return {"available": True, "servers": [], "error": str(e)[:200]}
     if not OOKLA_BIN:
         return {"available": False, "servers": []}
     try:
@@ -2034,19 +2063,21 @@ async def server_speedtest(rid):
 
     def cfg():
         with Session(engine) as s:
-            return sget(s, "speed_engine", "ookla"), sget(s, "speed_server", "")
+            e = sget(s, "speed_engine", "") or default_engine()
+            return e, server_setting(s, e)
     eng, sid = await run_in_threadpool(cfg)
+    runners = {"librespeed": (LS_BIN, librespeed_test, "LibreSpeed"), "ookla": (OOKLA_BIN, ookla_test, "Ookla")}
     try:
-        if eng != "cloudflare" and OOKLA_BIN:
-            src = "ookla"
-            SPD_STATE["phase"] = "spd.ookla"
+        if eng in runners and runners[eng][0]:
+            src = eng
+            SPD_STATE["phase"] = "spd." + eng
             try:
-                res.update(await ookla_test(sid))
+                res.update(await runners[eng][1](sid))
             except Exception as e:
-                error = "Ookla: %s" % e
-                print("speedtest ookla: %s" % e, flush=True)
-        if eng == "cloudflare" or not OOKLA_BIN or not res["down"]:
-            if src == "ookla":
+                error = "%s: %s" % (runners[eng][2], e)
+                print("speedtest %s: %s" % (eng, e), flush=True)
+        if eng not in runners or not runners[eng][0] or not res["down"]:
+            if src != "server":
                 src = "server"
             SPD_STATE["phase"] = "spd.ping"
             res["ping"] = await _ping()
@@ -2071,6 +2102,11 @@ async def server_speedtest(rid):
                 s.commit()
         await run_in_threadpool(store)
         SPD_STATE.update(running=False, phase="", rid=None)
+
+
+def server_setting(s, engine):
+    """Serwer testowy zapisany osobno dla każdego silnika (numeracja serwerów różni się między silnikami)."""
+    return sget(s, "speed_server_" + engine, sget(s, "speed_server", "") if engine == "ookla" else "")
 
 
 def speed_due():
@@ -2105,11 +2141,12 @@ async def speedtest_now(rid: int):
 
 
 @app.post("/settings/speed", dependencies=[Depends(admin)])
-def settings_speed(request: Request, rid: str = Form(""), engine_: str = Form("ookla", alias="engine"),
+def settings_speed(request: Request, rid: str = Form(""), engine_: str = Form("", alias="engine"),
                    server: str = Form(""), s: Session = Depends(db)):
     sset(s, "speed_router", rid if rid.isdigit() else "")
-    sset(s, "speed_engine", "cloudflare" if engine_ == "cloudflare" else "ookla")
-    sset(s, "speed_server", server if server.isdigit() else "")
+    engine_ = engine_ if engine_ in SPEED_ENGINES else default_engine()
+    sset(s, "speed_engine", engine_)
+    sset(s, "speed_server_" + engine_, server if server.isdigit() else "")
     r = s.get(Router, int(rid)) if rid.isdigit() else None
     log(s, "test prędkości", "z serwera za routerem: %s" % (r.name if r else "wyłączony"))
     s.commit()
@@ -3128,7 +3165,9 @@ def settings_view(request, s, msg="", ok=True):
         "domain": sget(s, "domain"), "email": sget(s, "email"), "msg": msg, "ok": ok,
         "interval": interval(s), "intervals": INTERVALS, "routers": ordered_routers(s), "bk": backups_info(),
         "wl_enabled": whitelist_on(s), "speed_router": sget(s, "speed_router"), "speed_time": SPEED_TIME[:5],
-        "speed_engine": sget(s, "speed_engine", "ookla"), "speed_server": sget(s, "speed_server", ""), "ookla": bool(OOKLA_BIN)})
+        "speed_engine": sget(s, "speed_engine", "") or default_engine(),
+        "speed_server": server_setting(s, sget(s, "speed_engine", "") or default_engine()),
+        "ookla": bool(OOKLA_BIN), "librespeed": bool(LS_BIN)})
 
 
 @app.post("/settings/whitelist", dependencies=[Depends(admin)])

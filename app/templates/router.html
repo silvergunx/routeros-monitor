@@ -295,7 +295,7 @@ if(document.getElementById('c11')){const sp=d.speed;
   if(last.ok){q.append(el('b',null,'↓ '+last.down+' Mb/s'));if(last.up!=null)q.append(' · ',el('b',null,'↑ '+last.up+' Mb/s'));
    if(last.ping!=null)q.append(' · ping '+last.ping+' ms');if(last.jitter!=null)q.append(' · '+T.rp_jitter_l+' '+last.jitter+' ms');
    if(last.loss!=null)q.append(' · '+T.rp_sp_loss+' '+last.loss+'%');
-   q.append(el('span','mut small',' ('+(last.src==='ookla'?'Speedtest by Ookla':last.src==='server'?T.rp_sp_server:T.rp_sp_router)+(last.server?' · '+last.server:'')+')'));
+   q.append(el('span','mut small',' ('+(last.src==='ookla'?'Speedtest by Ookla':last.src==='librespeed'?'LibreSpeed':last.src==='server'?T.rp_sp_server:T.rp_sp_router)+(last.server?' · '+last.server:'')+')'));
    if(last.url){const a=el('a',null,' '+T.rp_sp_result);a.href=last.url;a.target='_blank';a.rel='noopener';a.className='small';q.append(a)}}
   else{q.append(el('b','bad',T.rp_sp_failed));if(last.err)q.append(el('span','mut small',' – '+last.err))}}
  else{q.className='mut';q.textContent=T.rp_sp_none}

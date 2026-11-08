@@ -21,6 +21,10 @@ jobs:
       - name: Python syntax
         run: python -m compileall -q app
       - name: Unit tests
-        run: python tests/test_version.py
+        run: python tests/test_version.py && python tests/test_speed.py
       - name: Docker image builds
-        run: docker build --build-arg OOKLA_VERSION= ./app
+        run: docker build --build-arg OOKLA_VERSION= -t rm-test ./app
+      - name: LibreSpeed CLI is in the image
+        run: docker run --rm rm-test librespeed-cli --version
+      - name: Python can import the speed engines
+        run: docker run --rm rm-test python -c "import speedengines, version; print(version.current())"

@@ -19,8 +19,9 @@ The interface is available in Polish and English, works in light and dark mode a
 **Link quality**
 - Netwatch probes: latency, jitter and packet loss to the gateway and, on the edge router, also DNS, HTTP and internet availability in %
 - list of outages with their type (no internet / DNS not working / HTTP not working)
-- **Speedtest by Ookla** (the same test as speedtest.net) built into the container, with a choice of test server,
-  jitter, packet loss and a link to the result; Cloudflare as a fallback; every night and on demand
+- a speed test run by the application server with a choice of engine and test server: **LibreSpeed** (open source, built into the image),
+  **Speedtest by Ookla** (the same test as speedtest.net; available when you build the image yourself) and Cloudflare as a fallback;
+  download, upload, ping and jitter; every night and on demand
 
 **Logs**
 - receiving router logs over syslog (UDP), colouring by severity, acknowledging, export with a date range
@@ -180,9 +181,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Changes are listed in [CHANGELOG.md](CHA
 
 Project code: [MIT](LICENSE).
 
-When you build the image yourself (`docker compose up -d --build`), **Ookla's Speedtest CLI** is downloaded. It is not part of this repository
+The image bundles **LibreSpeed CLI** (LGPL-3.0, unmodified) for the speed test; see [THIRD_PARTY.md](THIRD_PARTY.md) for the licences of bundled components.
+It runs without sharing results, so nothing but the test traffic goes to the public LibreSpeed servers.
+
+When you build the image yourself (`docker compose up -d --build`), **Ookla's Speedtest CLI** is also downloaded. It is not part of this repository
 and has its own licence (personal, non-commercial use); the application runs it accepting Ookla's licence and privacy policy.
-The ready-made images do **not** include it (Settings then shows how to build with it) and use the Cloudflare test.
-If you do not want Ookla, choose the Cloudflare engine in Settings.
+The ready-made images do **not** include it (Settings then shows how to build with it). You can always choose the LibreSpeed or Cloudflare engine instead.
 
 This project is not affiliated with MikroTik, Ookla or Cloudflare. The names belong to their owners.

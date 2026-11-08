@@ -19,8 +19,9 @@ Interfejs jest dostępny po polsku i angielsku, działa w trybie jasnym i ciemny
 **Jakość łącza**
 - sondy Netwatch: opóźnienie, jitter i utrata pakietów do bramy, a na routerze brzegowym także DNS, HTTP i dostępność internetu w %
 - lista przerw z typem (brak internetu / nie działa DNS / nie działa HTTP)
-- **test prędkości Speedtest by Ookla** (ten sam co speedtest.net) wbudowany w kontener, z wyborem serwera testowego,
-  jitterem, utratą pakietów i linkiem do wyniku; zapasowo test Cloudflare; codziennie w nocy i na żądanie
+- test prędkości wykonywany przez serwer aplikacji, z wyborem silnika i serwera testowego: **LibreSpeed** (otwartoźródłowy, wbudowany w obraz),
+  **Speedtest by Ookla** (ten sam co speedtest.net; dostępny po własnej budowie obrazu) i zapasowo Cloudflare;
+  pobieranie, wysyłanie, ping i jitter; codziennie w nocy i na żądanie
 
 **Logi**
 - odbiór logów z routerów przez syslog (UDP), kolorowanie wg ważności, potwierdzanie, eksport z zakresem dat
@@ -175,9 +176,11 @@ Interfejs działa po polsku i angielsku (przełącznik PL / EN w menu i na ekran
 
 Kod projektu: [MIT](LICENSE).
 
-Przy własnej budowie obrazu (`docker compose up -d --build`) pobierany jest program **Speedtest CLI firmy Ookla**, który nie jest częścią
+Obraz zawiera **LibreSpeed CLI** (LGPL-3.0, bez zmian) do testu prędkości; licencje dołączonych składników są w [THIRD_PARTY.md](THIRD_PARTY.md).
+Działa bez udostępniania wyników, więc do publicznych serwerów LibreSpeed trafia tylko ruch testowy.
+
+Przy własnej budowie obrazu (`docker compose up -d --build`) pobierany jest dodatkowo program **Speedtest CLI firmy Ookla**, który nie jest częścią
 tego repozytorium i ma własną licencję (użytek osobisty, niekomercyjny); aplikacja uruchamia go z akceptacją licencji i polityki prywatności Ookla.
-Gotowe obrazy go **nie zawierają** (w Ustawieniach jest wtedy podpowiedź, jak zbudować obraz z Ooklą) i używają testu Cloudflare.
-Jeśli nie chcesz Ookli, wybierz w Ustawieniach silnik Cloudflare.
+Gotowe obrazy go **nie zawierają** (w Ustawieniach jest wtedy podpowiedź, jak zbudować obraz z Ooklą). Zawsze możesz wybrać silnik LibreSpeed lub Cloudflare.
 
 Projekt nie jest powiązany z MikroTik, Ookla ani Cloudflare. Nazwy należą do ich właścicieli.

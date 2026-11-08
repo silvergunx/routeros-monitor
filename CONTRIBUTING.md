@@ -46,6 +46,6 @@ The panel is then at `http://localhost/`. After changing Python or template file
 - Keep changes small and focused; one topic per pull request.
 - Every text shown to the user goes through the translation files (`app/locales/*.json`), never hard-coded in templates or Python.
   Provide at least the English and Polish text.
-- Run `python tests/test_version.py` and `python tools/check_locales.py` before opening a pull request.
+- Run `python tests/test_version.py`, `python tests/test_speed.py` and `python tools/check_locales.py` before opening a pull request.
 - Do not add new dependencies without a good reason; the project is intentionally small.
 - Do not commit secrets, `.env` files, backups or real router data.
