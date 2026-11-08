@@ -7,6 +7,8 @@ którą routery pobierają same. Całość działa w Dockerze (`docker compose`)
 
 Interfejs jest dostępny po polsku i angielsku, działa w trybie jasnym i ciemnym oraz na telefonie.
 
+**Spis treści:** [Co potrafi](#co-potrafi) · [Wymagania](#wymagania) · [Instalacja](#instalacja) · [Aktualizacja](#aktualizacja) · [Konfiguracja](#konfiguracja-env) · [Kopie zapasowe](#kopie-zapasowe) · [Diagnostyka](#diagnostyka) · [Języki](#języki) · [Dokumentacja](#dokumentacja) · [Licencja](#licencja)
+
 ## Co potrafi
 
 **Monitoring routerów**
@@ -194,6 +196,19 @@ Bezpieczeństwo: [docs/BEZPIECZENSTWO.md](docs/BEZPIECZENSTWO.md) oraz [SECURITY
 ## Języki
 
 Interfejs działa po polsku i angielsku (przełącznik PL / EN w menu i na ekranie logowania, wybór zapamiętuje ciasteczko). Kolejne języki dodaje się samym plikiem JSON, bez zmian w kodzie: [docs/TRANSLATING.md](docs/TRANSLATING.md).
+
+## Dokumentacja
+
+| Dokument | Co zawiera |
+|---|---|
+| [Releases](https://github.com/silvergunx/routeros-monitor/releases) i [CHANGELOG.md](CHANGELOG.md) | co zmieniło się w każdej wersji i co trzeba zrobić na routerach lub serwerze po aktualizacji |
+| [docs/ROUTERY.md](docs/ROUTERY.md) | co instaluje komenda konfiguracyjna na routerze, reguły firewalla dla whitelisty i blacklisty, routery poza siecią lokalną |
+| [docs/BEZPIECZENSTWO.md](docs/BEZPIECZENSTWO.md) i [SECURITY.md](SECURITY.md) | zalecenia bezpieczeństwa i zgłaszanie błędów bezpieczeństwa |
+| [docs/TRANSLATING.md](docs/TRANSLATING.md) | jak dodać język |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | gałęzie (`main` stabilna, `develop` beta), testy, wydawanie wersji |
+| [THIRD_PARTY.md](THIRD_PARTY.md) | licencje dołączonych składników (LibreSpeed CLI) i opcjonalnego programu Ookla |
+
+Pytania i zgłoszenia błędów: [GitHub Issues](https://github.com/silvergunx/routeros-monitor/issues).
 
 ## Licencja
 
