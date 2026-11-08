@@ -193,7 +193,7 @@ const p=new URLSearchParams({sev:LF.sev,topic:document.getElementById('ltopic').
 let d;try{const r=await fetch('/api/routers/'+RID+'/logs?'+p,{cache:'no-store'});if(!r.ok)return;d=await r.json()}catch(e){return}
 const sel=document.getElementById('ltopic'),cur=sel.value;
 if(sel.options.length-1!==d.topics.length){sel.replaceChildren(new Option(T.rp_all_topics,''),...d.topics.map(t=>new Option(t,t)));sel.value=cur}
-for(const k in d.counts){const e=document.getElementById('lc-'+k);if(e)e.textContent=d.counts[k]}setUnread(d.unread);
+for(const k in d.counts){const e=document.getElementById('lc-'+k);if(e)e.textContent=d.counts[k]}setUnread(d.unread,d.unread_warn);
 const grp=document.getElementById('lgrp').checked,body=document.getElementById('lbody'),rows=[];let prev=null,prow=null,n=1;
 for(const it of d.items){
  if(grp&&prev&&prev.msg===it.msg&&prev.topics.join()===it.topics.join()&&prev.cls===it.cls){n++;prow.querySelector('.rep').textContent='×'+n;prow.querySelector('.since').textContent=tf(T.log_since,{t:lfmt(it.t)});continue}
@@ -205,8 +205,8 @@ for(const it of d.items){
 if(!rows.length){const tr=lel('tr');tr.append(lel('td','mut',d.items.length?'':T.rp_logs_empty));rows.push(tr)}
 body.replaceChildren(...rows)}
 document.querySelectorAll('#lsev button').forEach(b=>b.onclick=()=>{LF.sev=b.dataset.s;document.querySelectorAll('#lsev button').forEach(x=>x.classList.toggle('on',x===b));loadLogs()});
-function setUnread(n){const b=document.getElementById('live-clog');if(b)b.innerHTML=n?'<span class="cnt cerr">'+Number(n)+'</span>':'';
-const a=document.getElementById('lack');if(a){a.disabled=!n;a.textContent=n?tf(T.rp_ack_n,{n:Number(n)}):T.rp_ack_none}}
+function setUnread(n,w){w=w||0;const b=document.getElementById('live-clog');if(b)b.innerHTML=n?'<span class="cnt cerr">'+Number(n)+'</span>':'';
+const a=document.getElementById('lack'),tot=Number(n||0)+Number(w);if(a){a.disabled=!tot;a.textContent=tot?tf(T.rp_ack_n,{n:tot}):T.rp_ack_none}}
 document.getElementById('lack').onclick=async()=>{try{await fetch('/routers/'+RID+'/logack',{method:'POST'})}catch(e){}loadLogs()};
 const pad=n=>String(n).padStart(2,'0'),dl=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes());
 function lpreset(p){const to=new Date();let fr;if(p==='today'){fr=new Date();fr.setHours(0,0,0,0)}else fr=new Date(to-p*3600000);

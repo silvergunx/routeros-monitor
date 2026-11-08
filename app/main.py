@@ -1754,6 +1754,7 @@ def logs_api(request: Request, rid: int, sev: str = "", topic: str = "", q: str 
     if q.strip():
         cond.append(LogEntry.msg.ilike("%" + q.strip()[:100].replace("%", r"\%").replace("_", r"\_") + "%"))
     rows = s.scalars(select(LogEntry).where(*cond).order_by(LogEntry.id.desc()).limit(limit)).all()
+    unread = unread_counts(s, request.state.user, rid)
     day = now() - dt.timedelta(hours=24)
     counts = {k: 0 for k in LOG_CATS}
     for v, c in s.execute(select(LogEntry.sev, func.count()).where(LogEntry.router_id == rid, LogEntry.ts > day)
@@ -1771,7 +1772,7 @@ def logs_api(request: Request, rid: int, sev: str = "", topic: str = "", q: str 
                       for x in rows],
             "counts": counts, "topics": sorted(words),
             "ack": (log_ack_time(request.state.user, rid) or dt.datetime(2000, 1, 1)).isoformat(timespec="seconds"),
-            "unread": unread_errors(s, request.state.user, rid)}
+            "unread": unread[0], "unread_warn": unread[1]}
 
 
 def log_ack_time(u, rid):

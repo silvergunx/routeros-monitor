@@ -318,7 +318,7 @@
   "log.since": "since {t}",
   "rp.logs_empty": "No logs for the selected filters. If this is a new router, paste the current configuration command (Configuration tab).",
   "rp.ack_n": "✓ Acknowledge ({n})",
-  "rp.ack_none": "✓ No new errors",
+  "rp.ack_none": "✓ No new errors or warnings",
   "rp.err_dates": "Fill in both dates.",
   "rp.err_range": "The “To” date must be later than “From”.",
   "rp.a_bad": "🔴 problems",

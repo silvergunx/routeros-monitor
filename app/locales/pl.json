@@ -319,7 +319,7 @@
   "log.since": "od {t}",
   "rp.logs_empty": "Brak logów dla wybranych filtrów. Jeśli to nowy router, wklej aktualną komendę konfiguracyjną (zakładka Konfiguracja).",
   "rp.ack_n": "✓ Zatwierdź ({n})",
-  "rp.ack_none": "✓ Brak nowych błędów",
+  "rp.ack_none": "✓ Brak nowych błędów i ostrzeżeń",
   "rp.err_dates": "Uzupełnij obie daty.",
   "rp.err_range": "Data „Do” musi być późniejsza niż „Od”.",
   "rp.a_bad": "🔴 problemy",
