@@ -1,0 +1,1 @@
+{% macro switcher(full=false) %}{% for c, n, f in languages() %}<a href="/lang/{{c}}" title="{{n}}" class="lg{% if c == request.state.lang %} on{% endif %}">{% if f %}<img src="/flag/{{c}}.svg" alt="" width="20" height="14">{% endif %}<span>{{ n if full else c|upper }}</span></a>{% endfor %}{% endmacro %}

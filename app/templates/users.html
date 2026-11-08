@@ -1,19 +1,19 @@
 {% extends "base.html" %}{% block c %}
-<div class="card"><h2>Użytkownicy</h2>
+<div class="card"><h2>{{ t('users.title') }}</h2>
 {% if msg %}<p class="{{'ok' if ok else 'err'}}">{{msg}}</p>{% endif %}
-<p class="mut"><b>Administrator</b>: pełny dostęp. <b>Tylko podgląd</b>: routery, wykresy i whitelista bez możliwości zmian; nie widzi tokenów routerów, dziennika ani ustawień.</p>
-<div style="overflow-x:auto"><table><tr><th>Login</th><th>Rola</th><th>Status</th><th>Ostatnie logowanie</th><th>Akcje</th></tr>
-{% for u in users %}<tr><td><b>{{u.username}}</b>{% if u.id == request.state.user.id %} <span class="mut">(Ty)</span>{% endif %}</td>
-<td>{% if u.id != request.state.user.id %}<form class="i" method="post" action="/users/{{u.id}}/role"><select name="role" onchange="this.form.submit()">{% for k, v in roles.items() %}<option value="{{k}}" {{'selected' if u.role==k}}>{{v}}</option>{% endfor %}</select></form>{% else %}{{roles[u.role]}}{% endif %}</td>
-<td class="{{'ok' if u.active else 'off'}}">{{'aktywny' if u.active else 'wyłączony'}}</td>
+<p class="mut">{{ th('users.help.html') }}</p>
+<div style="overflow-x:auto"><table><tr><th>{{ t('users.login') }}</th><th>{{ t('users.role') }}</th><th>{{ t('users.status') }}</th><th>{{ t('users.last_login') }}</th><th>{{ t('users.actions') }}</th></tr>
+{% for u in users %}<tr><td><b>{{u.username}}</b>{% if u.id == request.state.user.id %} <span class="mut">{{ t('users.you') }}</span>{% endif %}</td>
+<td>{% if u.id != request.state.user.id %}<form class="i" method="post" action="/users/{{u.id}}/role"><select name="role" onchange="this.form.submit()">{% for k, v in roles.items() %}<option value="{{k}}" {{'selected' if u.role==k}}>{{ t('role.' ~ k) }}</option>{% endfor %}</select></form>{% else %}{{ t('role.' ~ u.role) }}{% endif %}</td>
+<td class="{{'ok' if u.active else 'off'}}">{{ t('users.active') if u.active else t('users.disabled') }}</td>
 <td>{% if u.last_login %}<span class="t" data-t="{{u.last_login|iso}}Z"></span>{% else %}-{% endif %}</td>
-<td class="row"><form class="i row" method="post" action="/users/{{u.id}}/password"><input name="password" type="password" minlength="8" placeholder="Nowe hasło" required style="width:130px"><button>Ustaw hasło</button></form>
-{% if u.id != request.state.user.id %}<form class="i" method="post" action="/users/{{u.id}}/toggle"><button>{{'Wyłącz' if u.active else 'Włącz'}}</button></form>
-<form class="i" method="post" action="/users/{{u.id}}/delete" onsubmit="return confirm('Usunąć użytkownika {{u.username}}?')"><button>Usuń</button></form>{% endif %}</td></tr>{% endfor %}
+<td class="row"><form class="i row" method="post" action="/users/{{u.id}}/password"><input name="password" type="password" minlength="8" placeholder="{{ t('users.new_password') }}" required style="width:130px"><button>{{ t('users.set_password') }}</button></form>
+{% if u.id != request.state.user.id %}<form class="i" method="post" action="/users/{{u.id}}/toggle"><button>{{ t('common.disable') if u.active else t('common.enable') }}</button></form>
+<form class="i" method="post" action="/users/{{u.id}}/delete" onsubmit='return confirm({{ t("users.confirm_delete", name=u.username)|tojson }})'><button>{{ t('common.delete') }}</button></form>{% endif %}</td></tr>{% endfor %}
 </table></div></div>
-<div class="card"><h2>Dodaj użytkownika</h2>
-<form method="post" action="/users" class="row"><input name="username" placeholder="Login" required pattern="[A-Za-z0-9._@\-]{3,40}">
-<input name="password" type="password" minlength="8" placeholder="Hasło (min. 8 znaków)" required>
-<select name="role">{% for k, v in roles.items() %}<option value="{{k}}" {{'selected' if k=='viewer'}}>{{v}}</option>{% endfor %}</select>
-<button class="p">Dodaj</button></form></div>
+<div class="card"><h2>{{ t('users.add_title') }}</h2>
+<form method="post" action="/users" class="row"><input name="username" placeholder="{{ t('users.login') }}" required pattern="[A-Za-z0-9._@\-]{3,40}">
+<input name="password" type="password" minlength="8" placeholder="{{ t('users.password_ph') }}" required>
+<select name="role">{% for k, v in roles.items() %}<option value="{{k}}" {{'selected' if k=='viewer'}}>{{ t('role.' ~ k) }}</option>{% endfor %}</select>
+<button class="p">{{ t('common.add') }}</button></form></div>
 {% endblock %}

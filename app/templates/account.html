@@ -1,9 +1,9 @@
 {% extends "base.html" %}{% block c %}
-<div class="card" style="max-width:420px"><h2>Moje konto: {{request.state.user.username}}</h2>
+<div class="card" style="max-width:420px"><h2>{{ t('account.title', name=request.state.user.username) }}</h2>
 {% if msg %}<p class="{{'ok' if ok else 'err'}}">{{msg}}</p>{% endif %}
-<p class="mut">Rola: {{'administrator' if request.state.user.is_admin else 'tylko podgląd'}}</p>
-<form method="post"><p><input name="current" type="password" placeholder="Obecne hasło" required style="width:100%"></p>
-<p><input name="password" type="password" minlength="8" placeholder="Nowe hasło (min. 8 znaków)" required style="width:100%"></p>
-<p><input name="password2" type="password" minlength="8" placeholder="Powtórz nowe hasło" required style="width:100%"></p>
-<button class="p">Zmień hasło</button></form></div>
+<p class="mut">{{ t('account.role', role=t('role.admin') if request.state.user.is_admin else t('role.viewer')) }}</p>
+<form method="post"><p><input name="current" type="password" placeholder="{{ t('account.current') }}" required style="width:100%"></p>
+<p><input name="password" type="password" minlength="8" placeholder="{{ t('account.new') }}" required style="width:100%"></p>
+<p><input name="password2" type="password" minlength="8" placeholder="{{ t('account.repeat') }}" required style="width:100%"></p>
+<button class="p">{{ t('account.submit') }}</button></form></div>
 {% endblock %}

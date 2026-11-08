@@ -1,35 +1,34 @@
 {% extends "base.html" %}{% block c %}
 {% set on = routers|selectattr('online')|list|length %}
-<div class="row" style="justify-content:space-between;margin-bottom:12px"><h2 style="margin:0">Routery <span class="mut" style="font-weight:400" id="live-count" data-live>· online {{on}} / {{routers|length}}</span></h2>
-{% if request.state.user.is_admin %}<button type="button" class="p" onclick="document.getElementById('addr').showModal();document.getElementById('addname').focus()">＋ Dodaj router</button>
+<div class="row" style="justify-content:space-between;margin-bottom:12px"><h2 style="margin:0">{{ t('rt.title') }} <span class="mut" style="font-weight:400" id="live-count" data-live>{{ t('rt.online_count', on=on, total=routers|length) }}</span></h2>
+{% if request.state.user.is_admin %}<button type="button" class="p" onclick="document.getElementById('addr').showModal();document.getElementById('addname').focus()">{{ t('rt.add') }}</button>
 <dialog id="addr" class="dlg"><form method="post" action="/routers">
-<div class="row" style="justify-content:space-between"><h3 style="margin:0">Nowy router</h3><button type="button" onclick="this.closest('dialog').close()" aria-label="Zamknij">✕</button></div>
-<label class="fl">Nazwa routera<input name="name" id="addname" placeholder="np. Master, AP piętro, Garage" required maxlength="80"></label>
+<div class="row" style="justify-content:space-between"><h3 style="margin:0">{{ t('rt.new') }}</h3><button type="button" onclick="this.closest('dialog').close()" aria-label="{{ t('common.close') }}">✕</button></div>
+<label class="fl">{{ t('rt.name') }}<input name="name" id="addname" placeholder="{{ t('rt.name_ph') }}" required maxlength="80"></label>
 <label class="row" style="gap:8px;margin:12px 0 4px;align-items:flex-start"><input type="checkbox" name="edge" value="1" style="margin-top:3px">
-<span><b>Router brzegowy</b><br><span class="mut small">Ma bezpośrednie wyjście do internetu (np. główny router). Mierzy jakość internetu i robi nocny test prędkości.
-AP i routery za nim zostaw odznaczone – mierzą tylko połączenie ze swoją bramą.</span></span></label>
-<p class="mut small">Po dodaniu otworzy się strona routera z komendą konfiguracyjną do wklejenia w terminalu RouterOS.</p>
-<div class="row" style="justify-content:flex-end"><button type="button" onclick="this.closest('dialog').close()">Anuluj</button><button class="p">Dodaj router</button></div>
+<span><b>{{ t('rt.edge') }}</b><br><span class="mut small">{{ t('rt.edge_help') }}</span></span></label>
+<p class="mut small">{{ t('rt.after_add') }}</p>
+<div class="row" style="justify-content:flex-end"><button type="button" onclick="this.closest('dialog').close()">{{ t('common.cancel') }}</button><button class="p">{{ t('rt.add_btn') }}</button></div>
 </form></dialog>{% endif %}</div>
-{% if not routers %}<div class="card mut">Brak routerów.{% if request.state.user.is_admin %} Dodaj pierwszy, a na jego stronie znajdziesz komendę konfiguracyjną.{% endif %}</div>{% endif %}
+{% if not routers %}<div class="card mut">{{ t('rt.none') }}{% if request.state.user.is_admin %}{{ t('rt.none_admin') }}{% endif %}</div>{% endif %}
 {% set n = routers|length %}{% set cols = 1 if n == 1 else 2 if n in (2, 4) else 3 if n in (3, 5, 6, 9) else 4 %}
 <div class="rgrid c{{cols}}" id="live-grid" data-live>
 {% for r in routers %}{% set m = latest.get(r.id) %}{% set w = wans.get(r.id) %}
 <a class="card rc" href="/routers/{{r.id}}">
-{% set lc = lcs.get(r.id, (0, 0)) %}<div class="rh"><b>{{r.name}}</b><span class="rstat"><span class="badge {{'ok' if r.online else 'bad'}}">{{'online' if r.online else 'offline'}}</span>
-{% if lc[0] or lc[1] %}<span class="logind" title="Niezatwierdzone wpisy w logach z ostatnich 24 h - kliknij, aby otworzyć logi" onclick="event.preventDefault();location.href='/routers/{{r.id}}#logs'">{% if lc[0] %}<span class="ld err"></span>{{lc[0]}} {{'błąd' if lc[0] == 1 else 'błędy' if lc[0] % 10 in (2, 3, 4) and lc[0] % 100 not in (12, 13, 14) else 'błędów'}}{% endif %}{% if lc[0] and lc[1] %} · {% endif %}{% if lc[1] %}<span class="ld warn"></span>{{lc[1]}} ostrz.{% endif %}</span>{% endif %}</span></div>
-{% set iv = invs.get(r.id) %}{% set si = sis.get(r.id) %}<div class="mut" style="margin-bottom:10px">{% if si.model %}{{si.model}} · {% endif %}{{r.ver or '-'}} · {{r.uptime or '-'}}{% if si.role %}<br><span class="badge caps">📡 {{si.role}}</span>{% endif %}{% if upds.get(r.id) %}<br><span class="badge warn">dostępna aktualizacja {{upds.get(r.id)}}</span>{% endif %}</div>
+{% set lc = lcs.get(r.id, (0, 0)) %}<div class="rh"><b>{{r.name}}</b><span class="rstat"><span class="badge {{'ok' if r.online else 'bad'}}">{{ t('rt.online') if r.online else t('rt.offline') }}</span>
+{% if lc[0] or lc[1] %}<span class="logind" title="{{ t('rt.logs_title') }}" onclick="event.preventDefault();location.href='/routers/{{r.id}}#logs'">{% if lc[0] %}<span class="ld err"></span>{{ tn('rt.errors', lc[0]) }}{% endif %}{% if lc[0] and lc[1] %} · {% endif %}{% if lc[1] %}<span class="ld warn"></span>{{ t('rt.warnings', n=lc[1]) }}{% endif %}</span>{% endif %}</span></div>
+{% set iv = invs.get(r.id) %}{% set si = sis.get(r.id) %}<div class="mut" style="margin-bottom:10px">{% if si.model %}{{si.model}} · {% endif %}{{r.ver or '-'}} · {{r.uptime or '-'}}{% if si.role %}<br><span class="badge caps">📡 {{si.role}}</span>{% endif %}{% if upds.get(r.id) %}<br><span class="badge warn">{{ t('rt.update', v=upds.get(r.id)) }}</span>{% endif %}</div>
 {% if m %}
 <div class="kv"><span>CPU</span><b>{{fm(m.cpu,'%')}}</b></div>
 <div class="bar"><i style="width:{{m.cpu or 0}}%" class="{{'bad' if (m.cpu or 0)>85 else 'warn' if (m.cpu or 0)>60 else 'ok'}}"></i></div>
 <div class="kv"><span>RAM{% if ram_mb(m, si) %} <small class="mut">{{ram_mb(m, si)}}</small>{% endif %}</span><b>{{fm(m.mem,'%')}}</b></div>
 <div class="bar"><i style="width:{{m.mem or 0}}%" class="{{'bad' if (m.mem or 0)>=si.ram_b else 'warn' if (m.mem or 0)>=si.ram_w else 'ok'}}"></i></div>
 <div class="mini">
-<div><span>↓ WAN</span><b>{{fm(w.rx_mbps if w else none,' Mb/s',1)}}</b></div><div><span>↑ WAN</span><b>{{fm(w.tx_mbps if w else none,' Mb/s',1)}}</b></div><div><span>Temp</span><b>{{fm(m.temp,'°C')}}</b></div>
-<div><span>Połączenia</span><b>{{fm(m.conns)}}</b></div><div><span>DHCP</span><b>{{fm(m.dhcp)}}</b></div>
+<div><span>↓ WAN</span><b>{{fm(w.rx_mbps if w else none,' Mb/s',1)}}</b></div><div><span>↑ WAN</span><b>{{fm(w.tx_mbps if w else none,' Mb/s',1)}}</b></div><div><span>{{ t('rt.temp') }}</span><b>{{fm(m.temp,'°C')}}</b></div>
+<div><span>{{ t('rt.conns') }}</span><b>{{fm(m.conns)}}</b></div><div><span>DHCP</span><b>{{fm(m.dhcp)}}</b></div>
 <div><span>Ping</span><b class="{{'bad' if (m.loss or 0)>0 else ''}}">{{fm(m.ping_ms,' ms',1)}}</b></div>
-{% if iv and iv.updated %}<div><span>Urządzenia online</span><b>{{iv.dev_on}}</b></div><div><span>Wi-Fi</span><b>{{iv.wifi|length}}</b></div><div><span>VPN online</span><b>{{iv.vpn_on}} / {{iv.vpn|length}}</b></div>{% endif %}</div>
-{% else %}<div class="mut">Brak danych, router jeszcze się nie zgłosił.</div>{% endif %}
+{% if iv and iv.updated %}<div><span>{{ t('rt.devices_online') }}</span><b>{{iv.dev_on}}</b></div><div><span>Wi-Fi</span><b>{{iv.wifi|length}}</b></div><div><span>{{ t('rt.vpn_online') }}</span><b>{{iv.vpn_on}} / {{iv.vpn|length}}</b></div>{% endif %}</div>
+{% else %}<div class="mut">{{ t('rt.nodata') }}</div>{% endif %}
 </a>{% endfor %}
 </div>
 {% endblock %}

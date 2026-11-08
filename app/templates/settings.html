@@ -1,64 +1,62 @@
 {% extends "base.html" %}{% block c %}
-<div class="card"><h2>Ustawienia HTTPS</h2>
+<div class="card"><h2>{{ t('set.https.title') }}</h2>
 {% if msg %}<p class="{{'ok' if ok else 'err'}}">{{msg}}</p>{% endif %}
-<p>Aktualnie: {% if domain %}<b>https://{{domain}}</b>{% else %}tylko HTTP{% endif %}</p>
+<p>{{ t('set.https.now') }} {% if domain %}<b>https://{{domain}}</b>{% else %}{{ t('set.https.http_only') }}{% endif %}</p>
 <form method="post"><p><input name="domain" value="{{domain}}" placeholder="monitor.example.com" style="width:280px"></p>
-<p><input name="email" value="{{email}}" placeholder="E-mail dla Let's Encrypt (opcjonalnie)" style="width:280px"></p>
-<button>Zapisz i włącz HTTPS</button></form>
-<p><small>Wymagania: rekord DNS domeny wskazuje na ten serwer, porty 80 i 443 są dostępne z internetu. Certyfikat jest pobierany i odnawiany automatycznie. Puste pole domeny = powrót do samego HTTP. Dostęp po HTTP (np. dla routerów po IP) zostaje aktywny.</small></p></div>
-<div class="card"><h2>Interwał monitoringu</h2>
-<form method="post" action="/settings/interval" class="row" id="ivform"><select name="every" id="ivsel">{% for i in intervals %}<option value="{{i}}" {{'selected' if i==interval}}>co {{i}} s{{' ⚠' if i in (1, 5) }}</option>{% endfor %}</select> <button class="p">Zapisz</button></form>
-<dialog id="ivdlg" class="dlg"><h3 style="margin-top:0">⚠ Szybki interwał</h3>
-<p>Opcja dla routerów z zapasem CPU, RAM. Wprowadzasz ustawienie na własną odpowiedzialność.</p>
-<p class="mut small">Interwał dotyczy wszystkich routerów. Przy 1–5 s baza danych rośnie kilka-kilkanaście razy szybciej (rozważ krótszy czas przechowywania RETENTION_DAYS w pliku .env). Monitoruj obciążenie CPU routerów po zmianie.</p>
-<div class="row" style="justify-content:flex-end"><button type="button" id="ivno">Odrzuć</button><button type="button" class="p" id="ivyes">Akceptuj</button></div></dialog>
+<p><input name="email" value="{{email}}" placeholder="{{ t('set.https.email_ph') }}" style="width:280px"></p>
+<button>{{ t('set.https.save') }}</button></form>
+<p><small>{{ t('set.https.help') }}</small></p></div>
+<div class="card"><h2>{{ t('set.iv.title') }}</h2>
+<form method="post" action="/settings/interval" class="row" id="ivform"><select name="every" id="ivsel">{% for i in intervals %}<option value="{{i}}" {{'selected' if i==interval}}>{{ t('set.iv.every', i=i) }}{{' ⚠' if i in (1, 5) }}</option>{% endfor %}</select> <button class="p">{{ t('common.save') }}</button></form>
+<dialog id="ivdlg" class="dlg"><h3 style="margin-top:0">{{ t('set.iv.dlg_title') }}</h3>
+<p>{{ t('set.iv.dlg_1') }}</p>
+<p class="mut small">{{ t('set.iv.dlg_2') }}</p>
+<div class="row" style="justify-content:flex-end"><button type="button" id="ivno">{{ t('set.iv.reject') }}</button><button type="button" class="p" id="ivyes">{{ t('set.iv.accept') }}</button></div></dialog>
 <script>(function(){const f=document.getElementById('ivform'),s=document.getElementById('ivsel'),d=document.getElementById('ivdlg');let ok=false;const cur=s.value;
 f.addEventListener('submit',e=>{if(!ok&&(s.value==='1'||s.value==='5')){e.preventDefault();d.showModal()}});
 document.getElementById('ivyes').onclick=()=>{ok=true;d.close();f.submit()};
 document.getElementById('ivno').onclick=()=>{s.value=cur;d.close()};})();</script>
-<p><small>Po zmianie wklej ponownie komendę konfiguracyjną na każdym routerze (strona routera → Konfiguracja routera). Krótszy interwał = więcej danych w bazie; wykresy dla dłuższych zakresów są uśredniane.</small></p></div>
-<div class="card" id="wlset"><h2>Whitelista</h2>
-<form method="post" action="/settings/whitelist" class="row"><label class="row" style="gap:6px"><input type="checkbox" name="on" value="1" {{'checked' if wl_enabled}}> moduł whitelisty włączony</label><button class="p">Zapisz</button></form>
-<p><small class="mut">Gdy wyłączony: zakładka Whitelist znika z menu, a komenda konfiguracyjna nie instaluje na routerach skryptu synchronizacji (brak pobierania listy co 5 minut).
-Po zmianie wklej ponownie komendę konfiguracyjną na routerach. Wyłączenie nie usuwa wpisów ani z panelu, ani z routerów.</small></p></div>
-<div class="card" id="spdset"><h2>Test prędkości</h2>
+<p><small>{{ t('set.iv.after') }}</small></p></div>
+<div class="card" id="wlset"><h2>{{ t('set.wl.title') }}</h2>
+<form method="post" action="/settings/whitelist" class="row"><label class="row" style="gap:6px"><input type="checkbox" name="on" value="1" {{'checked' if wl_enabled}}> {{ t('set.wl.on') }}</label><button class="p">{{ t('common.save') }}</button></form>
+<p><small class="mut">{{ t('set.wl.help') }}</small></p></div>
+<div class="card" id="spdset"><h2>{{ t('set.sp.title') }}</h2>
 <form method="post" action="/settings/speed">
-<label class="fl">Serwer aplikacji jest w sieci routera
-<select name="rid"><option value="">— brak (test tylko na routerach brzegowych) —</option>{% for x in routers %}<option value="{{x.id}}" {{'selected' if speed_router == x.id|string}}>{{x.name}}</option>{% endfor %}</select></label>
-<label class="fl">Silnik testu
-<select name="engine"><option value="ookla" {{'selected' if speed_engine != 'cloudflare'}}>Speedtest by Ookla (speedtest.net){{' – niedostępny w tym kontenerze' if not ookla}}</option>
-<option value="cloudflare" {{'selected' if speed_engine == 'cloudflare'}}>Cloudflare (zapasowy)</option></select></label>
-<label class="fl">Serwer testowy (Ookla)
-<span class="row"><select name="server" id="spdsrv" style="flex:1"><option value="">automatycznie (najbliższy)</option>{% if speed_server %}<option value="{{speed_server}}" selected>serwer #{{speed_server}}</option>{% endif %}</select>
-<button type="button" id="spdlist">Pobierz listę</button></span></label>
-<div class="row" style="justify-content:flex-end"><button class="p">Zapisz</button></div></form>
-<p><small class="mut">{% if ookla %}Speedtest by Ookla jest wbudowany w ten kontener: ten sam test co speedtest.net (pobieranie, wysyłanie, ping, jitter, utrata pakietów, link do wyniku).
-Licencja Ookla dopuszcza użytek osobisty, niekomercyjny.{% else %}Program Ookla nie został pobrany podczas budowy kontenera (brak internetu lub nieobsługiwana architektura) – używany jest test zapasowy. Przebuduj kontener: <code>docker compose build --no-cache app</code>.{% endif %}
-Jeśli test Ookla się nie uda, automatycznie wykonywany jest test zapasowy. Test codziennie o {{speed_time}} oraz przyciskiem na stronie routera (Wykresy → Jakość łącza).
-Pozostałe routery brzegowe wykonują prostszy test na samym routerze.</small></p></div>
-<script>(function(){const b=document.getElementById('spdlist'),s=document.getElementById('spdsrv');if(!b)return;
-b.onclick=async()=>{b.disabled=true;b.textContent='Pobieranie…';try{const d=await(await fetch('/api/speedtest/servers')).json();
- if(!d.available){alert('Ookla speedtest niedostępny w tym kontenerze.')}else{const cur=s.value;s.replaceChildren(new Option('automatycznie (najbliższy)',''),...d.servers.map(x=>new Option(x.name+' #'+x.id,x.id)));s.value=cur;if(s.value!==cur&&cur)s.append(new Option('serwer #'+cur,cur,true,true))}}catch(e){}
- b.disabled=false;b.textContent='Pobierz listę'}})();</script>
-<div class="card" id="order"><h2>Kolejność routerów</h2>
+<label class="fl">{{ t('set.sp.router') }}
+<select name="rid"><option value="">{{ t('set.sp.none') }}</option>{% for x in routers %}<option value="{{x.id}}" {{'selected' if speed_router == x.id|string}}>{{x.name}}</option>{% endfor %}</select></label>
+<label class="fl">{{ t('set.sp.engine') }}
+<select name="engine"><option value="ookla" {{'selected' if speed_engine != 'cloudflare'}}>{{ t('set.sp.ookla') }}{{ t('set.sp.unavail') if not ookla }}</option>
+<option value="cloudflare" {{'selected' if speed_engine == 'cloudflare'}}>{{ t('set.sp.cf') }}</option></select></label>
+<label class="fl">{{ t('set.sp.server') }}
+<span class="row"><select name="server" id="spdsrv" style="flex:1"><option value="">{{ t('set.sp.auto') }}</option>{% if speed_server %}<option value="{{speed_server}}" selected>{{ t('set.sp.server_n', id=speed_server) }}</option>{% endif %}</select>
+<button type="button" id="spdlist">{{ t('set.sp.list') }}</button></span></label>
+<div class="row" style="justify-content:flex-end"><button class="p">{{ t('common.save') }}</button></div></form>
+<p><small class="mut">{% if ookla %}{{ t('set.sp.help_ookla') }}{% else %}{{ th('set.sp.help_no.html') }}{% endif %}
+{{ t('set.sp.help_tail', time=speed_time) }}</small></p></div>
+<script>(function(){const L={load:{{ t('set.sp.loading')|tojson }},list:{{ t('set.sp.list')|tojson }},na:{{ t('set.sp.na')|tojson }},auto:{{ t('set.sp.auto')|tojson }},srv:{{ t('set.sp.server_n', id='{id}')|tojson }}};
+const b=document.getElementById('spdlist'),s=document.getElementById('spdsrv');if(!b)return;
+b.onclick=async()=>{b.disabled=true;b.textContent=L.load;try{const d=await(await fetch('/api/speedtest/servers')).json();
+ if(!d.available){alert(L.na)}else{const cur=s.value;s.replaceChildren(new Option(L.auto,''),...d.servers.map(x=>new Option(x.name+' #'+x.id,x.id)));s.value=cur;if(s.value!==cur&&cur)s.append(new Option(L.srv.replace('{id}',cur),cur,true,true))}}catch(e){}
+ b.disabled=false;b.textContent=L.list}})();</script>
+<div class="card" id="order"><h2>{{ t('set.order.title') }}</h2>
 <table>{% for x in routers %}<tr><td style="width:40px" class="mut">{{loop.index}}.</td><td><b>{{x.name}}</b></td><td style="text-align:right">
-<form class="i" method="post" action="/routers/{{x.id}}/move"><input type="hidden" name="dir" value="up"><button {{'disabled' if loop.first}} title="W górę">▲</button></form>
-<form class="i" method="post" action="/routers/{{x.id}}/move"><input type="hidden" name="dir" value="down"><button {{'disabled' if loop.last}} title="W dół">▼</button></form></td></tr>
-{% else %}<tr><td class="mut">Brak routerów.</td></tr>{% endfor %}</table>
-<p><small class="mut">Ta kolejność obowiązuje na stronie głównej. Nowe routery trafiają na koniec listy.</small></p></div>
-<div class="card" id="backup"><h2>Kopie zapasowe bazy</h2>
-{% if not bk.available %}<p class="err">Katalog kopii nie jest dostępny. Sprawdź, czy w docker-compose.yml jest wolumen <code>./backups:/backups</code> i uruchom <code>docker compose up -d</code>.</p>
+<form class="i" method="post" action="/routers/{{x.id}}/move"><input type="hidden" name="dir" value="up"><button {{'disabled' if loop.first}} title="{{ t('set.order.up') }}">▲</button></form>
+<form class="i" method="post" action="/routers/{{x.id}}/move"><input type="hidden" name="dir" value="down"><button {{'disabled' if loop.last}} title="{{ t('set.order.down') }}">▼</button></form></td></tr>
+{% else %}<tr><td class="mut">{{ t('rt.none') }}</td></tr>{% endfor %}</table>
+<p><small class="mut">{{ t('set.order.help') }}</small></p></div>
+<div class="card" id="backup"><h2>{{ t('set.bk.title') }}</h2>
+{% if not bk.available %}<p class="err">{{ th('set.bk.noaccess.html') }}</p>
 {% else %}
-<p>Automatycznie codziennie o <b>{{bk.hour}}:00</b>, przechowywane <b>{{bk.keep}} dni</b> · kopii: {{bk.files|length}} ({{bk.total}})
-{% if bk.files %}· ostatnia: <span class="t" data-t="{{bk.files[0].ts|iso}}Z"></span>{% endif %}</p>
-{% if bk.error %}<p class="err">Ostatnia próba kopii nie powiodła się ({{bk.error}}). Sprawdź: <code>docker compose logs backup</code></p>
-{% elif bk.stale %}<p class="warn">Brak aktualnej kopii (starszej niż 2 dni lub żadnej). Sprawdź, czy działa kontener <code>backup</code>: <code>docker compose ps</code></p>{% endif %}
-<form method="post" action="/settings/backup-now" class="row"><button class="p" {{'disabled' if bk.pending}}>{{'Kopia w toku…' if bk.pending else 'Utwórz kopię teraz'}}</button></form>
-<div class="scroll" style="margin-top:10px"><table><tr><th>Plik</th><th>Data</th><th>Rozmiar</th><th></th></tr>
+<p>{{ th('set.bk.auto.html', hour=bk.hour, keep=bk.keep, count=bk.files|length, total=bk.total) }}
+{% if bk.files %}{{ t('set.bk.last') }} <span class="t" data-t="{{bk.files[0].ts|iso}}Z"></span>{% endif %}</p>
+{% if bk.error %}<p class="err">{{ th('set.bk.failed.html', err=bk.error) }}</p>
+{% elif bk.stale %}<p class="warn">{{ th('set.bk.stale.html') }}</p>{% endif %}
+<form method="post" action="/settings/backup-now" class="row"><button class="p" {{'disabled' if bk.pending}}>{{ t('set.bk.pending') if bk.pending else t('set.bk.now') }}</button></form>
+<div class="scroll" style="margin-top:10px"><table><tr><th>{{ t('set.bk.file') }}</th><th>{{ t('set.bk.date') }}</th><th>{{ t('set.bk.size') }}</th><th></th></tr>
 {% for f in bk.files %}<tr><td class="small">{{f.name}}</td><td><span class="t" data-t="{{f.ts|iso}}Z"></span></td><td>{{f.size}}</td>
-<td style="text-align:right"><a href="/backups/{{f.name}}"><button type="button">Pobierz</button></a>
-<form class="i" method="post" action="/backups/{{f.name}}/delete" onsubmit="return confirm('Usunąć kopię {{f.name}}?')"><button>Usuń</button></form></td></tr>
-{% else %}<tr><td colspan="4" class="mut">Brak kopii.</td></tr>{% endfor %}</table></div>
-<p><small class="mut">Kopie leżą na tym samym serwerze (katalog <code>backups</code> obok docker-compose.yml). Dla bezpieczeństwa co jakiś czas pobierz kopię na inny komputer. Przechowuj też plik <code>.env</code>: bez niego (SECRET_KEY, hasła) odtworzenie będzie trudniejsze. Instrukcja przywracania jest w README.md.</small></p>
+<td style="text-align:right"><a href="/backups/{{f.name}}"><button type="button">{{ t('set.bk.download') }}</button></a>
+<form class="i" method="post" action="/backups/{{f.name}}/delete" onsubmit='return confirm({{ t("set.bk.confirm", name=f.name)|tojson }})'><button>{{ t('common.delete') }}</button></form></td></tr>
+{% else %}<tr><td colspan="4" class="mut">{{ t('set.bk.empty') }}</td></tr>{% endfor %}</table></div>
+<p><small class="mut">{{ th('set.bk.help.html') }}</small></p>
 {% endif %}</div>
 {% endblock %}
