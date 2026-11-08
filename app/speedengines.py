@@ -28,11 +28,29 @@ def parse_librespeed_json(text):
             "loss": None, "url": None, "server": (str(srv.get("name") or "").strip()[:120] or None)}
 
 
-def parse_librespeed_list(text):
-    """Wynik `librespeed-cli --list` -> [{'id': '51', 'name': 'Amsterdam, Netherlands (Clouvider)'}, ...]."""
+def parse_librespeed_servers(text):
+    """Wynik `librespeed-cli --list` -> [{'id': '51', 'name': 'Amsterdam, Netherlands (Clouvider)', 'url': 'https://...'}, ...]."""
     out = []
     for line in text.splitlines():
         m = _LS_LINE.match(line)
         if m:
-            out.append({"id": m.group(1), "name": m.group(2)[:100]})
+            out.append({"id": m.group(1), "name": m.group(2)[:100], "url": m.group(3)})
     return out
+
+
+def parse_librespeed_list(text):
+    """To samo bez adresów: [{'id', 'name'}] - do listy w ustawieniach."""
+    return [{"id": s["id"], "name": s["name"]} for s in parse_librespeed_servers(text)]
+
+
+def pick_candidates(servers, latencies, n=5):
+    """`n` serwerów o najniższym opóźnieniu (latencies: {id: ms}); serwery bez pomiaru są pomijane."""
+    ok = [s for s in servers if isinstance(latencies.get(s["id"]), (int, float))]
+    ok.sort(key=lambda s: latencies[s["id"]])
+    return [dict(s, ping=round(latencies[s["id"]], 1)) for s in ok[:n]]
+
+
+def pick_best(results):
+    """Serwer o największej prędkości pobierania z listy wyników [{'id','name','down',...}] albo None."""
+    good = [r for r in results if isinstance(r.get("down"), (int, float)) and r["down"] > 0]
+    return max(good, key=lambda r: r["down"]) if good else None

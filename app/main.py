@@ -2054,7 +2054,7 @@ async def speed_servers(engine: str = "ookla"):
 
 
 async def server_speedtest(rid):
-    if SPD_STATE["running"]:
+    if SPD_STATE["running"] or BEST_STATE["running"]:
         return
     SPD_STATE.update(running=True, rid=rid)
     res = {"ok": False, "down": None, "up": None, "ping": None, "jitter": None, "loss": None, "server": None, "url": None}
@@ -2070,6 +2070,9 @@ async def server_speedtest(rid):
     try:
         if eng in runners and runners[eng][0]:
             src = eng
+            if eng == "librespeed" and sid == "best":
+                SPD_STATE["phase"] = "spd.best"
+                sid = await resolve_best_server()
             SPD_STATE["phase"] = "spd." + eng
             try:
                 res.update(await runners[eng][1](sid))
@@ -2104,9 +2107,124 @@ async def server_speedtest(rid):
         SPD_STATE.update(running=False, phase="", rid=None)
 
 
+BEST_STATE = {"running": False, "phase": None, "error": None}  # phase: (klucz tłumaczenia, parametry)
+BEST_MAX_AGE = 7 * 86400  # wybór najlepszego serwera jest powtarzany co 7 dni
+BEST_CANDIDATES = 8       # tylu najbliższych (wg opóźnienia) serwerów porównujemy (lista ma ok. 20)
+
+
+def best_result(s):
+    try:
+        d = json.loads(sget(s, "speed_ls_best", "") or "null")
+    except ValueError:
+        return None
+    return d if isinstance(d, dict) else None
+
+
+async def _server_latency(client, url):
+    """Najkrótszy z dwóch czasów odpowiedzi serwera (pierwsze zapytanie zawiera nawiązanie połączenia)."""
+    best = None
+    for _ in range(2):
+        t = time.monotonic()
+        try:
+            async with client.stream("GET", url):
+                pass  # wystarczą nagłówki
+        except Exception:
+            continue
+        ms = (time.monotonic() - t) * 1000
+        best = ms if best is None else min(best, ms)
+    return best
+
+
+async def find_best_librespeed():
+    """Porównuje kilka najbliższych serwerów LibreSpeed krótkim testem pobierania i zapamiętuje najszybszy."""
+    BEST_STATE.update(running=True, phase=("best.ping", {}), error=None)
+    try:
+        code, out, err = await _run([LS_BIN, "--list"], 40)
+        servers = speedengines.parse_librespeed_servers(out)
+        if not servers:
+            raise RuntimeError("brak listy serwerów")
+        async with httpx.AsyncClient(timeout=4, follow_redirects=True) as c:
+            lats = await asyncio.gather(*[_server_latency(c, sv["url"]) for sv in servers])
+        cands = speedengines.pick_candidates(servers, {sv["id"]: l for sv, l in zip(servers, lats)}, BEST_CANDIDATES)
+        if not cands:
+            raise RuntimeError("żaden serwer nie odpowiada")
+        results = []
+        for i, sv in enumerate(cands, 1):
+            BEST_STATE["phase"] = ("best.test", {"i": i, "n": len(cands), "name": sv["name"]})
+            row = {"id": sv["id"], "name": sv["name"], "ping": sv["ping"], "down": None}
+            try:
+                code, out, err = await _run([LS_BIN, "--json", "--no-upload", "--duration", "5", "--timeout", "10",
+                                             "--concurrent", "8", "--server", sv["id"]], 60)
+                d = speedengines.parse_librespeed_json(out)
+                row["down"] = round(d["down"], 1) if d["down"] else None
+            except Exception as e:
+                print("librespeed best: serwer %s: %s" % (sv["id"], e), flush=True)
+            results.append(row)
+        best = speedengines.pick_best(results)
+        if not best:
+            raise RuntimeError("żaden test nie zakończył się wynikiem")
+        data = {"at": now().isoformat(timespec="seconds"), "best": best, "tested": results}
+
+        def save():
+            with Session(engine) as s:
+                sset(s, "speed_ls_best", json.dumps(data))
+                s.commit()
+        await run_in_threadpool(save)
+        return data
+    except Exception as e:
+        BEST_STATE["error"] = str(e)[:200]
+        raise
+    finally:
+        BEST_STATE.update(running=False, phase=None)
+
+
+async def resolve_best_server():
+    """Id serwera do testu: zapamiętany najlepszy; gdy go brak lub jest starszy niż 7 dni, szuka od nowa. Błąd = "" (wybór programu)."""
+    def load():
+        with Session(engine) as s:
+            return best_result(s)
+    d = await run_in_threadpool(load)
+    try:
+        age = (now() - dt.datetime.fromisoformat(d["at"])).total_seconds() if d else None
+    except (KeyError, ValueError, TypeError):
+        age = None
+    if d is None or age is None or age > BEST_MAX_AGE:
+        try:
+            d = await find_best_librespeed()
+        except Exception as e:
+            print("librespeed best: %s" % e, flush=True)
+    sid = str(((d or {}).get("best") or {}).get("id") or "")
+    return sid if sid.isdigit() else ""
+
+
+async def _best_task():
+    try:
+        await find_best_librespeed()
+    except Exception as e:
+        print("librespeed best: %s" % e, flush=True)
+
+
+@app.post("/api/speedtest/best", dependencies=[Depends(admin)])
+async def best_start():
+    if not LS_BIN:
+        raise HTTPException(400, tr("err.ls_missing"))
+    if BEST_STATE["running"] or SPD_STATE["running"]:
+        return {"ok": False, "busy": True}
+    asyncio.create_task(_best_task())
+    return {"ok": True}
+
+
+@app.get("/api/speedtest/best", dependencies=[Depends(admin)])
+def best_status(s: Session = Depends(db)):
+    ph = BEST_STATE["phase"]
+    return {"running": BEST_STATE["running"], "phase": tr(ph[0], **ph[1]) if ph else "",
+            "error": BEST_STATE["error"], "result": best_result(s)}
+
+
 def server_setting(s, engine):
     """Serwer testowy zapisany osobno dla każdego silnika (numeracja serwerów różni się między silnikami)."""
-    return sget(s, "speed_server_" + engine, sget(s, "speed_server", "") if engine == "ookla" else "")
+    default = sget(s, "speed_server", "") if engine == "ookla" else "best" if engine == "librespeed" else ""
+    return sget(s, "speed_server_" + engine, default)
 
 
 def speed_due():
@@ -2135,7 +2253,7 @@ async def speedtest_now(rid: int):
             return sget(s, "speed_router") == str(rid)
     if not await run_in_threadpool(check):
         raise HTTPException(400, tr("err.speed_router"))
-    if not SPD_STATE["running"]:
+    if not SPD_STATE["running"] and not BEST_STATE["running"]:
         asyncio.create_task(server_speedtest(rid))
     return {"ok": True}
 
@@ -2146,7 +2264,7 @@ def settings_speed(request: Request, rid: str = Form(""), engine_: str = Form(""
     sset(s, "speed_router", rid if rid.isdigit() else "")
     engine_ = engine_ if engine_ in SPEED_ENGINES else default_engine()
     sset(s, "speed_engine", engine_)
-    sset(s, "speed_server_" + engine_, server if server.isdigit() else "")
+    sset(s, "speed_server_" + engine_, server if server.isdigit() or (engine_ == "librespeed" and server == "best") else "")
     r = s.get(Router, int(rid)) if rid.isdigit() else None
     log(s, "test prędkości", "z serwera za routerem: %s" % (r.name if r else "wyłączony"))
     s.commit()
@@ -3167,7 +3285,7 @@ def settings_view(request, s, msg="", ok=True):
         "wl_enabled": whitelist_on(s), "speed_router": sget(s, "speed_router"), "speed_time": SPEED_TIME[:5],
         "speed_engine": sget(s, "speed_engine", "") or default_engine(),
         "speed_server": server_setting(s, sget(s, "speed_engine", "") or default_engine()),
-        "ookla": bool(OOKLA_BIN), "librespeed": bool(LS_BIN)})
+        "ookla": bool(OOKLA_BIN), "librespeed": bool(LS_BIN), "ls_best": best_result(s)})
 
 
 @app.post("/settings/whitelist", dependencies=[Depends(admin)])

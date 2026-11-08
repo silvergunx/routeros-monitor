@@ -13,7 +13,8 @@ Work in progress on `develop` (version 1.1.0).
 - **LibreSpeed** speed test engine (open source, LGPL-3.0, [librespeed.org](https://librespeed.org)) bundled in the Docker image. It is the default
   engine when Speedtest by Ookla is not installed, so users of the ready-made image get a full speed test without building anything.
   Nothing is sent to LibreSpeed besides the test traffic itself. Choose the engine and server in Settings → Speed test.
-  It uses 8 parallel connections. On fast links its download result can be well below Ookla's (it depends on the community server), so Ookla stays the
+  By default it picks the best server itself: it compares the 8 nearest servers with a short download test, remembers the fastest
+  and repeats the check every 7 days (button "Find the best server now" in Settings). It uses 8 parallel connections. On fast links its download result can be well below Ookla's (it depends on the community server), so Ookla stays the
   recommended engine when you build the image yourself.
 - `THIRD_PARTY.md` with the licences of bundled components.
 

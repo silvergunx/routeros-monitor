@@ -29,18 +29,37 @@ document.getElementById('ivno').onclick=()=>{s.value=cur;d.close()};})();</scrip
 <option value="ookla" {{'selected' if speed_engine == 'ookla'}}>{{ t('set.sp.ookla') }}{{ t('set.sp.unavail') if not ookla }}</option>
 <option value="cloudflare" {{'selected' if speed_engine == 'cloudflare'}}>{{ t('set.sp.cf') }}</option></select></label>
 <label class="fl">{{ t('set.sp.server') }}
-<span class="row"><select name="server" id="spdsrv" style="flex:1"><option value="">{{ t('set.sp.auto') }}</option>{% if speed_server %}<option value="{{speed_server}}" selected>{{ t('set.sp.server_n', id=speed_server) }}</option>{% endif %}</select>
+<span class="row"><select name="server" id="spdsrv" style="flex:1">{% if speed_engine == 'librespeed' %}<option value="best" {{'selected' if speed_server == 'best'}}>{{ t('set.sp.best_opt') }}</option>{% endif %}<option value="" {{'selected' if not speed_server}}>{{ t('set.sp.auto') }}</option>{% if speed_server and speed_server != 'best' %}<option value="{{speed_server}}" selected>{{ t('set.sp.server_n', id=speed_server) }}</option>{% endif %}</select>
 <button type="button" id="spdlist">{{ t('set.sp.list') }}</button></span></label>
 <div class="row" style="justify-content:flex-end"><button class="p">{{ t('common.save') }}</button></div></form>
+<div id="lsbest" style="margin:10px 0;{{'' if speed_engine == 'librespeed' else 'display:none'}}"><p class="mut small">{{ t('set.sp.best_info') }}</p>
+<p class="small" id="lsbestlast"></p>
+<div class="row"><button type="button" id="lsbestgo">{{ t('set.sp.best_btn') }}</button><span class="small mut" id="lsbeststat"></span></div>
+<div class="scroll" id="lsbesttab"></div></div>
 <p><small class="mut">{{ t('set.sp.help_ls') }}
 {% if ookla %}{{ t('set.sp.help_ookla') }}{% else %}{{ th('set.sp.help_no.html') }}{% endif %}
 {{ t('set.sp.help_tail', time=speed_time) }}</small></p></div>
-<script>(function(){const L={load:{{ t('set.sp.loading')|tojson }},list:{{ t('set.sp.list')|tojson }},na:{{ t('set.sp.na')|tojson }},auto:{{ t('set.sp.auto')|tojson }},srv:{{ t('set.sp.server_n', id='{id}')|tojson }}};
+<script>(function(){const L={load:{{ t('set.sp.loading')|tojson }},list:{{ t('set.sp.list')|tojson }},na:{{ t('set.sp.na')|tojson }},auto:{{ t('set.sp.auto')|tojson }},srv:{{ t('set.sp.server_n', id='{id}')|tojson }},
+bestopt:{{ t('set.sp.best_opt')|tojson }},bestlast:{{ t('set.sp.best_last')|tojson }},bestnone:{{ t('set.sp.best_none')|tojson }},busy:{{ t('set.sp.best_busy')|tojson }},fail:{{ t('set.sp.best_fail')|tojson }},
+cs:{{ t('set.sp.col_server')|tojson }},cp:{{ t('set.sp.col_ping')|tojson }},cd:{{ t('set.sp.col_down')|tojson }}};
+const tf=(x,o)=>x.replace(/\{(\w+)\}/g,(m,k)=>o[k]===undefined?m:o[k]);
 const b=document.getElementById('spdlist'),s=document.getElementById('spdsrv'),e=document.getElementById('spdeng'),e0=e.value,s0=s.value;if(!b)return;
-e.onchange=()=>{s.replaceChildren(new Option(L.auto,''));if(e.value===e0&&s0)s.append(new Option(L.srv.replace('{id}',s0),s0,true,true))};
+const bx=document.getElementById('lsbest'),bs=document.getElementById('lsbeststat'),bg=document.getElementById('lsbestgo'),bl=document.getElementById('lsbestlast'),bt=document.getElementById('lsbesttab');
+const withBest=()=>e.value==='librespeed'?[new Option(L.bestopt,'best')]:[];
+e.onchange=()=>{s.replaceChildren(...withBest(),new Option(L.auto,''));bx.style.display=e.value==='librespeed'?'':'none';
+ if(e.value===e0){if(s0&&s0!=='best')s.append(new Option(L.srv.replace('{id}',s0),s0,true,true));else s.value=s0}else s.value=e.value==='librespeed'?'best':''};
 b.onclick=async()=>{b.disabled=true;b.textContent=L.load;try{const d=await(await fetch('/api/speedtest/servers?engine='+encodeURIComponent(e.value))).json();
- if(!d.available){alert(L.na)}else{const cur=s.value;s.replaceChildren(new Option(L.auto,''),...d.servers.map(x=>new Option(x.name+' #'+x.id,x.id)));s.value=cur;if(s.value!==cur&&cur)s.append(new Option(L.srv.replace('{id}',cur),cur,true,true))}}catch(e){}
- b.disabled=false;b.textContent=L.list}})();</script>
+ if(!d.available){alert(L.na)}else{const cur=s.value;s.replaceChildren(...withBest(),new Option(L.auto,''),...d.servers.map(x=>new Option(x.name+' #'+x.id,x.id)));s.value=cur;if(s.value!==cur&&cur)s.append(new Option(L.srv.replace('{id}',cur),cur,true,true))}}catch(x){}
+ b.disabled=false;b.textContent=L.list};
+let BEST={{ ls_best|tojson }};
+function renderBest(){if(!BEST||!BEST.best){bl.textContent=L.bestnone;bt.replaceChildren();return}
+ bl.textContent=tf(L.bestlast,{name:BEST.best.name,down:BEST.best.down,when:new Date(BEST.at+'Z').toLocaleString()});
+ const tb=document.createElement('table'),hr=tb.insertRow();[L.cs,L.cp,L.cd].forEach(x=>{const th=document.createElement('th');th.textContent=x;hr.append(th)});
+ BEST.tested.forEach(r=>{const tr=tb.insertRow();[(r.id===BEST.best.id?'\u2713 ':'')+r.name,r.ping+' ms',r.down==null?'-':r.down+' Mb/s'].forEach(v=>{tr.insertCell().textContent=v})});bt.replaceChildren(tb)}
+async function pollBest(){try{const d=await(await fetch('/api/speedtest/best',{cache:'no-store'})).json();BEST=d.result||BEST;renderBest();
+ if(d.running){bg.disabled=true;bs.textContent=d.phase;setTimeout(pollBest,2000)}else{bg.disabled=false;bs.textContent=d.error?tf(L.fail,{err:d.error}):''}}catch(x){bg.disabled=false}}
+bg.onclick=async()=>{bg.disabled=true;bs.textContent='\u2026';try{const r=await(await fetch('/api/speedtest/best',{method:'POST'})).json();if(r.busy){bs.textContent=L.busy;bg.disabled=false;return}}catch(x){bg.disabled=false;return}setTimeout(pollBest,800)};
+renderBest();if(e.value==='librespeed')pollBest();})();</script>
 <div class="card" id="order"><h2>{{ t('set.order.title') }}</h2>
 <table>{% for x in routers %}<tr><td style="width:40px" class="mut">{{loop.index}}.</td><td><b>{{x.name}}</b></td><td style="text-align:right">
 <form class="i" method="post" action="/routers/{{x.id}}/move"><input type="hidden" name="dir" value="up"><button {{'disabled' if loop.first}} title="{{ t('set.order.up') }}">▲</button></form>
