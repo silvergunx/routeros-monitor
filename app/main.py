@@ -1422,6 +1422,10 @@ templates.env.globals["wl_on"] = wl_on
 _BL_ON = [None, 0.0]
 
 
+BL_RULE = ('/ip firewall raw remove [find comment="app-blacklist"]\n'
+           '/ip firewall raw add chain=prerouting in-interface-list=WAN src-address-list=blacklist action=drop comment="app-blacklist"')
+
+
 def blacklist_on(s):
     """Moduł blacklisty: ustawienie z panelu; domyślnie włączony tylko jeśli blacklista ma już wpisy."""
     v = sget(s, "blacklist_on", "")
@@ -2998,7 +3002,7 @@ def logs_analysis(request: Request, rid: int, hours: int = 24, s: Session = Depe
             if g["id"] == "login_fail_wan":
                 g["ban_key"] = tr("an.015")
         banned = [w.ip for w in s.scalars(select(Whitelist).where(Whitelist.kind == "black", Whitelist.active == True))]  # noqa: E712
-    return {"groups": out, "unknown": unk, "total": len(rows), "can_ban": can_ban, "banned": banned,
+    return {"groups": out, "unknown": unk, "total": len(rows), "can_ban": can_ban, "banned": banned, "rule": BL_RULE,
             "summary": {k: sum(g["count"] for g in out if g["level"] == k) for k in order}}
 
 
@@ -3139,7 +3143,7 @@ def wl_page(request: Request, s: Session = Depends(db), err: str = "", ok: str =
     return templates.TemplateResponse(request, "whitelist.html", {
         "items": items, "routers": routers, "names": {r.id: r.name for r in routers},
         "err": err, "ok": ok, "now": now(), "kind": kind, "base": "/blacklist" if kind == "black" else "/whitelist",
-        "wl_enabled": whitelist_on(s), "bl_enabled": blacklist_on(s)})
+        "wl_enabled": whitelist_on(s), "bl_enabled": blacklist_on(s), "bl_rule": BL_RULE})
 
 
 @app.post("/whitelist", dependencies=[Depends(admin)])
