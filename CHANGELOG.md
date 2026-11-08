@@ -17,6 +17,9 @@ Work in progress on `develop` (version 1.1.0).
   and repeats the check every 7 days (button "Find the best server now" in Settings). It uses 8 parallel connections. On fast links its download result can be well below Ookla's (it depends on the community server), so Ookla stays the
   recommended engine when you build the image yourself.
 - `THIRD_PARTY.md` with the licences of bundled components.
+- Faster and safer application start: database migrations are executed only when something actually has to change (they used to run on every
+  start and waited for a running backup to finish, which could delay the start by minutes), and the one-off data fixes no longer scan the whole
+  `metrics` table on every start. Waiting for a table lock is limited to 15 s per attempt.
 - `IFACE_RETENTION_DAYS` (default **7**): per-interface traffic samples, the largest table in the database, are now kept for fewer days than
   the other measurements (`RETENTION_DAYS`). **Older interface samples are deleted** (in the background, in chunks, so routers are not blocked); the
   interface charts for ranges longer than this show less history. The daily WAN transfer statistics are not affected.

@@ -12,7 +12,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.concurrency import run_in_threadpool
 from sqlalchemy.engine import URL
-from sqlalchemy import extract, create_engine, Date, Text, UniqueConstraint, String, Float, DateTime, Integer, Boolean, BigInteger, ForeignKey, Index, select, delete, func, or_, text
+from sqlalchemy import inspect as sa_inspect, extract, create_engine, Date, Text, UniqueConstraint, String, Float, DateTime, Integer, Boolean, BigInteger, ForeignKey, Index, select, delete, func, or_, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
 
 ADMIN_USER = os.getenv("ADMIN_USER", "admin")
@@ -343,9 +343,46 @@ MIGRATIONS = [
     "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS dns_ms DOUBLE PRECISION",
     "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS http_ms DOUBLE PRECISION",
     "ALTER TABLE routers ADD COLUMN IF NOT EXISTS iface_types TEXT",
-    "UPDATE metrics SET mem = NULL WHERE mem < 0 OR mem > 100",
-    "UPDATE metrics SET cpu = NULL WHERE cpu < 0 OR cpu > 100",
 ]
+# Poprawki danych wykonywane RAZ (znacznik w tabeli settings); wcześniej szły przy każdym starcie i czytały całą tabelę metrics.
+ONCE_MIGRATIONS = [
+    ("migr_metrics_clamp", ["UPDATE metrics SET mem = NULL WHERE mem < 0 OR mem > 100",
+                            "UPDATE metrics SET cpu = NULL WHERE cpu < 0 OR cpu > 100"]),
+]
+_ADD_COL = re.compile(r"^ALTER TABLE (\w+) ADD COLUMN IF NOT EXISTS (\w+) ", re.I)
+_COL_TYPE = re.compile(r"^ALTER TABLE (\w+) ALTER COLUMN (\w+) TYPE (\w+)(?:\((\d+)\))?$", re.I)
+
+
+def migration_needed(insp, stmt):
+    """Czy komenda migracji coś zmieni? ALTER TABLE zawsze bierze blokadę wyłączną (czeka m.in. na trwającą kopię pg_dump),
+    więc wykonujemy ją tylko wtedy, gdy kolumny brakuje albo ma inny typ. Nieznana postać komendy = wykonaj."""
+    m = _ADD_COL.match(stmt)
+    if m:
+        return m.group(2) not in {c["name"] for c in insp.get_columns(m.group(1))}
+    m = _COL_TYPE.match(stmt)
+    if m:
+        col = next((c for c in insp.get_columns(m.group(1)) if c["name"] == m.group(2)), None)
+        if col is None:
+            return True
+        t, want = col["type"], m.group(3).upper()
+        if want == "TEXT":
+            return not isinstance(t, Text)
+        if want == "VARCHAR" and m.group(4):
+            return not (isinstance(t, String) and not isinstance(t, Text) and getattr(t, "length", None) == int(m.group(4)))
+    return True
+
+
+def apply_migrations(c):
+    insp = sa_inspect(c)
+    for stmt in MIGRATIONS:
+        if migration_needed(insp, stmt):
+            c.execute(text(stmt))
+            insp.clear_cache()
+    for key, stmts in ONCE_MIGRATIONS:
+        if not c.execute(text('SELECT 1 FROM settings WHERE "key" = :k'), {"k": key}).first():
+            for st in stmts:
+                c.execute(text(st))
+            c.execute(text('INSERT INTO settings ("key", value) VALUES (:k, \'1\')'), {"k": key})
 
 
 @app.on_event("startup")
@@ -355,8 +392,9 @@ def start():
         try:
             Base.metadata.create_all(engine)
             with engine.begin() as c:
-                for stmt in MIGRATIONS:
-                    c.execute(text(stmt))
+                if engine.dialect.name == "postgresql":
+                    c.execute(text("SET LOCAL lock_timeout = '15s'"))  # nie wisi bez końca na trwającej kopii; pętla ponawia
+                apply_migrations(c)
             with Session(engine) as s:
                 if not s.scalar(select(func.count(User.id))):
                     s.add(User(username=ADMIN_USER[:40], pw=hash_pw(ADMIN_PASSWORD), role="admin", created=now()))
