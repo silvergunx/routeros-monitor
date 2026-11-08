@@ -7,6 +7,8 @@ Notes marked **Routers** mean the configuration command has to be pasted again o
 
 ## [Unreleased]
 
+Work in progress on `develop` (version 1.2.0).
+
 ## [1.1.0] - 2026-11-08
 
 ### Added
