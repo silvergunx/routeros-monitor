@@ -5,6 +5,7 @@ przetłumaczenie wartości i ustawienie "_name". Brakujące klucze wracają do a
 """
 import json
 import re
+from contextvars import ContextVar
 from pathlib import Path
 
 from jinja2 import pass_context
@@ -99,3 +100,11 @@ def th(ctx, key, **kw):
 def tn(ctx, key, n, **kw):
     """Tekst z liczbą mnogą."""
     return translate_n(_lang(ctx), key, n, **kw)
+
+
+# Język bieżącego żądania (ustawiany w middleware) - pozwala tłumaczyć komunikaty w kodzie serwera.
+CURRENT = ContextVar("lang", default=DEFAULT)
+
+
+def _(key, **kw):
+    return translate(CURRENT.get(), key, **kw)

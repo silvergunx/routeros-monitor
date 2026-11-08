@@ -139,6 +139,10 @@ Routery same wysyłają dane do aplikacji (`/tool fetch`), więc aplikacja nie p
 
 Bezpieczeństwo: [docs/BEZPIECZENSTWO.md](docs/BEZPIECZENSTWO.md).
 
+## Języki
+
+Interfejs działa po polsku i angielsku (przełącznik PL / EN w menu i na ekranie logowania, wybór zapamiętuje ciasteczko). Kolejne języki dodaje się samym plikiem JSON, bez zmian w kodzie: [docs/TRANSLATING.md](docs/TRANSLATING.md).
+
 ## Licencja
 
 Kod projektu: [MIT](LICENSE).

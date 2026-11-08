@@ -2,92 +2,90 @@
 {% macro sig(v, c) %}{% if v is not none %}<span class="sig {{c}}">{% for lim in [-85,-75,-67,-60] %}<i class="{{'f' if v >= lim}}" style="height:{{loop.index*3}}px"></i>{% endfor %}</span>{{v}} dBm{% else %}-{% endif %}{% endmacro %}
 {% set me = request.state.user %}
 <div class="row" style="justify-content:space-between;margin-bottom:12px">
-<h2 style="margin:0">{{r.name}} <span id="live-badge" data-live><span class="badge {{'ok' if r.online else 'bad'}}" style="font-weight:400">{{'online' if r.online else 'offline'}}</span></span></h2>
-<div class="rinfo" id="live-info" data-live><span class="mut">{% if si.model %}{{si.model}} · {% endif %}{{r.ident or '-'}} · RouterOS {{r.ver or '-'}}{% if si.fw %} · firmware {{si.fw}}{% endif %} · uptime {{r.uptime or '-'}}</span>
-{% if si.role or upd %}<span class="badges">{% if si.role %}<span class="badge caps">📡 {{si.role}}</span>{% endif %}{% if upd %}<span class="badge warn">RouterOS {{upd}} dostępny</span>{% endif %}</span>{% endif %}</div></div>
+<h2 style="margin:0">{{r.name}} <span id="live-badge" data-live><span class="badge {{'ok' if r.online else 'bad'}}" style="font-weight:400">{{ t('rt.online') if r.online else t('rt.offline') }}</span></span></h2>
+<div class="rinfo" id="live-info" data-live><span class="mut">{% if si.model %}{{si.model}} · {% endif %}{{r.ident or '-'}} · RouterOS {{r.ver or '-'}}{% if si.fw %} · {{ t('rp.firmware') }} {{si.fw}}{% endif %} · {{ t('rp.uptime_l') }} {{r.uptime or '-'}}</span>
+{% if si.role or upd %}<span class="badges">{% if si.role %}<span class="badge caps">📡 {{si.role}}</span>{% endif %}{% if upd %}<span class="badge warn">{{ t('rp.upd_avail', v=upd) }}</span>{% endif %}</span>{% endif %}</div></div>
 {% macro tile(label, value, cls='', bar=none, unit='', tip='', sub='') %}<div class="tile"{% if tip %} title="{{tip}}"{% endif %}><span>{{label}}</span><b class="{{cls}}">{{value}}</b>{% if unit %} <small>{{unit}}</small>{% endif %}{% if sub %}<div class="tsub">{{sub}}</div>{% endif %}{% if bar is not none %}<div class="bar"><i class="{{cls or 'ok'}}" style="width:{{[bar,100]|min}}%"></i></div>{% endif %}</div>{% endmacro %}
 {% macro lvl(v, w, b) %}{{ '' if v is none else ('bad' if v >= b else 'warn' if v >= w else 'ok') }}{% endmacro %}
 <div id="live-tiles" data-live>{% if m %}<div class="tiles">
 {{ tile('CPU', fm(m.cpu,'%'), lvl(m.cpu,60,85), m.cpu or 0) }}
 {{ tile('RAM' ~ (' (wifi-qcom)' if si.qcom else ''), fm(m.mem,'%'), lvl(m.mem, si.ram_w, si.ram_b), m.mem or 0, ram_mb(m, si)) }}
-{{ tile('Temperatura', fm(m.temp,'°C') if m.temp is not none else 'brak', lvl(m.temp,70,85) if m.temp is not none else 'txt') }}
-{{ tile('Uptime', r.uptime or '-', 'txt') }}
+{{ tile(t('rp.temp'), fm(m.temp,'°C') if m.temp is not none else t('rp.none_val'), lvl(m.temp,70,85) if m.temp is not none else 'txt') }}
+{{ tile(t('rp.uptime'), r.uptime or '-', 'txt') }}
 {{ tile('↓ WAN', fm(w.rx_mbps if w else none,'',1), '', none, 'Mb/s') }}
 {{ tile('↑ WAN', fm(w.tx_mbps if w else none,'',1), '', none, 'Mb/s') }}
-{% if r.edge %}{{ tile('Opóźnienie do DNS', fm(m.inet_rtt,'',1), lvl(m.inet_rtt,50,150), none,
-   'ms' ~ (' · jitter ' ~ fm(m.inet_jit,'',1) ~ ' ms' if m.inet_jit is not none else ''),
-   'Mediana średnich opóźnień do 1.1.1.1, 8.8.8.8 i 9.9.9.9 z ostatniego pomiaru (20 pakietów do każdego, co minutę). Brama = opóźnienie do routera operatora.',
-   'brama ' ~ fm(m.gw_rtt,'',1) ~ ' ms' if m.gw_rtt is not none else '') }}
-{% else %}{{ tile('Opóźnienie do bramy', fm(m.gw_rtt,'',1), lvl(m.gw_rtt,10,50), none,
-   'ms' ~ (' · jitter ' ~ fm(m.gw_jit,'',1) ~ ' ms' if m.gw_jit is not none else ''),
-   'Średnie opóźnienie do routera nadrzędnego z ostatniego pomiaru (10 pakietów co 30 s).') }}{% endif %}
-{{ tile('Utrata pakietów', fm(m.loss,'%'), lvl(m.loss,1,5), none, '', 'Utrata do serwerów DNS (router brzegowy) albo do bramy (pozostałe routery) z ostatniego pomiaru.') }}
-{{ tile('Połączenia', fm(m.conns)) }}
-{{ tile('Urządzenia online', (inv.dev_on ~ ' / ' ~ inv.devices|length) if inv.updated else fm(m.dhcp), '' if inv.updated else 'txt') }}
-{{ tile('Klienci Wi-Fi', inv.wifi|length if inv.updated else '-') }}
-{{ tile('VPN online', (inv.vpn_on ~ ' / ' ~ inv.vpn|length) if inv.updated else '-') }}
+{% if r.edge %}{{ tile(t('rp.dns_latency'), fm(m.inet_rtt,'',1), lvl(m.inet_rtt,50,150), none,
+   'ms' ~ (' · ' ~ t('rp.jitter_l') ~ ' ' ~ fm(m.inet_jit,'',1) ~ ' ms' if m.inet_jit is not none else ''),
+   t('rp.tip_dns'),
+   t('rp.gateway_l') ~ ' ' ~ fm(m.gw_rtt,'',1) ~ ' ms' if m.gw_rtt is not none else '') }}
+{% else %}{{ tile(t('rp.gw_latency'), fm(m.gw_rtt,'',1), lvl(m.gw_rtt,10,50), none,
+   'ms' ~ (' · ' ~ t('rp.jitter_l') ~ ' ' ~ fm(m.gw_jit,'',1) ~ ' ms' if m.gw_jit is not none else ''),
+   t('rp.tip_gw')) }}{% endif %}
+{{ tile(t('rp.pkt_loss'), fm(m.loss,'%'), lvl(m.loss,1,5), none, '', t('rp.tip_loss')) }}
+{{ tile(t('rt.conns'), fm(m.conns)) }}
+{{ tile(t('rt.devices_online'), (inv.dev_on ~ ' / ' ~ inv.devices|length) if inv.updated else fm(m.dhcp), '' if inv.updated else 'txt') }}
+{{ tile(t('rp.wifi_clients'), inv.wifi|length if inv.updated else '-') }}
+{{ tile(t('rt.vpn_online'), (inv.vpn_on ~ ' / ' ~ inv.vpn|length) if inv.updated else '-') }}
 </div>{% endif %}</div>
 <div id="rtabs" data-tab="charts">
 <div class="tabs rt">
-<button type="button" data-t="charts" onclick="rTab('charts')">📈 Wykresy</button>
-<button type="button" data-t="dev" onclick="rTab('dev')">💻 Urządzenia <span class="cnt" id="live-cdev" data-live>{{inv.dev_on}}/{{inv.devices|length}}</span></button>
+<button type="button" data-t="charts" onclick="rTab('charts')">{{ t('rp.tab_charts') }}</button>
+<button type="button" data-t="dev" onclick="rTab('dev')">{{ t('rp.tab_dev') }} <span class="cnt" id="live-cdev" data-live>{{inv.dev_on}}/{{inv.devices|length}}</span></button>
 <button type="button" data-t="wifi" onclick="rTab('wifi')">📶 Wi-Fi <span class="cnt" id="live-cwifi" data-live>{{inv.wifi|length}}</span></button>
-<button type="button" data-t="vpn" onclick="rTab('vpn')">🔒 VPN <span class="cnt" id="live-cvpn" data-live>{{inv.vpn_on}}/{{inv.vpn|length}}</span></button>
-<button type="button" data-t="logs" onclick="rTab('logs')">📜 Logi <span id="live-clog" data-live>{% if log_err %}<span class="cnt cerr">{{log_err}}</span>{% endif %}</span></button>
-{% if me.is_admin %}<button type="button" data-t="cfg" onclick="rTab('cfg')">⚙️ Konfiguracja</button>{% endif %}
+<button type="button" data-t="vpn" onclick="rTab('vpn')">{{ t('rp.tab_vpn') }} <span class="cnt" id="live-cvpn" data-live>{{inv.vpn_on}}/{{inv.vpn|length}}</span></button>
+<button type="button" data-t="logs" onclick="rTab('logs')">{{ t('rp.tab_logs') }} <span id="live-clog" data-live>{% if log_err %}<span class="cnt cerr">{{log_err}}</span>{% endif %}</span></button>
+{% if me.is_admin %}<button type="button" data-t="cfg" onclick="rTab('cfg')">{{ t('rp.tab_cfg') }}</button>{% endif %}
 </div>
 
 <div class="rp rp-charts">
 <form method="post" action="/routers/{{r.id}}/view" class="card row" style="padding:10px 14px">
-<span class="mut">Zakres:</span><select name="hours" id="h">{% for h in ranges %}<option value="{{h}}" {{'selected' if h==hours}}>{{ {1:'1 h',6:'6 h',24:'24 h',168:'7 dni',720:'30 dni'}[h] }}</option>{% endfor %}</select>
+<span class="mut">{{ t('rp.range') }}</span><select name="hours" id="h">{% for h in ranges %}<option value="{{h}}" {{'selected' if h==hours}}>{{ {1:'1 h',6:'6 h',24:'24 h',168:t('rp.days7'),720:t('rp.days30')}[h] }}</option>{% endfor %}</select>
 {% if me.is_admin %}<span class="mut" style="margin-left:8px">WAN:</span><select name="wan"><option value="" {{'selected' if not r.wan}}>auto{{' (' ~ wan ~ ')' if wan and not r.wan}}</option>{% for n in names %}<option {{'selected' if r.wan and n==wan}}>{{n}}</option>{% endfor %}</select>
 {% else %}<span class="mut" style="margin-left:8px">WAN: {{wan or '-'}}</span>{% endif %}
-<button class="p">Ustaw</button><span class="mut small">zapamiętuje wybór na stałe</span></form>
-<div id="ctabs" data-tab="sys"><div class="tabs ct"><button type="button" data-t="sys" onclick="cTab('sys')">🖥️ System</button><button type="button" data-t="net" onclick="cTab('net')">🌐 Sieć</button><button type="button" data-t="qual" onclick="cTab('qual')">📡 Jakość łącza</button><button type="button" data-t="cli" onclick="cTab('cli')">👥 Klienci</button></div>
+<button class="p">{{ t('rp.set') }}</button><span class="mut small">{{ t('rp.remember') }}</span></form>
+<div id="ctabs" data-tab="sys"><div class="tabs ct"><button type="button" data-t="sys" onclick="cTab('sys')">{{ t('rp.ct_sys') }}</button><button type="button" data-t="net" onclick="cTab('net')">{{ t('rp.ct_net') }}</button><button type="button" data-t="qual" onclick="cTab('qual')">{{ t('rp.ct_qual') }}</button><button type="button" data-t="cli" onclick="cTab('cli')">{{ t('rp.ct_cli') }}</button></div>
 <div class="sp sp-sys">
 <div class="grid"><div class="card"><canvas id="c1"></canvas></div><div class="card" id="card-temp"><canvas id="c5"></canvas></div></div></div>
 
 <div class="sp sp-net">
 <div class="grid"><div class="card"><canvas id="c2"></canvas></div>
-<div class="card" id="card-if"><div class="row" style="margin-bottom:6px"><b>Interfejs:</b><select id="if"></select></div><canvas id="c3"></canvas></div></div>
-<div class="card"><div class="row" style="justify-content:space-between"><h3 style="margin:0">Interfejsy</h3><span class="mut small">ruch bieżący · miniwykres: ostatnia godzina · kliknij wiersz, aby otworzyć wykres</span></div>
-<div id="ifov" style="margin-top:8px"><p class="mut">Ładowanie…</p></div></div>
-<div class="card"><div class="row" style="justify-content:space-between"><h3 style="margin:0">Transfer WAN</h3><span class="mut small" id="tiface"></span></div>
+<div class="card" id="card-if"><div class="row" style="margin-bottom:6px"><b>{{ t('rp.iface_l') }}</b><select id="if"></select></div><canvas id="c3"></canvas></div></div>
+<div class="card"><div class="row" style="justify-content:space-between"><h3 style="margin:0">{{ t('rp.ifaces') }}</h3><span class="mut small">{{ t('rp.ifaces_hint') }}</span></div>
+<div id="ifov" style="margin-top:8px"><p class="mut">{{ t('common.loading') }}</p></div></div>
+<div class="card"><div class="row" style="justify-content:space-between"><h3 style="margin:0">{{ t('rp.wan_transfer') }}</h3><span class="mut small" id="tiface"></span></div>
 <div class="tiles tsum" id="tsum" style="margin:10px 0"></div>
 <canvas id="c9" style="max-height:260px"></canvas>
 <div class="scroll" id="tmonths" style="margin-top:10px"></div>
-<p class="mut small">Dane dzienne przeliczane co 10 minut z liczników interfejsu WAN; przechowywane do ok. 2 lat. Dzień liczony wg czasu lokalnego.</p></div>
+<p class="mut small">{{ t('rp.wan_help') }}</p></div>
 </div>
 
 <div class="sp sp-qual">
 {% if r.edge %}<div class="tiles tsum" id="qavail"></div>{% endif %}
-<div class="card"><details class="nwd" id="nwd"><summary><h3>Sondy pomiarowe <span class="mut small" style="font-weight:400">(Netwatch na routerze)</span></h3>
-<span id="live-nwsum" data-live>{% if nw %}{% set upn = nw|selectattr('status','equalto','up')|list|length %}<span class="small {{'ok' if upn == nw|length else 'bad'}}">· {{upn}}/{{nw|length}} działa</span>{% endif %}</span>
-<span class="tg"><span class="o">▸ rozwiń</span><span class="c">▾ zwiń</span></span></summary>
-<div id="live-nw" data-live class="scroll">{% if nw %}<table class="mob"><tr><th>Sonda</th><th>Cel</th><th>Stan</th><th>Opóźnienie</th><th>Jitter</th><th>Utrata</th><th>Czas odp.</th></tr>
-{% for p in nw %}<tr><td data-l="Sonda"><b>{{p.name}}</b></td><td data-l="Cel" class="small">{{p.host}}</td>
-<td data-l="Stan"><span class="st {{'online' if p.status == 'up' else 'offline' if p.status == 'down' else 'idle'}}">{{ {'up':'działa','down':'brak odpowiedzi'}.get(p.status, p.status or '?') }}</span></td>
-<td data-l="Opóźnienie">{{fm(p.rtt,' ms',1)}}</td><td data-l="Jitter">{{fm(p.jit,' ms',1)}}</td><td data-l="Utrata">{{fm(p.loss,'%')}}</td><td data-l="Czas odp.">{{fm(p.time,' ms',0)}}</td></tr>{% endfor %}</table>
-{% else %}<p class="mut small">Brak danych z sond. Wklej na routerze aktualną komendę konfiguracyjną (zakładka Konfiguracja).</p>{% endif %}</div></details></div>
+<div class="card"><details class="nwd" id="nwd"><summary><h3>{{ t('rp.probes') }} <span class="mut small" style="font-weight:400">{{ t('rp.probes_sub') }}</span></h3>
+<span id="live-nwsum" data-live>{% if nw %}{% set upn = nw|selectattr('status','equalto','up')|list|length %}<span class="small {{'ok' if upn == nw|length else 'bad'}}">· {{ t('rp.probes_up', up=upn, total=nw|length) }}</span>{% endif %}</span>
+<span class="tg"><span class="o">{{ t('rp.expand') }}</span><span class="c">{{ t('rp.collapse') }}</span></span></summary>
+<div id="live-nw" data-live class="scroll">{% if nw %}<table class="mob"><tr><th>{{ t('rp.probe') }}</th><th>{{ t('rp.target') }}</th><th>{{ t('rp.state') }}</th><th>{{ t('lv.latency') }}</th><th>Jitter</th><th>{{ t('lv.loss') }}</th><th>{{ t('rp.resp') }}</th></tr>
+{% for p in nw %}<tr><td data-l="{{ t('rp.probe') }}"><b>{{p.name}}</b></td><td data-l="{{ t('rp.target') }}" class="small">{{p.host}}</td>
+<td data-l="{{ t('rp.state') }}"><span class="st {{'online' if p.status == 'up' else 'offline' if p.status == 'down' else 'idle'}}">{{ {'up':t('rp.up'),'down':t('rp.down')}.get(p.status, p.status or '?') }}</span></td>
+<td data-l="{{ t('lv.latency') }}">{{fm(p.rtt,' ms',1)}}</td><td data-l="Jitter">{{fm(p.jit,' ms',1)}}</td><td data-l="{{ t('lv.loss') }}">{{fm(p.loss,'%')}}</td><td data-l="{{ t('rp.resp') }}">{{fm(p.time,' ms',0)}}</td></tr>{% endfor %}</table>
+{% else %}<p class="mut small">{{ t('rp.probes_none') }}</p>{% endif %}</div></details></div>
 <script>(function(){const d=document.getElementById('nwd');try{d.open=localStorage.getItem('nwopen')==='1'}catch(e){}
 d.addEventListener('toggle',()=>{try{localStorage.setItem('nwopen',d.open?'1':'0')}catch(e){}})})();</script>
 <div class="card"><canvas id="c4" style="max-height:320px"></canvas></div>
-{% if r.edge %}<div class="card"><details class="nwd" id="outd"><summary><h3>Przerwy i problemy z internetem (7 dni)</h3>
-<span id="qoutsum" class="small"></span><span class="tg"><span class="o">▸ rozwiń</span><span class="c">▾ zwiń</span></span></summary>
+{% if r.edge %}<div class="card"><details class="nwd" id="outd"><summary><h3>{{ t('rp.outages') }}</h3>
+<span id="qoutsum" class="small"></span><span class="tg"><span class="o">{{ t('rp.expand') }}</span><span class="c">{{ t('rp.collapse') }}</span></span></summary>
 <div id="qout" class="scroll"></div>
-<p class="mut small">Rodzaj problemu: „brak internetu” – żaden z serwerów (1.1.1.1, 8.8.8.8, 9.9.9.9) nie odpowiada; „nie działa DNS” – łącze działa, ale nie działa rozwiązywanie nazw; „nie działa HTTP” – strony się nie otwierają.</p></details></div>
+<p class="mut small">{{ t('rp.outages_help') }}</p></details></div>
 <script>(function(){const o=document.getElementById('outd');if(o){try{o.open=localStorage.getItem('outopen')==='1'}catch(e){}
 o.addEventListener('toggle',()=>{if(!o.classList.contains('empty'))try{localStorage.setItem('outopen',o.open?'1':'0')}catch(e){}});
 o.querySelector('summary').addEventListener('click',e=>{if(o.classList.contains('empty'))e.preventDefault()})}})();
 </script>
-{% endif %}{% if r.edge or speed_srv %}<div class="card"><div class="row" style="justify-content:space-between"><h3 style="margin:0">Test prędkości</h3>
-{% if speed_srv and me.is_admin %}<button type="button" class="p" id="spdgo">▶ Uruchom test teraz</button>{% endif %}</div>
+{% endif %}{% if r.edge or speed_srv %}<div class="card"><div class="row" style="justify-content:space-between"><h3 style="margin:0">{{ t('set.sp.title') }}</h3>
+{% if speed_srv and me.is_admin %}<button type="button" class="p" id="spdgo">{{ t('rp.speed_run') }}</button>{% endif %}</div>
 <p id="qspd" style="margin:8px 0"></p>
 <canvas id="c11" style="max-height:260px"></canvas>
-{% if speed_srv %}<p class="mut small">Test wykonuje serwer aplikacji (ten sam internet co ten router), mierzy pobieranie, wysyłanie, ping i jitter. Domyślnie Speedtest by Ookla (ten sam test co speedtest.net), a zapasowo Cloudflare (Ustawienia → Test prędkości). Nie obciąża procesora routera. Codziennie w nocy oraz na żądanie. Trwa ok. 30 s i na ten czas zajmuje łącze.</p>
-{% else %}<p class="mut small">Test wykonuje router (4 równoległe pobrania, tylko pobieranie), codziennie w nocy. Ręcznie: <code>/system script run app-speed</code>.
-Na słabszych routerach wynik bywa zaniżony (szyfrowanie HTTPS obciąża procesor). Dokładniejszy test z serwera aplikacji włączysz w Ustawieniach → Test prędkości,
-jeśli serwer stoi w sieci tego routera.</p>{% endif %}</div>{% endif %}
+{% if speed_srv %}<p class="mut small">{{ t('rp.speed_help_srv') }}</p>
+{% else %}<p class="mut small">{{ th('rp.speed_help_rt.html') }}</p>{% endif %}</div>{% endif %}
 </div>
 
 <div class="sp sp-cli">
@@ -96,56 +94,56 @@ jeśli serwer stoi w sieci tego routera.</p>{% endif %}</div>{% endif %}
 </div>
 </div>
 
-<div class="rp rp-dev card"><div class="row" style="justify-content:flex-end;margin-bottom:8px"><input class="q" placeholder="Szukaj: nazwa, IP, MAC…" oninput="invFilter(this)" style="width:240px"></div><div id="live-dev" data-live>{% if inv.stale %}<p class="warn small">Dane z routera są nieaktualne (ostatnia aktualizacja <span class="t" data-t="{{inv.updated|iso}}Z"></span>). Sprawdź skrypt app-inventory na routerze.</p>{% elif not inv.updated %}<p class="mut small">Brak danych. Wklej na routerze aktualną komendę konfiguracyjną (zakładka Konfiguracja); dane pojawią się w ciągu minuty.</p>{% endif %}<div class="scroll"><table class="mob"><tr><th>Status</th><th>Nazwa</th><th>IP</th><th class="hm">MAC</th><th>Wi-Fi</th><th class="hm">Dzierżawa</th><th class="hm">Ostatnio (DHCP)</th></tr>
-{% for d in inv.devices %}<tr><td data-l="Status"><span class="st {{d.state}}">{{ {'online':'online','idle':'bezczynny','offline':'offline'}[d.state] }}</span></td>
-<td data-l="Nazwa"><b>{{d.name}}</b>{% if d.host %}<div class="mut small">{{d.host}}</div>{% endif %}</td><td data-l="IP">{{d.ip}}</td><td data-l="MAC" class="hm small">{{d.mac}}</td>
-<td data-l="Wi-Fi">{{ sig(d.signal, d.sc) if d.signal is not none else '-' }}</td><td data-l="Dzierżawa" class="hm small">{{'statyczna' if d.static else 'dynamiczna'}}</td><td data-l="Ostatnio (DHCP)" class="hm small">{{d.last}}</td></tr>
-{% else %}<tr><td colspan="7" class="mut">Brak dzierżaw DHCP.</td></tr>{% endfor %}</table>
-<p class="mut small">Online: urządzenie wysyłało ruch w ostatnich minutach (tablica hostów bridge), jest połączone przez Wi-Fi, odpowiada w ARP albo jest monitorowanym routerem online. Bezczynny: router zna urządzenie, ale od dawna nie widział jego ruchu.</p></div></div></div>
-<div class="rp rp-wifi card"><div class="row" style="justify-content:flex-end;margin-bottom:8px"><input class="q" placeholder="Szukaj: nazwa, IP, MAC…" oninput="invFilter(this)" style="width:240px"></div><div id="live-wifi" data-live>{% if inv.stale %}<p class="warn small">Dane z routera są nieaktualne (ostatnia aktualizacja <span class="t" data-t="{{inv.updated|iso}}Z"></span>). Sprawdź skrypt app-inventory na routerze.</p>{% elif not inv.updated %}<p class="mut small">Brak danych. Wklej na routerze aktualną komendę konfiguracyjną (zakładka Konfiguracja); dane pojawią się w ciągu minuty.</p>{% endif %}<div class="scroll"><table class="mob"><tr><th>Nazwa</th><th>Jakość</th><th>Sygnał</th><th>IP</th><th class="hm">MAC</th><th class="hm">Interfejs</th><th class="hm">Łącze</th><th class="hm">TX / RX</th><th>Połączony</th></tr>
-{% for w in inv.wifi %}<tr><td data-l="Nazwa"><b>{{w.name}}</b></td>
-<td data-l="Jakość"><span class="qbadge {{w.qc}}">{{w.qlabel}}</span>{% if w.pct is not none %} <span class="mut small">{{w.pct}}% maks.</span>{% endif %}</td>
-<td data-l="Sygnał" class="{{w.sc}}">{{ sig(w.signal, w.sc) }}{% if w.snr is not none %} <span class="mut small">SNR {{w.snr|int}}</span>{% endif %}</td><td data-l="IP">{{w.ip}}</td><td data-l="MAC" class="hm small">{{w.mac}}</td><td data-l="Interfejs" class="hm">{{w.iface}}</td>
-<td data-l="Łącze" class="hm small">{{ [w.band, w.std, (w.width ~ ' MHz') if w.width else '', (w.streams ~ 'x' ~ w.streams) if w.streams else '']|select|join(' · ') or '-' }}</td>
-<td data-l="TX / RX" class="hm small">{{w.tx}} / {{w.rx}}</td><td data-l="Połączony" class="small">{{w.uptime}}</td></tr>
-{% else %}<tr><td colspan="9" class="mut">Brak klientów Wi-Fi (albo router nie ma Wi-Fi).</td></tr>{% endfor %}</table>
-<p class="mut small">Jakość ocenia faktyczne połączenie: głównie wynegocjowaną prędkość względem maksimum dla kanału i liczby anten, uzupełniająco SNR i siłę sygnału. Sygnał: zielony ≥ -67 dBm, żółty -67…-75, czerwony &lt; -75. Przy CAPsMAN klienci wszystkich AP są widoczni na kontrolerze.</p></div></div></div>
-<div class="rp rp-vpn card"><div class="row" style="justify-content:flex-end;margin-bottom:8px"><input class="q" placeholder="Szukaj: nazwa, IP, MAC…" oninput="invFilter(this)" style="width:240px"></div><div id="live-vpn" data-live>{% if inv.stale %}<p class="warn small">Dane z routera są nieaktualne (ostatnia aktualizacja <span class="t" data-t="{{inv.updated|iso}}Z"></span>). Sprawdź skrypt app-inventory na routerze.</p>{% elif not inv.updated %}<p class="mut small">Brak danych. Wklej na routerze aktualną komendę konfiguracyjną (zakładka Konfiguracja); dane pojawią się w ciągu minuty.</p>{% endif %}<div class="scroll"><table class="mob"><tr><th>Status</th><th>Nazwa</th><th class="hm">Typ</th><th class="hm">Interfejs</th><th class="hm">Adres zdalny</th><th>Informacje</th><th class="hm">RX / TX</th></tr>
-{% for v in inv.vpn %}<tr><td data-l="Status"><span class="st {{v.state}}">{{ {'online':'online','offline':'offline','disabled':'wyłączony'}[v.state] }}</span></td>
-<td data-l="Nazwa"><b>{{v.name}}</b></td><td data-l="Typ" class="hm">{{v.type}}</td><td data-l="Interfejs" class="hm">{{v.iface or '-'}}</td><td data-l="Adres zdalny" class="hm small">{{v.remote}}</td><td data-l="Informacje" class="small">{{v.info}}</td><td data-l="RX / TX" class="hm small">{{v.rx}}{% if v.tx %} / {{v.tx}}{% endif %}</td></tr>
-{% else %}<tr><td colspan="7" class="mut">Brak tuneli WireGuard ani aktywnych sesji VPN (PPP).</td></tr>{% endfor %}</table>
-<p class="mut small">WireGuard jest online, gdy ostatni handshake był nie dawniej niż 3 minuty temu.</p></div></div></div>
+<div class="rp rp-dev card"><div class="row" style="justify-content:flex-end;margin-bottom:8px"><input class="q" placeholder="{{ t('rp.search') }}" oninput="invFilter(this)" style="width:240px"></div><div id="live-dev" data-live>{% if inv.stale %}<p class="warn small">{{ t('rp.stale_a') }}<span class="t" data-t="{{inv.updated|iso}}Z"></span>{{ t('rp.stale_b') }}</p>{% elif not inv.updated %}<p class="mut small">{{ t('rp.nodata_inv') }}</p>{% endif %}<div class="scroll"><table class="mob"><tr><th>Status</th><th>{{ t('lv.name') }}</th><th>IP</th><th class="hm">MAC</th><th>Wi-Fi</th><th class="hm">{{ t('rp.lease') }}</th><th class="hm">{{ t('rp.last_dhcp') }}</th></tr>
+{% for d in inv.devices %}<tr><td data-l="Status"><span class="st {{d.state}}">{{ {'online':t('rt.online'),'idle':t('rp.idle'),'offline':t('rt.offline')}[d.state] }}</span></td>
+<td data-l="{{ t('lv.name') }}"><b>{{d.name}}</b>{% if d.host %}<div class="mut small">{{d.host}}</div>{% endif %}</td><td data-l="IP">{{d.ip}}</td><td data-l="MAC" class="hm small">{{d.mac}}</td>
+<td data-l="Wi-Fi">{{ sig(d.signal, d.sc) if d.signal is not none else '-' }}</td><td data-l="{{ t('rp.lease') }}" class="hm small">{{ t('rp.static') if d.static else t('rp.dynamic') }}</td><td data-l="{{ t('rp.last_dhcp') }}" class="hm small">{{d.last}}</td></tr>
+{% else %}<tr><td colspan="7" class="mut">{{ t('rp.no_leases') }}</td></tr>{% endfor %}</table>
+<p class="mut small">{{ t('rp.dev_help') }}</p></div></div></div>
+<div class="rp rp-wifi card"><div class="row" style="justify-content:flex-end;margin-bottom:8px"><input class="q" placeholder="{{ t('rp.search') }}" oninput="invFilter(this)" style="width:240px"></div><div id="live-wifi" data-live>{% if inv.stale %}<p class="warn small">{{ t('rp.stale_a') }}<span class="t" data-t="{{inv.updated|iso}}Z"></span>{{ t('rp.stale_b') }}</p>{% elif not inv.updated %}<p class="mut small">{{ t('rp.nodata_inv') }}</p>{% endif %}<div class="scroll"><table class="mob"><tr><th>{{ t('lv.name') }}</th><th>{{ t('lv.q_short') }}</th><th>{{ t('lv.signal') }}</th><th>IP</th><th class="hm">MAC</th><th class="hm">{{ t('rp.interface') }}</th><th class="hm">{{ t('lv.link') }}</th><th class="hm">TX / RX</th><th>{{ t('rp.connected') }}</th></tr>
+{% for w in inv.wifi %}<tr><td data-l="{{ t('lv.name') }}"><b>{{w.name}}</b></td>
+<td data-l="{{ t('lv.q_short') }}"><span class="qbadge {{w.qc}}">{{w.qlabel}}</span>{% if w.pct is not none %} <span class="mut small">{{ t('rp.pct_max', n=w.pct) }}</span>{% endif %}</td>
+<td data-l="{{ t('lv.signal') }}" class="{{w.sc}}">{{ sig(w.signal, w.sc) }}{% if w.snr is not none %} <span class="mut small">SNR {{w.snr|int}}</span>{% endif %}</td><td data-l="IP">{{w.ip}}</td><td data-l="MAC" class="hm small">{{w.mac}}</td><td data-l="{{ t('rp.interface') }}" class="hm">{{w.iface}}</td>
+<td data-l="{{ t('lv.link') }}" class="hm small">{{ [w.band, w.std, (w.width ~ ' MHz') if w.width else '', (w.streams ~ 'x' ~ w.streams) if w.streams else '']|select|join(' · ') or '-' }}</td>
+<td data-l="TX / RX" class="hm small">{{w.tx}} / {{w.rx}}</td><td data-l="{{ t('rp.connected') }}" class="small">{{w.uptime}}</td></tr>
+{% else %}<tr><td colspan="9" class="mut">{{ t('rp.no_wifi') }}</td></tr>{% endfor %}</table>
+<p class="mut small">{{ t('rp.wifi_help') }}</p></div></div></div>
+<div class="rp rp-vpn card"><div class="row" style="justify-content:flex-end;margin-bottom:8px"><input class="q" placeholder="{{ t('rp.search') }}" oninput="invFilter(this)" style="width:240px"></div><div id="live-vpn" data-live>{% if inv.stale %}<p class="warn small">{{ t('rp.stale_a') }}<span class="t" data-t="{{inv.updated|iso}}Z"></span>{{ t('rp.stale_b') }}</p>{% elif not inv.updated %}<p class="mut small">{{ t('rp.nodata_inv') }}</p>{% endif %}<div class="scroll"><table class="mob"><tr><th>Status</th><th>{{ t('lv.name') }}</th><th class="hm">{{ t('rp.type') }}</th><th class="hm">{{ t('rp.interface') }}</th><th class="hm">{{ t('rp.remote') }}</th><th>{{ t('rp.info') }}</th><th class="hm">RX / TX</th></tr>
+{% for v in inv.vpn %}<tr><td data-l="Status"><span class="st {{v.state}}">{{ {'online':t('rt.online'),'offline':t('rt.offline'),'disabled':t('users.disabled')}[v.state] }}</span></td>
+<td data-l="{{ t('lv.name') }}"><b>{{v.name}}</b></td><td data-l="{{ t('rp.type') }}" class="hm">{{v.type}}</td><td data-l="{{ t('rp.interface') }}" class="hm">{{v.iface or '-'}}</td><td data-l="{{ t('rp.remote') }}" class="hm small">{{v.remote}}</td><td data-l="{{ t('rp.info') }}" class="small">{{v.info}}</td><td data-l="RX / TX" class="hm small">{{v.rx}}{% if v.tx %} / {{v.tx}}{% endif %}</td></tr>
+{% else %}<tr><td colspan="7" class="mut">{{ t('rp.no_vpn') }}</td></tr>{% endfor %}</table>
+<p class="mut small">{{ t('rp.vpn_help') }}</p></div></div></div>
 <div class="rp rp-logs card">
-<div id="lsub" data-tab="list"><div class="tabs ct" id="ltabs"><button type="button" data-t="list" onclick="lTab('list')">📋 Lista</button><button type="button" data-t="ana" onclick="lTab('ana')">🧠 Analiza</button></div>
+<div id="lsub" data-tab="list"><div class="tabs ct" id="ltabs"><button type="button" data-t="list" onclick="lTab('list')">{{ t('rp.l_list') }}</button><button type="button" data-t="ana" onclick="lTab('ana')">{{ t('rp.l_ana') }}</button></div>
 <div class="lp lp-list">
-<div class="row ltool"><button type="button" id="lack" class="p" title="Oznacz błędy i ostrzeżenia jako przeczytane: zeruje licznik na zakładce i wskaźnik na stronie głównej">✓ Zatwierdź</button><div class="row lsev" id="lsev"><button type="button" data-s="" class="on">Wszystkie</button><button type="button" data-s="error">🔴 Błędy <span class="cnt" id="lc-error">0</span></button><button type="button" data-s="warning">🟡 Ostrzeżenia <span class="cnt" id="lc-warning">0</span></button><button type="button" data-s="info">Info <span class="cnt" id="lc-info">0</span></button><button type="button" data-s="debug">Debug</button></div><select id="ltopic"><option value="">Wszystkie tematy</option></select><input id="lq" placeholder="Szukaj w logach…" style="width:200px"><label class="small row" style="gap:4px"><input type="checkbox" id="lgrp" checked>grupuj powtórzenia</label><span class="lsp"></span><button type="button" id="lexp" title="Pobierz logi z wybranego okresu">⬇ Pobierz</button></div>
+<div class="row ltool"><button type="button" id="lack" class="p" title="{{ t('rp.ack_title') }}">{{ t('rp.ack') }}</button><div class="row lsev" id="lsev"><button type="button" data-s="" class="on">{{ t('rp.all') }}</button><button type="button" data-s="error">{{ t('rp.sev_err') }} <span class="cnt" id="lc-error">0</span></button><button type="button" data-s="warning">{{ t('rp.sev_warn') }} <span class="cnt" id="lc-warning">0</span></button><button type="button" data-s="info">Info <span class="cnt" id="lc-info">0</span></button><button type="button" data-s="debug">Debug</button></div><select id="ltopic"><option value="">{{ t('rp.all_topics') }}</option></select><input id="lq" placeholder="{{ t('rp.search_logs') }}" style="width:200px"><label class="small row" style="gap:4px"><input type="checkbox" id="lgrp" checked>{{ t('rp.group') }}</label><span class="lsp"></span><button type="button" id="lexp" title="{{ t('rp.dl_title') }}">{{ t('rp.dl') }}</button></div>
 
-<div class="scroll"><table class="logs"><tbody id="lbody"><tr><td class="mut">Ładowanie…</td></tr></tbody></table></div>
+<div class="scroll"><table class="logs"><tbody id="lbody"><tr><td class="mut">{{ t('common.loading') }}</td></tr></tbody></table></div>
 <dialog id="ldlg" class="dlg"><form method="dialog" id="lform">
-<div class="row" style="justify-content:space-between"><h3 style="margin:0">Pobierz logi</h3><button value="cancel" aria-label="Zamknij">✕</button></div>
-<div class="row" style="margin:12px 0 6px;gap:6px"><span class="mut small">Szybki wybór:</span><button type="button" data-p="1">1 h</button><button type="button" data-p="24">24 h</button><button type="button" data-p="168">7 dni</button><button type="button" data-p="today">Dziś</button></div>
-<label class="fl">Od<input type="datetime-local" id="lfrom" step="60" required></label>
-<label class="fl">Do<input type="datetime-local" id="lto" step="60" required></label>
-<label class="fl">Format<select id="lfmt"><option value="csv">CSV (Excel)</option><option value="txt">Tekst (TXT)</option></select></label>
-<label class="small row" style="gap:6px;margin:8px 0"><input type="checkbox" id="lflt">uwzględnij bieżące filtry (waga, temat, wyszukiwanie)</label>
+<div class="row" style="justify-content:space-between"><h3 style="margin:0">{{ t('rp.dl_logs') }}</h3><button value="cancel" aria-label="{{ t('common.close') }}">✕</button></div>
+<div class="row" style="margin:12px 0 6px;gap:6px"><span class="mut small">{{ t('rp.quick') }}</span><button type="button" data-p="1">1 h</button><button type="button" data-p="24">24 h</button><button type="button" data-p="168">{{ t('rp.days7') }}</button><button type="button" data-p="today">{{ t('rp.today') }}</button></div>
+<label class="fl">{{ t('rp.from') }}<input type="datetime-local" id="lfrom" step="60" required></label>
+<label class="fl">{{ t('rp.to') }}<input type="datetime-local" id="lto" step="60" required></label>
+<label class="fl">{{ t('rp.format') }}<select id="lfmt"><option value="csv">CSV (Excel)</option><option value="txt">{{ t('rp.fmt_txt') }}</option></select></label>
+<label class="small row" style="gap:6px;margin:8px 0"><input type="checkbox" id="lflt">{{ t('rp.use_filters') }}</label>
 <p class="err small" id="lerr"></p>
-<div class="row" style="justify-content:flex-end"><button value="cancel">Anuluj</button><button type="button" class="p" id="lgo">⬇ Pobierz</button></div>
+<div class="row" style="justify-content:flex-end"><button value="cancel">{{ t('common.cancel') }}</button><button type="button" class="p" id="lgo">{{ t('rp.dl') }}</button></div>
 </form></dialog>
-<p class="mut small" id="linfo">Liczniki przy przyciskach dotyczą ostatnich 24 godzin. Pokazywane jest maksymalnie 300 najnowszych wpisów pasujących do filtrów.</p>
+<p class="mut small" id="linfo">{{ t('rp.log_info') }}</p>
 </div>
 <div class="lp lp-ana">
-<div class="row" style="justify-content:space-between;margin-bottom:10px"><div class="row" id="arange"><span class="mut small">Okres:</span><button type="button" data-h="1">1 h</button><button type="button" data-h="24" class="on">24 h</button><button type="button" data-h="168">7 dni</button></div>
+<div class="row" style="justify-content:space-between;margin-bottom:10px"><div class="row" id="arange"><span class="mut small">{{ t('rp.period') }}</span><button type="button" data-h="1">1 h</button><button type="button" data-h="24" class="on">24 h</button><button type="button" data-h="168">{{ t('rp.days7') }}</button></div>
 <div class="row small" id="asum"></div></div>
-<div id="alist"><p class="mut">Ładowanie…</p></div>
+<div id="alist"><p class="mut">{{ t('common.loading') }}</p></div>
 <div id="aunk"></div>
-<p class="mut small">Analiza tłumaczy znane komunikaty RouterOS na zrozumiały język i podpowiada, co zrobić. Grupuje powtarzające się zdarzenia. Wpisy, których nie rozpoznaje, są na dole listy.</p>
+<p class="mut small">{{ t('rp.ana_help') }}</p>
 </div>
 </div>
 </div>
-{% if me.is_admin %}<div class="rp rp-cfg card"><h2>Konfiguracja routera</h2>
-<p>Wklej w terminalu RouterOS. W adresie możesz zmienić <code>ping=</code> (cel testu łącza) i dodać <code>&amp;list=nazwa_listy</code>. Po aktualizacji aplikacji uruchom komendę ponownie, aby router dostał nowe skrypty.</p>
+{% if me.is_admin %}<div class="rp rp-cfg card"><h2>{{ t('rp.cfg_title') }}</h2>
+<p>{{ th('rp.cfg_paste.html') }}</p>
 <pre>{{cmd}}</pre>
-<p><b>Usuwanie konfiguracji z routera</b> (wklej w terminalu RouterOS):</p>
+<p><b>{{ t('rp.cfg_remove') }}</b> ({{ t('rp.cfg_remove_sub') }}):</p>
 <pre>/system scheduler remove [find name~"^app-"]
 /system script remove [find name~"^app-"]
 :do {/system logging remove [find action=appsyslog]} on-error={}
@@ -153,26 +151,25 @@ jeśli serwer stoi w sieci tego routera.</p>{% endif %}</div>{% endif %}
 /tool netwatch remove [find comment~"^app-nw:"]
 /ip firewall address-list remove [find comment~"^wl:"]
 /file remove [find name~"^app-"]</pre>
-<h3 style="margin-top:20px">Wykryte funkcje routera</h3>
-<p class="small">{% if si.known %}{{ si.feats|join(' · ') if si.feats else 'brak Wi-Fi, DHCP i WireGuard' }}{% else %}jeszcze nieznane (pojawią się w ciągu minuty po wklejeniu komendy){% endif %}</p>
-<p class="mut small">Komenda konfiguracyjna sama sprawdza na routerze, co jest dostępne, i instaluje tylko potrzebne skrypty (Wi-Fi nowy/stary pakiet, DHCP).
-Po instalacji pakietu Wi-Fi, włączeniu serwera DHCP albo innej zmianie sprzętu wklej komendę ponownie.</p>
-<h3 style="margin-top:20px">Router brzegowy</h3>
-<p class="small">Zaznacz przy routerze, który ma bezpośrednie wyjście do internetu (np. Master). Taki router mierzy jakość internetu
-(opóźnienie, jitter i utratę do 1.1.1.1, 8.8.8.8 i 9.9.9.9, czas DNS i HTTP), dostępność łącza oraz robi nocny test prędkości.
-Pozostałe routery i AP mierzą tylko połączenie ze swoją bramą (routerem nadrzędnym). Po zmianie wklej komendę konfiguracyjną ponownie.</p>
-<form method="post" action="/routers/{{r.id}}/edge" class="row"><label class="row" style="gap:6px"><input type="checkbox" name="edge" value="1" {{'checked' if r.edge}}> router brzegowy (internet + test prędkości)</label><button>Zapisz</button><span class="mut small">teraz: {{'brzegowy' if r.edge else 'wewnętrzny (mierzy bramę)'}}</span></form>
-<h3 style="margin-top:20px">Logi (syslog)</h3>
-<p class="small">Komenda konfiguracyjna ustawia na routerze wysyłanie logów (tematy critical, error, warning, info) na ten serwer, UDP port {{syslog_port}}.
-Logi są przypisywane do routera po adresie IP, z którego przychodzą.</p>
-<p class="small">Adres IP routera: <b>{{r.log_ip or 'jeszcze nieznany'}}</b> {{'(ustawiony ręcznie)' if r.log_ip_fixed else '(wykryty automatycznie)'}} · ostatni log: {% if log_last %}<span class="t" data-t="{{log_last|iso}}Z"></span>{% else %}brak{% endif %}</p>
-<form method="post" action="/routers/{{r.id}}/logip" class="row"><input name="ip" placeholder="IP routera (puste = automatycznie)" value="{{r.log_ip if r.log_ip_fixed else ''}}" style="width:240px"><button>Zapisz</button></form>
-{% if log_rejected %}<p class="small warn">Odrzucone pakiety syslog z nieznanych adresów (jeśli to któryś z routerów, wpisz ten adres powyżej):
+<h3 style="margin-top:20px">{{ t('rp.cfg_feats') }}</h3>
+<p class="small">{% if si.known %}{{ si.feats|join(' · ') if si.feats else t('rp.cfg_nofeats') }}{% else %}{{ t('rp.cfg_unknown') }}{% endif %}</p>
+<p class="mut small">{{ t('rp.cfg_auto') }}</p>
+<h3 style="margin-top:20px">{{ t('rp.edge_title') }}</h3>
+<p class="small">{{ t('rp.edge_help') }}</p>
+<form method="post" action="/routers/{{r.id}}/edge" class="row"><label class="row" style="gap:6px"><input type="checkbox" name="edge" value="1" {{'checked' if r.edge}}> {{ t('rp.edge_cb') }}</label><button>{{ t('common.save') }}</button><span class="mut small">{{ t('rp.now') }} {{ t('rp.is_edge') if r.edge else t('rp.is_inner') }}</span></form>
+<h3 style="margin-top:20px">{{ t('rp.syslog') }}</h3>
+<p class="small">{{ t('rp.syslog_help', port=syslog_port) }}</p>
+<p class="small">{{ t('rp.router_ip') }} <b>{{r.log_ip or t('rp.unknown_yet')}}</b> {{ t('rp.ip_manual') if r.log_ip_fixed else t('rp.ip_auto') }} · {{ t('rp.last_log') }} {% if log_last %}<span class="t" data-t="{{log_last|iso}}Z"></span>{% else %}{{ t('rp.none_short') }}{% endif %}</p>
+<form method="post" action="/routers/{{r.id}}/logip" class="row"><input name="ip" placeholder="{{ t('rp.ip_ph') }}" value="{{r.log_ip if r.log_ip_fixed else ''}}" style="width:240px"><button>{{ t('common.save') }}</button></form>
+{% if log_rejected %}<p class="small warn">{{ t('rp.rejected') }}
 {% for ip, c in log_rejected %}<code>{{ip}}</code> ({{c[0]}}){{ ', ' if not loop.last }}{% endfor %}</p>{% endif %}
-<form method="post" action="/routers/{{r.id}}/clear" style="display:inline" onsubmit="return confirm('Usunąć zebrane dane tego routera? Konfiguracja zostaje.')"><button>Wyczyść zebrane dane</button></form>
-<form method="post" action="/routers/{{r.id}}/delete" onsubmit="return confirm('Usunąć router i jego dane?')"><button>Usuń router</button></form></div>{% endif %}
+<form method="post" action="/routers/{{r.id}}/clear" style="display:inline" onsubmit='return confirm({{ t("rp.confirm_clear")|tojson }})'><button>{{ t('rp.clear') }}</button></form>
+<form method="post" action="/routers/{{r.id}}/delete" onsubmit='return confirm({{ t("rp.confirm_delete")|tojson }})'><button>{{ t('rp.delete') }}</button></form></div>{% endif %}
 </div>
 
+<script>const LANG={{ request.state.lang|tojson }};const pcat=n=>LANG==='pl'?(n===1?'one':(n%10>=2&&n%10<=4&&(n%100<12||n%100>14))?'few':'many'):(n===1?'one':'other');
+const tf=(s,o)=>s.replace(/\{(\w+)\}/g,(m,k)=>o[k]===undefined?m:o[k]);
+const T={log_since:{{ t('log.since')|tojson }},rp_a_bad:{{ t('rp.a_bad')|tojson }},rp_a_examples:{{ t('rp.a_examples')|tojson }},rp_a_info:{{ t('rp.a_info')|tojson }},rp_a_last:{{ t('rp.a_last')|tojson }},rp_a_none:{{ t('rp.a_none')|tojson }},rp_a_none_known:{{ t('rp.a_none_known')|tojson }},rp_a_todo:{{ t('rp.a_todo')|tojson }},rp_a_unknown:{{ t('rp.a_unknown')|tojson }},rp_a_warn:{{ t('rp.a_warn')|tojson }},rp_a_what:{{ t('rp.a_what')|tojson }},rp_ack_n:{{ t('rp.ack_n')|tojson }},rp_ack_none:{{ t('rp.ack_none')|tojson }},rp_all_topics:{{ t('rp.all_topics')|tojson }},rp_avail24:{{ t('rp.avail24')|tojson }},rp_avail_tip:{{ t('rp.avail_tip')|tojson }},rp_c_all:{{ t('rp.c_all')|tojson }},rp_c_conns:{{ t('rp.c_conns')|tojson }},rp_c_cpu:{{ t('rp.c_cpu')|tojson }},rp_c_daily:{{ t('rp.c_daily')|tojson }},rp_c_dhcp:{{ t('rp.c_dhcp')|tojson }},rp_c_gw:{{ t('rp.c_gw')|tojson }},rp_c_gwconn:{{ t('rp.c_gwconn')|tojson }},rp_c_if:{{ t('rp.c_if')|tojson }},rp_c_inet:{{ t('rp.c_inet')|tojson }},rp_c_lat:{{ t('rp.c_lat')|tojson }},rp_c_loss:{{ t('rp.c_loss')|tojson }},rp_c_temp:{{ t('rp.c_temp')|tojson }},rp_c_tempd:{{ t('rp.c_tempd')|tojson }},rp_c_wan:{{ t('rp.c_wan')|tojson }},rp_c_wv:{{ t('rp.c_wv')|tojson }},rp_days30:{{ t('rp.days30')|tojson }},rp_days7:{{ t('rp.days7')|tojson }},rp_duration:{{ t('rp.duration')|tojson }},rp_err_dates:{{ t('rp.err_dates')|tojson }},rp_err_range:{{ t('rp.err_range')|tojson }},rp_from:{{ t('rp.from')|tojson }},rp_if_none:{{ t('rp.if_none')|tojson }},rp_iface_l2:{{ t('rp.iface_l2')|tojson }},rp_interface:{{ t('rp.interface')|tojson }},rp_jitter_l:{{ t('rp.jitter_l')|tojson }},rp_kind:{{ t('rp.kind')|tojson }},rp_lasthour:{{ t('rp.lasthour')|tojson }},rp_logs_empty:{{ t('rp.logs_empty')|tojson }},rp_month:{{ t('rp.month')|tojson }},rp_no_outages:{{ t('rp.no_outages')|tojson }},rp_nooutn:{{ t('rp.nooutn')|tojson }},rp_ongoing:{{ t('rp.ongoing')|tojson }},rp_outn_few:{{ t('rp.outn_few')|tojson }},rp_outn_many:{{ t('rp.outn_many')|tojson }},rp_outn_one:{{ t('rp.outn_one')|tojson }},rp_outn_other:{{ t('rp.outn_other')|tojson }},rp_prev_month:{{ t('rp.prev_month')|tojson }},rp_rx:{{ t('rp.rx')|tojson }},rp_since_p:{{ t('rp.since_p')|tojson }},rp_sp_down:{{ t('rp.sp_down')|tojson }},rp_sp_failed:{{ t('rp.sp_failed')|tojson }},rp_sp_last:{{ t('rp.sp_last')|tojson }},rp_sp_loss:{{ t('rp.sp_loss')|tojson }},rp_sp_none:{{ t('rp.sp_none')|tojson }},rp_sp_result:{{ t('rp.sp_result')|tojson }},rp_sp_router:{{ t('rp.sp_router')|tojson }},rp_sp_run:{{ t('rp.sp_run')|tojson }},rp_sp_run2:{{ t('rp.sp_run2')|tojson }},rp_sp_server:{{ t('rp.sp_server')|tojson }},rp_sp_up:{{ t('rp.sp_up')|tojson }},rp_sum:{{ t('rp.sum')|tojson }},rp_this_month:{{ t('rp.this_month')|tojson }},rp_to:{{ t('rp.to')|tojson }},rp_today:{{ t('rp.today')|tojson }},rp_total:{{ t('rp.total')|tojson }},rp_tr_none:{{ t('rp.tr_none')|tojson }},rp_tx:{{ t('rp.tx')|tojson }},rt_conns:{{ t('rt.conns')|tojson }}};</script>
 <script>
 const RTABS=['charts','dev','wifi','vpn','logs','cfg'];
 function rTab(t){if(!RTABS.includes(t)||!document.querySelector('#rtabs button[data-t="'+t+'"]'))t='charts';
@@ -193,21 +190,21 @@ async function loadLogs(){
 const p=new URLSearchParams({sev:LF.sev,topic:document.getElementById('ltopic').value,q:document.getElementById('lq').value});
 let d;try{const r=await fetch('/api/routers/'+RID+'/logs?'+p,{cache:'no-store'});if(!r.ok)return;d=await r.json()}catch(e){return}
 const sel=document.getElementById('ltopic'),cur=sel.value;
-if(sel.options.length-1!==d.topics.length){sel.replaceChildren(new Option('Wszystkie tematy',''),...d.topics.map(t=>new Option(t,t)));sel.value=cur}
+if(sel.options.length-1!==d.topics.length){sel.replaceChildren(new Option(T.rp_all_topics,''),...d.topics.map(t=>new Option(t,t)));sel.value=cur}
 for(const k in d.counts){const e=document.getElementById('lc-'+k);if(e)e.textContent=d.counts[k]}setUnread(d.unread);
 const grp=document.getElementById('lgrp').checked,body=document.getElementById('lbody'),rows=[];let prev=null,prow=null,n=1;
 for(const it of d.items){
- if(grp&&prev&&prev.msg===it.msg&&prev.topics.join()===it.topics.join()&&prev.cls===it.cls){n++;prow.querySelector('.rep').textContent='×'+n;prow.querySelector('.since').textContent='od '+lfmt(it.t);continue}
+ if(grp&&prev&&prev.msg===it.msg&&prev.topics.join()===it.topics.join()&&prev.cls===it.cls){n++;prow.querySelector('.rep').textContent='×'+n;prow.querySelector('.since').textContent=tf(T.log_since,{t:lfmt(it.t)});continue}
  n=1;const tr=lel('tr','lv lv-'+it.cls);
  const t1=lel('td','ltime');if(it.t>d.ack&&(it.cls==='err'||it.cls==='crit'))tr.classList.add('lnew');t1.append(lel('div',null,lfmt(it.t)),lel('div','since mut',''));
  const t2=lel('td');t2.append(lel('span','lbadge '+it.cls,it.label));
  const t3=lel('td','lmsg');it.topics.forEach(w=>t3.append(lel('span','chip c-'+w,w)));t3.append(lel('span',null,it.msg),lel('span','rep',''));
  tr.append(t1,t2,t3);rows.push(tr);prev=it;prow=tr}
-if(!rows.length){const tr=lel('tr');tr.append(lel('td','mut',d.items.length?'':'Brak logów dla wybranych filtrów. Jeśli to nowy router, wklej aktualną komendę konfiguracyjną (zakładka Konfiguracja).'));rows.push(tr)}
+if(!rows.length){const tr=lel('tr');tr.append(lel('td','mut',d.items.length?'':T.rp_logs_empty));rows.push(tr)}
 body.replaceChildren(...rows)}
 document.querySelectorAll('#lsev button').forEach(b=>b.onclick=()=>{LF.sev=b.dataset.s;document.querySelectorAll('#lsev button').forEach(x=>x.classList.toggle('on',x===b));loadLogs()});
 function setUnread(n){const b=document.getElementById('live-clog');if(b)b.innerHTML=n?'<span class="cnt cerr">'+Number(n)+'</span>':'';
-const a=document.getElementById('lack');if(a){a.disabled=!n;a.textContent=n?'✓ Zatwierdź ('+Number(n)+')':'✓ Brak nowych błędów'}}
+const a=document.getElementById('lack');if(a){a.disabled=!n;a.textContent=n?tf(T.rp_ack_n,{n:Number(n)}):T.rp_ack_none}}
 document.getElementById('lack').onclick=async()=>{try{await fetch('/routers/'+RID+'/logack',{method:'POST'})}catch(e){}loadLogs()};
 const pad=n=>String(n).padStart(2,'0'),dl=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes());
 function lpreset(p){const to=new Date();let fr;if(p==='today'){fr=new Date();fr.setHours(0,0,0,0)}else fr=new Date(to-p*3600000);
@@ -215,7 +212,7 @@ document.getElementById('lfrom').value=dl(fr);document.getElementById('lto').val
 document.getElementById('lexp').onclick=()=>{lpreset(24);document.getElementById('lerr').textContent='';document.getElementById('ldlg').showModal()};
 document.querySelectorAll('#ldlg button[data-p]').forEach(b=>b.onclick=()=>lpreset(b.dataset.p==='today'?'today':+b.dataset.p));
 document.getElementById('lgo').onclick=()=>{const f=document.getElementById('lfrom').value,t=document.getElementById('lto').value,er=document.getElementById('lerr');
-if(!f||!t){er.textContent='Uzupełnij obie daty.';return}const a=new Date(f),b=new Date(t);if(b<=a){er.textContent='Data „Do” musi być późniejsza niż „Od”.';return}
+if(!f||!t){er.textContent=T.rp_err_dates;return}const a=new Date(f),b=new Date(t);if(b<=a){er.textContent=T.rp_err_range;return}
 const p=new URLSearchParams({start:a.toISOString(),end:b.toISOString(),fmt:document.getElementById('lfmt').value});
 if(document.getElementById('lflt').checked){p.set('sev',LF.sev);p.set('topic',document.getElementById('ltopic').value);p.set('q',document.getElementById('lq').value)}
 window.location.href='/api/routers/'+RID+'/logs/export?'+p;document.getElementById('ldlg').close()};
@@ -225,20 +222,20 @@ const AN={h:24};
 function codeText(parent,txt){txt.split('`').forEach((p,i)=>{if(!p)return;parent.append(i%2?lel('code',null,p):document.createTextNode(p))})}
 async function loadAna(){let d;try{d=await(await fetch('/api/routers/'+RID+'/logs/analysis?hours='+AN.h,{cache:'no-store'})).json()}catch(e){return}
 const sm=document.getElementById('asum');sm.replaceChildren();
-[['bad','🔴 problemy'],['warn','🟡 uwagi'],['info','ℹ️ informacje']].forEach(([k,l])=>sm.append(lel('span','achip a-'+k,l+': '+(d.summary[k]||0))));
+[['bad',T.rp_a_bad],['warn',T.rp_a_warn],['info',T.rp_a_info]].forEach(([k,l])=>sm.append(lel('span','achip a-'+k,l+': '+(d.summary[k]||0))));
 const box=document.getElementById('alist'),out=[];
-if(!d.groups.length)out.push(lel('p','mut',d.total?'Brak rozpoznanych zdarzeń w tym okresie.':'Brak logów w tym okresie.'));
+if(!d.groups.length)out.push(lel('p','mut',d.total?T.rp_a_none_known:T.rp_a_none));
 for(const g of d.groups){const c=lel('div','acard a-'+g.level);
- const h=lel('div','ahead');h.append(lel('span','adot'),lel('b',null,g.title),lel('span','acnt','×'+g.count),lel('span','mut small','ostatnio '+lfmt(g.last)));c.append(h);
- const p1=lel('p','aex');p1.append(lel('b',null,'Co to znaczy: '),document.createTextNode(g.explain));c.append(p1);
- if(g.advice){const p2=lel('p','aadv');p2.append(lel('b',null,'Co zrobić: '));codeText(p2,g.advice);c.append(p2)}
+ const h=lel('div','ahead');h.append(lel('span','adot'),lel('b',null,g.title),lel('span','acnt','×'+g.count),lel('span','mut small',tf(T.rp_a_last,{t:lfmt(g.last)})));c.append(h);
+ const p1=lel('p','aex');p1.append(lel('b',null,T.rp_a_what),document.createTextNode(g.explain));c.append(p1);
+ if(g.advice){const p2=lel('p','aadv');p2.append(lel('b',null,T.rp_a_todo));codeText(p2,g.advice);c.append(p2)}
  const dets=Object.entries(g.det).filter(([k,v])=>v.length);
  if(dets.length){const dd=lel('div','adet small');dets.forEach(([k,v])=>{const s=lel('span');s.append(lel('span','mut',k+': '),document.createTextNode(v.map(([x,n])=>n>1?x+' ('+n+')':x).join(', ')));dd.append(s)});c.append(dd)}
- if(g.examples.length){const ex=lel('details','small');ex.append(lel('summary',null,'Przykładowe wpisy ('+g.examples.length+')'));g.examples.forEach(x=>ex.append(lel('div','lmsg mut',x)));c.append(ex)}
+ if(g.examples.length){const ex=lel('details','small');ex.append(lel('summary',null,tf(T.rp_a_examples,{n:g.examples.length})));g.examples.forEach(x=>ex.append(lel('div','lmsg mut',x)));c.append(ex)}
  out.push(c)}
 box.replaceChildren(...out);
 const uk=document.getElementById('aunk');uk.replaceChildren();
-if(d.unknown.length){const det=lel('details','acard');det.append(lel('summary',null,'Nierozpoznane komunikaty ('+d.unknown.length+')'));
+if(d.unknown.length){const det=lel('details','acard');det.append(lel('summary',null,tf(T.rp_a_unknown,{n:d.unknown.length})));
  d.unknown.forEach(u=>{const r=lel('div','arow small');r.append(lel('span','acnt','×'+u.count),lel('span','lmsg',u.msg));det.append(r)});uk.append(det)}}
 function lTab(k){if(!['list','ana'].includes(k))k='list';document.getElementById('lsub').dataset.tab=k;try{localStorage.setItem('ltab',k)}catch(e){}if(k==='ana')loadAna();else loadLogs()}
 document.querySelectorAll('#arange button').forEach(b=>b.onclick=()=>{AN.h=+b.dataset.h;document.querySelectorAll('#arange button').forEach(x=>x.classList.toggle('on',x===b));loadAna()});
@@ -262,52 +259,52 @@ options:{animation:false,spanGaps:true,interaction:{mode:'index',intersect:false
 const lab=t=>t.map(x=>new Date(x+'Z').toLocaleString([],{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}));
 async function load(){const h=document.getElementById('h').value;
 const d=await(await fetch('/api/routers/'+RID+'/series?hours='+h)).json(),L=lab(d.t);
-draw('c1','CPU i RAM (%)',L,[['CPU %',d.cpu],['RAM %',d.mem]]);
+draw('c1',T.rp_c_cpu,L,[['CPU %',d.cpu],['RAM %',d.mem]]);
 loadQuality();
 document.getElementById('card-temp').style.display=d.temp.some(v=>v!=null)?'':'none';
-draw('c5','Temperatura (°C)',L,[['Temp °C',d.temp]]);
-draw('c6','Połączenia (conntrack)',L,[['Połączenia',d.conns]]);
+draw('c5',T.rp_c_temp,L,[[T.rp_c_tempd,d.temp]]);
+draw('c6',T.rp_c_conns,L,[[T.rt_conns,d.conns]]);
 loadIf();loadWan();loadClients();loadIfov();}
 async function loadQuality(){const h=document.getElementById('h').value;let d;try{d=await(await fetch('/api/routers/'+RID+'/quality?hours='+h)).json()}catch(e){return}
 const L=lab(d.t);
-if(EDGE){draw('c4','Internet: opóźnienie i utrata',L,[['Opóźnienie ms',d.inet_rtt],['Jitter ms',d.inet_jit],['Brama ms',d.gw_rtt],['Utrata %',d.inet_loss,1]]);
+if(EDGE){draw('c4',T.rp_c_inet,L,[[T.rp_c_lat,d.inet_rtt],['Jitter ms',d.inet_jit],[T.rp_c_gw,d.gw_rtt],[T.rp_c_loss,d.inet_loss,1]]);
 }
-else{draw('c4','Połączenie z bramą',L,[['Opóźnienie ms',d.gw_rtt],['Jitter ms',d.gw_jit],['Utrata %',d.gw_loss,1]]);
+else{draw('c4',T.rp_c_gwconn,L,[[T.rp_c_lat,d.gw_rtt],['Jitter ms',d.gw_jit],[T.rp_c_loss,d.gw_loss,1]]);
 }
 const av=document.getElementById('qavail');
 if(av){const tl=(l,v)=>{const t=el('div','tile');t.append(el('span',null,l),el('b',v==null?'':v>=99.9?'ok':v>=99?'warn':'bad',v==null?'-':v.toFixed(2)+'%'));return t};
- const age=d.since?(Date.now()-new Date(d.since+'Z'))/3600000:0,lb=(l,h)=>age&&age<h?l+' (od '+lfmt(d.since).slice(0,12)+')':l;
- av.replaceChildren(tl(lb('Dostępność internetu 24 h',24),d.avail['24h']),tl(lb('7 dni',168),d.avail['7d']),tl(lb('30 dni',720),d.avail['30d']));
- av.title=d.since?'Liczone od pierwszego pomiaru: '+lfmt(d.since)+'. Okresy bez danych (router offline, sondy jeszcze nie gotowe) nie obniżają wyniku.':'';}
+ const age=d.since?(Date.now()-new Date(d.since+'Z'))/3600000:0,lb=(l,h)=>age&&age<h?l+' ('+tf(T.rp_since_p,{t:lfmt(d.since).slice(0,12)})+')':l;
+ av.replaceChildren(tl(lb(T.rp_avail24,24),d.avail['24h']),tl(lb(T.rp_days7,168),d.avail['7d']),tl(lb(T.rp_days30,720),d.avail['30d']));
+ av.title=d.since?tf(T.rp_avail_tip,{t:lfmt(d.since)}):'';}
 const qo=document.getElementById('qout');
 {const sm=document.getElementById('qoutsum'),od=document.getElementById('outd');
  if(sm&&od){const n=d.outages.length,tot=d.outages.reduce((a,o)=>a+(o.min||0),0);
   sm.className='small '+(n?'bad':'ok');
-  sm.textContent=n?'· '+n+' '+(n===1?'przerwa':(n%10>=2&&n%10<=4&&(n%100<12||n%100>14)?'przerwy':'przerw'))+', łącznie '+(tot>=60?(tot/60).toFixed(1)+' h':Math.round(tot)+' min'):'· brak przerw ✓';
+  sm.textContent=n?'· '+tf(T['rp_outn_'+pcat(n)]||T.rp_outn_other,{n:n})+', '+tf(T.rp_total,{v:(tot>=60?(tot/60).toFixed(1)+' h':Math.round(tot)+' min')}):T.rp_nooutn;
   od.classList.toggle('empty',!n);if(!n)od.open=false}}
-if(qo){if(!d.outages.length)qo.replaceChildren(el('p','mut small','Brak przerw w ostatnich 7 dniach.'));
- else{const tb=el('table','mob');const hr=el('tr');['Od','Do','Czas trwania','Rodzaj'].forEach(x=>hr.append(el('th',null,x)));tb.append(hr);
+if(qo){if(!d.outages.length)qo.replaceChildren(el('p','mut small',T.rp_no_outages));
+ else{const tb=el('table','mob');const hr=el('tr');[T.rp_from,T.rp_to,T.rp_duration,T.rp_kind].forEach(x=>hr.append(el('th',null,x)));tb.append(hr);
   d.outages.forEach(o=>{const tr=el('tr');const mk=(l,v,k)=>{const td=el('td',k,v);td.dataset.l=l;return td};
-   tr.append(mk('Od',lfmt(o.from)),mk('Do',o.to?lfmt(o.to):'trwa'),mk('Czas trwania',o.min<1?'< 1 min':(o.min>=60?(o.min/60).toFixed(1)+' h':Math.round(o.min)+' min')),mk('Rodzaj',o.type||'-',o.type==='brak internetu'?'bad':'warn'));tb.append(tr)});
+   tr.append(mk(T.rp_from,lfmt(o.from)),mk(T.rp_to,o.to?lfmt(o.to):T.rp_ongoing),mk(T.rp_duration,o.min<1?'< 1 min':(o.min>=60?(o.min/60).toFixed(1)+' h':Math.round(o.min)+' min')),mk(T.rp_kind,o.type||'-',o.code==='inet'?'bad':'warn'));tb.append(tr)});
   qo.replaceChildren(tb)}}
 if(document.getElementById('c11')){const sp=d.speed;
- draw('c11','Mb/s',sp.map(x=>lfmt(x.t).slice(0,11)),[['↓ Pobieranie',sp.map(x=>x.ok?x.down:null)],['↑ Wysyłanie',sp.map(x=>x.ok?x.up:null)]],'bar');
+ draw('c11','Mb/s',sp.map(x=>lfmt(x.t).slice(0,11)),[[T.rp_sp_down,sp.map(x=>x.ok?x.down:null)],[T.rp_sp_up,sp.map(x=>x.ok?x.up:null)]],'bar');
  const last=sp.length?sp[sp.length-1]:null,q=document.getElementById('qspd'),b=document.getElementById('spdgo');
- if(d.speed_running){q.textContent='⏳ Test w toku: '+(d.speed_phase||'')+'…';q.className='warn'}
- else if(last){q.className='';q.replaceChildren();q.append(el('span','mut','Ostatni test '+lfmt(last.t)+': '));
+ if(d.speed_running){q.textContent=tf(T.rp_sp_run,{p:d.speed_phase||''});q.className='warn'}
+ else if(last){q.className='';q.replaceChildren();q.append(el('span','mut',tf(T.rp_sp_last,{t:lfmt(last.t)})));
   if(last.ok){q.append(el('b',null,'↓ '+last.down+' Mb/s'));if(last.up!=null)q.append(' · ',el('b',null,'↑ '+last.up+' Mb/s'));
-   if(last.ping!=null)q.append(' · ping '+last.ping+' ms');if(last.jitter!=null)q.append(' · jitter '+last.jitter+' ms');
-   if(last.loss!=null)q.append(' · utrata '+last.loss+'%');
-   q.append(el('span','mut small',' ('+(last.src==='ookla'?'Speedtest by Ookla':last.src==='server'?'z serwera':'z routera')+(last.server?' · '+last.server:'')+')'));
-   if(last.url){const a=el('a',null,' wynik na speedtest.net');a.href=last.url;a.target='_blank';a.rel='noopener';a.className='small';q.append(a)}}
-  else{q.append(el('b','bad','nieudany'));if(last.err)q.append(el('span','mut small',' – '+last.err))}}
- else{q.className='mut';q.textContent='Brak wyników. Pierwszy test odbędzie się w nocy.'}
+   if(last.ping!=null)q.append(' · ping '+last.ping+' ms');if(last.jitter!=null)q.append(' · '+T.rp_jitter_l+' '+last.jitter+' ms');
+   if(last.loss!=null)q.append(' · '+T.rp_sp_loss+' '+last.loss+'%');
+   q.append(el('span','mut small',' ('+(last.src==='ookla'?'Speedtest by Ookla':last.src==='server'?T.rp_sp_server:T.rp_sp_router)+(last.server?' · '+last.server:'')+')'));
+   if(last.url){const a=el('a',null,' '+T.rp_sp_result);a.href=last.url;a.target='_blank';a.rel='noopener';a.className='small';q.append(a)}}
+  else{q.append(el('b','bad',T.rp_sp_failed));if(last.err)q.append(el('span','mut small',' – '+last.err))}}
+ else{q.className='mut';q.textContent=T.rp_sp_none}
  if(b){b.disabled=!!d.speed_running;b.onclick=async()=>{b.disabled=true;try{await fetch('/routers/'+RID+'/speedtest',{method:'POST'})}catch(e){}
-  q.textContent='⏳ Test w toku…';q.className='warn';let n=0;const tm=setInterval(async()=>{n++;await loadQuality();if(n>30)clearInterval(tm)},3000)}}}}
+  q.textContent=T.rp_sp_run2;q.className='warn';let n=0;const tm=setInterval(async()=>{n++;await loadQuality();if(n>30)clearInterval(tm)},3000)}}}}
 async function loadClients(){const h=document.getElementById('h').value;
 const d=await(await fetch('/api/routers/'+RID+'/clients?hours='+h)).json(),L=lab(d.t);
-draw('c7','Urządzenia (DHCP)',L,[['Online',d.dev_on],['Wszystkie',d.dev_total]]);
-draw('c8','Klienci Wi-Fi i VPN online',L,[['Wi-Fi',d.wifi],['VPN online',d.vpn_on]]);}
+draw('c7',T.rp_c_dhcp,L,[['Online',d.dev_on],[T.rp_c_all,d.dev_total]]);
+draw('c8',T.rp_c_wv,L,[['Wi-Fi',d.wifi],['VPN online',d.vpn_on]]);}
 function el(tag,cls,txt){const e=document.createElement(tag);if(cls)e.className=cls;if(txt!=null)e.textContent=txt;return e}
 function spark(rx,tx){const W=120,H=26,all=rx.concat(tx).filter(v=>v!=null),mx=Math.max(0.001,...all);
 const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');svg.setAttribute('width',W);svg.setAttribute('height',H);svg.setAttribute('class','spark');
@@ -318,36 +315,36 @@ const f2=v=>v==null?'-':(v>=100?v.toFixed(0):v>=10?v.toFixed(1):v.toFixed(2));
 async function loadIfov(){let d;try{d=await(await fetch('/api/routers/'+RID+'/ifaces/overview')).json()}catch(e){return}
 let open={};try{open=JSON.parse(localStorage.getItem('ifgroups')||'{}')}catch(e){}
 const box=document.getElementById('ifov'),out=[];
-if(!d.groups.length){box.replaceChildren(el('p','mut','Brak danych o interfejsach.'));return}
+if(!d.groups.length){box.replaceChildren(el('p','mut',T.rp_if_none));return}
 for(const g of d.groups){const det=el('details','ifg');det.open=open[g.group]!==false;det.dataset.g=g.group;
 const sm=el('summary');sm.append(el('b',null,g.group),el('span','cnt',String(g.items.length)),el('span','mut small',' ↓ '+f2(g.rx)+' · ↑ '+f2(g.tx)+' Mb/s'));det.append(sm);
-const tb=el('table','iftab');const hr=el('tr');['Interfejs','↓ Mb/s','↑ Mb/s','Ostatnia godzina'].forEach((x,i)=>hr.append(el('th',i==3?'hm':null,x)));tb.append(hr);
+const tb=el('table','iftab');const hr=el('tr');[T.rp_interface,'↓ Mb/s','↑ Mb/s',T.rp_lasthour].forEach((x,i)=>hr.append(el('th',i==3?'hm':null,x)));tb.append(hr);
 for(const it of g.items){const tr=el('tr','ifrow');const n=el('td');n.append(el('b',null,it.name));if(it.wan)n.append(el('span','badge ok',' WAN'));if(it.type)n.append(el('div','mut small',it.type));
 const sp=el('td','hm');sp.append(spark(it.spark.rx,it.spark.tx));tr.append(n,el('td',null,f2(it.rx)),el('td',null,f2(it.tx)),sp);
 tr.onclick=()=>{const s=document.getElementById('if');if(![...s.options].some(o=>o.value===it.name))s.append(new Option(it.name,it.name));s.value=it.name;loadIf();document.getElementById('card-if').scrollIntoView({behavior:'smooth',block:'center'})};tb.append(tr)}
 det.append(tb);det.addEventListener('toggle',()=>{open[g.group]=det.open;try{localStorage.setItem('ifgroups',JSON.stringify(open))}catch(e){}});out.push(det)}
 box.replaceChildren(...out)}
 async function loadTraffic(){let d;try{d=await(await fetch('/api/routers/'+RID+'/traffic?days=30')).json()}catch(e){return}
-document.getElementById('tiface').textContent=d.iface?('interfejs '+d.iface):'';
+document.getElementById('tiface').textContent=d.iface?(T.rp_iface_l2+' '+d.iface):'';
 const today=new Date(),iso=x=>x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0'),ym=iso(today),pm=iso(new Date(today.getFullYear(),today.getMonth()-1,1)),
 td=today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0');
 const dd=d.daily.find(x=>x.day===td)||{rx:0,tx:0},cm=d.months.find(x=>x.month===ym)||{rx:0,tx:0},lm=d.months.find(x=>x.month===pm)||{rx:0,tx:0};
 const tile=(l,v)=>{const t=el('div','tile');t.append(el('span',null,l),el('b',null,v.rx.toFixed(1)),el('small',null,' GB ↓ · '+v.tx.toFixed(1)+' GB ↑'));return t};
-document.getElementById('tsum').replaceChildren(tile('Dziś',dd),tile('Ten miesiąc',cm),tile('Poprzedni miesiąc',lm));
-draw('c9','Transfer dzienny (GB)',d.daily.map(x=>x.day.slice(5).split('-').reverse().join('.')),[['↓ Pobrane',d.daily.map(x=>x.rx)],['↑ Wysłane',d.daily.map(x=>x.tx)]],'bar');
-const tb=el('table');const hr=el('tr');['Miesiąc','↓ Pobrane','↑ Wysłane','Razem'].forEach(x=>hr.append(el('th',null,x)));tb.append(hr);
+document.getElementById('tsum').replaceChildren(tile(T.rp_today,dd),tile(T.rp_this_month,cm),tile(T.rp_prev_month,lm));
+draw('c9',T.rp_c_daily,d.daily.map(x=>x.day.slice(5).split('-').reverse().join('.')),[[T.rp_rx,d.daily.map(x=>x.rx)],[T.rp_tx,d.daily.map(x=>x.tx)]],'bar');
+const tb=el('table');const hr=el('tr');[T.rp_month,T.rp_rx,T.rp_tx,T.rp_sum].forEach(x=>hr.append(el('th',null,x)));tb.append(hr);
 d.months.slice().reverse().forEach(m=>{const tr=el('tr');tr.append(el('td',null,m.month),el('td',null,m.rx.toFixed(1)+' GB'),el('td',null,m.tx.toFixed(1)+' GB'),el('td',null,(m.rx+m.tx).toFixed(1)+' GB'));tb.append(tr)});
-document.getElementById('tmonths').replaceChildren(d.months.length?tb:el('p','mut small','Brak danych o transferze. Pierwsze wartości pojawią się w ciągu 10 minut.'))}
+document.getElementById('tmonths').replaceChildren(d.months.length?tb:el('p','mut small',T.rp_tr_none))}
 function cTab(k){if(!['sys','net','qual','cli'].includes(k))k='sys';document.getElementById('ctabs').dataset.tab=k;
 try{localStorage.setItem('ctab',k)}catch(e){}if(window.chartsResize)setTimeout(chartsResize,0)}
 (function(){let k='sys';try{k=localStorage.getItem('ctab')||'sys'}catch(e){}cTab(k)})();
 loadTraffic();setInterval(()=>{if(!document.hidden)loadTraffic()},300000);
 async function loadWan(){const h=document.getElementById('h').value;
 const d=await(await fetch('/api/routers/'+RID+'/ifaces?hours='+h+'&name='+encodeURIComponent(WAN))).json();
-draw('c2','Ruch WAN: '+d.name+' (Mbit/s)',lab(d.t),[['↓ RX',d.rx],['↑ TX',d.tx]]);}
+draw('c2',tf(T.rp_c_wan,{n:d.name}),lab(d.t),[['↓ RX',d.rx],['↑ TX',d.tx]]);}
 async function loadIf(){const h=document.getElementById('h').value,sel=document.getElementById('if');
 const d=await(await fetch('/api/routers/'+RID+'/ifaces?hours='+h+'&name='+encodeURIComponent(sel.value))).json();
 if(sel.options.length!==d.names.length){sel.replaceChildren(...d.names.map(n=>new Option(n,n)))}
-sel.value=d.name;draw('c3','Ruch interfejsu '+d.name+' (Mbit/s)',lab(d.t),[['↓ RX',d.rx],['↑ TX',d.tx]]);}
+sel.value=d.name;draw('c3',tf(T.rp_c_if,{n:d.name}),lab(d.t),[['↓ RX',d.rx],['↑ TX',d.tx]]);}
 document.getElementById('h').onchange=load;window.chartsResize=()=>Object.values(ch).forEach(c=>c.resize());document.getElementById('if').onchange=loadIf;load();setInterval(()=>{if(!document.hidden)load()},REFRESH);
 </script>{% endraw %}{% endblock %}

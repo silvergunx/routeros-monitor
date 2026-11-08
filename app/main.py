@@ -30,6 +30,13 @@ app = FastAPI()
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=86400 * 7)
 templates = Jinja2Templates(directory="templates")
 templates.env.globals["t"] = i18n.t
+tr = i18n._
+
+
+def L(v):
+    """Stała z poziomu modułu: klucz tłumaczenia (an.NNN) -> tekst w języku żądania; inne wartości bez zmian."""
+    return tr(v) if isinstance(v, str) and v.startswith("an.") else v
+
 templates.env.globals["th"] = i18n.th
 templates.env.globals["tn"] = i18n.tn
 templates.env.globals["languages"] = i18n.languages
@@ -38,6 +45,7 @@ templates.env.globals["languages"] = i18n.languages
 @app.middleware("http")
 async def set_lang(request: Request, call_next):
     request.state.lang = i18n.pick_lang(request)
+    i18n.CURRENT.set(request.state.lang)
     return await call_next(request)
 
 
@@ -388,7 +396,7 @@ def user(request: Request, s: Session = Depends(db)):
 
 def admin(u: User = Depends(user)):
     if not u.is_admin:
-        raise HTTPException(403, "Brak uprawnień: ta akcja wymaga roli administratora.")
+        raise HTTPException(403, tr("err.admin_required"))
     return u
 
 
@@ -775,7 +783,7 @@ def router_page(rid: int, request: Request, s: Session = Depends(db)):
                                                               "inv": inventory_view(s, r), "upd": update_available(r),
                                                               "si": sys_info(s, r),
                                                               "hours": router_hours(request.state.user, r.id),
-                                                              "nw": json.loads(r.nw_state) if r.nw_state else [],
+                                                              "nw": nw_view(r),
                                                               "speed_srv": sget(s, "speed_router") == str(r.id),
                                                               "log_err": unread_errors(s, request.state.user, r.id),
                                                               "log_last": s.scalar(select(func.max(LogEntry.ts)).where(
@@ -1026,7 +1034,7 @@ def nw_metrics(r, d):
         out["ping_ms"], out["loss"] = out.get("inet_rtt"), out.get("inet_loss")
     elif gw:
         out["ping_ms"], out["loss"] = out.get("gw_rtt"), out.get("gw_loss")
-    names = {"app-nw:gw": "Brama", "app-nw:dns": "Test DNS (rozwiązywanie nazw)", "app-nw:http": "Test HTTP (otwieranie strony)"}
+    names = {"app-nw:gw": "@gw", "app-nw:dns": "@dns", "app-nw:http": "@http"}
     for p in probes:
         c = str(p.get("comment", ""))
         state.append({"name": names.get(c, "DNS " + c.split(":")[-1] if c.startswith("app-nw:inet") else c[7:]),
@@ -1177,7 +1185,7 @@ PHY_PER_STREAM = {  # Mb/s na strumień przy danej szerokości kanału (najwyżs
     "ac": {20: 86.7, 40: 200.0, 80: 433.3, 160: 866.7},
     "n": {20: 72.2, 40: 150.0},
 }
-QLABEL = {3: "bardzo dobra", 2: "dobra", 1: "średnia", 0: "słaba"}
+QLABEL = {3: "q.3", 2: "q.2", 1: "q.1", 0: "q.0"}
 
 
 def _mbps(v):
@@ -1226,7 +1234,7 @@ def wifi_quality(d):
             q = min(q, 1)
         if snr is not None and snr < 10:
             q = 0
-    return {"q": q, "qlabel": QLABEL.get(q, "-"), "qc": "" if q is None else "ok" if q >= 2 else "warn" if q == 1 else "bad",
+    return {"q": q, "qlabel": tr(QLABEL[q]) if q in QLABEL else "-", "qc": "" if q is None else "ok" if q >= 2 else "warn" if q == 1 else "bad",
             "signal": sig, "sc": sig_class(sig), "rate": round(rate) if rate else None, "pct": pct, "snr": snr, "ccq": ccq,
             "width": width, "streams": streams, "std": {"ax": "Wi-Fi 6", "ac": "Wi-Fi 5", "n": "Wi-Fi 4"}.get(std, ""),
             "band": "2,4 GHz" if is24 else ("5 GHz" if (rate or width) else ""),
@@ -1257,6 +1265,15 @@ def fmt_rate(v):
         f = float(m.group(1)) * {"k": 0.001, "M": 1, "G": 1000}[m.group(2)]
         return "%.0f Mb/s" % f
     return v.split("-")[0][:20]
+
+
+NW_NAMES = {"@gw": "nw.gw", "@dns": "nw.dns", "@http": "nw.http",
+            "Brama": "nw.gw", "Test DNS (rozwiązywanie nazw)": "nw.dns", "Test HTTP (otwieranie strony)": "nw.http"}  # starsze wpisy w bazie
+
+
+def nw_view(r):
+    out = json.loads(r.nw_state) if r.nw_state else []
+    return [{**p, "name": tr(NW_NAMES[p["name"]]) if p.get("name") in NW_NAMES else p.get("name")} for p in out]
 
 
 def sys_info(s, r):
@@ -1608,7 +1625,7 @@ def sev_cls(v):
     return "crit" if v <= 2 else "err" if v == 3 else "warn" if v == 4 else "dbg" if v == 7 else "info"
 
 
-SEV_LABEL = {"crit": "krytyczny", "err": "błąd", "warn": "ostrzeżenie", "info": "info", "dbg": "debug"}
+SEV_LABEL = {"crit": "sev.crit", "err": "sev.err", "warn": "sev.warn", "info": "sev.info", "dbg": "sev.dbg"}
 
 
 @app.get("/api/routers/{rid}/logs", dependencies=[Depends(user)])
@@ -1637,7 +1654,7 @@ def logs_api(request: Request, rid: int, sev: str = "", topic: str = "", q: str 
                                                          LogEntry.ts > now() - dt.timedelta(days=7))
                            .distinct().limit(1000)).all():
         words.update(w for w in (tp or "").split(",") if w and w not in SEV_WORDS)
-    return {"items": [{"t": x.ts.isoformat(timespec="seconds"), "cls": sev_cls(x.sev), "label": SEV_LABEL[sev_cls(x.sev)],
+    return {"items": [{"t": x.ts.isoformat(timespec="seconds"), "cls": sev_cls(x.sev), "label": tr(SEV_LABEL[sev_cls(x.sev)]),
                        "topics": [w for w in x.topics.split(",") if w and w not in SEV_WORDS], "msg": x.msg}
                       for x in rows],
             "counts": counts, "topics": sorted(words),
@@ -1702,7 +1719,7 @@ def logs_export(rid: int, start: str, end: str, fmt: str = "csv", sev: str = "",
     r = s.get(Router, rid)
     a, b = parse_utc(start), parse_utc(end)
     if not r or not a or not b or b <= a:
-        raise HTTPException(400, "Niepoprawny zakres dat.")
+        raise HTTPException(400, tr("err.bad_range"))
     cond = [LogEntry.router_id == rid, LogEntry.ts >= a, LogEntry.ts <= b]
     if sev in LOG_CATS:
         cond.append(LogEntry.sev.in_(LOG_CATS[sev]))
@@ -1723,6 +1740,8 @@ def logs_export(rid: int, start: str, end: str, fmt: str = "csv", sev: str = "",
     fname = "logi-%s-%s-%s.%s" % (name, loc(a)[:16].replace(" ", "_").replace(":", ""), loc(b)[:16].replace(" ", "_").replace(":", ""),
                                   "csv" if fmt == "csv" else "txt")
 
+    lang_ = i18n.CURRENT.get()
+
     def gen():
         with Session(engine) as s2:
             if fmt == "csv":
@@ -1730,7 +1749,7 @@ def logs_export(rid: int, start: str, end: str, fmt: str = "csv", sev: str = "",
             rows = s2.execute(select(LogEntry.ts, LogEntry.sev, LogEntry.topics, LogEntry.msg).where(*cond)
                               .order_by(LogEntry.ts).limit(500000).execution_options(yield_per=2000))
             for ts, sv, tp, msg in rows:
-                lab = SEV_LABEL[sev_cls(sv)]
+                lab = i18n.translate(lang_, SEV_LABEL[sev_cls(sv)])
                 if fmt == "csv":
                     buf = io.StringIO()
                     csv.writer(buf, delimiter=";").writerow([loc(ts), lab, tp, msg])
@@ -1835,7 +1854,7 @@ def live_state(mac: str = "", s: Session = Depends(db)):
         hist = [{"t": h[0].isoformat(timespec="seconds"), "s": h[1], "r": h[2], "q": h[3], "i": h[4]}
                 for h in LIVE_HIST[mac] if (n - h[0]).total_seconds() < 1800]
     spots = [{"id": x.id, "t": x.ts.isoformat(timespec="seconds"), "label": x.label, "device": x.device, "iface": x.iface,
-              "signal": x.signal, "rate": x.rate, "q": x.quality, "qlabel": QLABEL.get(x.quality, "-")}
+              "signal": x.signal, "rate": x.rate, "q": x.quality, "qlabel": tr(QLABEL[x.quality]) if x.quality in QLABEL else "-"}
              for x in s.scalars(select(LiveSpot).order_by(LiveSpot.id.desc()).limit(30)).all()]
     return {"routers": rts, "clients": out, "hist": hist, "spots": spots}
 
@@ -1845,7 +1864,7 @@ def live_spot(mac: str = Form(), label: str = Form(), s: Session = Depends(db)):
     mac = mac.upper()
     h = [x for x in LIVE_HIST.get(mac, []) if (now() - x[0]).total_seconds() <= 30]
     if not h:
-        raise HTTPException(400, "Brak pomiarów z ostatnich 30 s dla tego urządzenia.")
+        raise HTTPException(400, tr("err.no_samples"))
     avg = lambda vals: (sum(vals) / len(vals)) if vals else None
     sigs, rts, qs = [x[1] for x in h if x[1] is not None], [x[2] for x in h if x[2]], [x[3] for x in h if x[3] is not None]
     lease = s.scalar(select(Inv).where(Inv.kind == "dhcp", func.upper(Inv.key) == mac))
@@ -2017,7 +2036,7 @@ async def server_speedtest(rid):
     try:
         if eng != "cloudflare" and OOKLA_BIN:
             src = "ookla"
-            SPD_STATE["phase"] = "Speedtest by Ookla (ok. 30 s)"
+            SPD_STATE["phase"] = "spd.ookla"
             try:
                 res.update(await ookla_test(sid))
             except Exception as e:
@@ -2026,11 +2045,11 @@ async def server_speedtest(rid):
         if eng == "cloudflare" or not OOKLA_BIN or not res["down"]:
             if src == "ookla":
                 src = "server"
-            SPD_STATE["phase"] = "ping"
+            SPD_STATE["phase"] = "spd.ping"
             res["ping"] = await _ping()
-            SPD_STATE["phase"] = "pobieranie"
+            SPD_STATE["phase"] = "spd.down"
             res["down"] = await _measure(_dl, 10)
-            SPD_STATE["phase"] = "wysyłanie"
+            SPD_STATE["phase"] = "spd.up"
             res["up"] = await _measure(_ul, 8)
             res["server"] = "Cloudflare"
         res["ok"] = bool(res["down"])
@@ -2076,7 +2095,7 @@ async def speedtest_now(rid: int):
         with Session(engine) as s:
             return sget(s, "speed_router") == str(rid)
     if not await run_in_threadpool(check):
-        raise HTTPException(400, "Test z serwera jest dostępny tylko dla routera wskazanego w Ustawieniach.")
+        raise HTTPException(400, tr("err.speed_router"))
     if not SPD_STATE["running"]:
         asyncio.create_task(server_speedtest(rid))
     return {"ok": True}
@@ -2091,8 +2110,7 @@ def settings_speed(request: Request, rid: str = Form(""), engine_: str = Form("o
     r = s.get(Router, int(rid)) if rid.isdigit() else None
     log(s, "test prędkości", "z serwera za routerem: %s" % (r.name if r else "wyłączony"))
     s.commit()
-    return settings_view(request, s, "Zapisano. %s" % (
-        "Wklej ponownie komendę konfiguracyjną na tym routerze (zostanie wyłączony słabszy test na routerze)." if r else ""), True)
+    return settings_view(request, s, tr("msg.saved") + (" " + tr("msg.speed_paste") if r else ""), True)
 
 
 @app.get("/api/routers/{rid}/quality", dependencies=[Depends(user)])
@@ -2122,8 +2140,7 @@ def quality_api(rid: int, hours: int = 24, s: Session = Depends(db)):
     for ts, iu, du, hu in s.execute(select(Metric.ts, Metric.inet_up, Metric.dns_up, Metric.http_up).where(
             Metric.router_id == rid, Metric.inet_up.is_not(None), Metric.ts > now() - dt.timedelta(days=7))
             .order_by(Metric.ts)).all():
-        k = "brak internetu" if iu is False else "działa ping, nie działa DNS" if du is False else \
-            "działa ping i DNS, nie działa HTTP" if hu is False else None
+        k = "inet" if iu is False else "dns" if du is False else "http" if hu is False else None
         if k != kind:
             if kind is not None:
                 outages.append((start, ts, kind))
@@ -2131,14 +2148,14 @@ def quality_api(rid: int, hours: int = 24, s: Session = Depends(db)):
     if kind is not None:
         outages.append((start, None, kind))
     outages = [{"from": a.isoformat(timespec="seconds"), "to": z.isoformat(timespec="seconds") if z else None,
-                "min": round(((z or now()) - a).total_seconds() / 60, 1), "type": k} for a, z, k in outages][-20:][::-1]
+                "min": round(((z or now()) - a).total_seconds() / 60, 1), "code": k, "type": tr("out." + k)} for a, z, k in outages][-20:][::-1]
     sp = s.scalars(select(SpeedTest).where(SpeedTest.router_id == rid).order_by(SpeedTest.ts.desc()).limit(60)).all()[::-1]
     return {**out, "avail": avail, "outages": outages,
             "since": first.isoformat(timespec="seconds") if first else None,
             "speed": [{"t": x.ts.isoformat(timespec="seconds"), "ok": x.ok, "down": x.down_mbps, "up": x.up_mbps,
                        "ping": x.ping_ms, "jitter": x.jitter_ms, "loss": x.loss, "server": x.server, "url": x.url,
                        "err": x.error, "src": x.source or "router"} for x in sp],
-            "speed_running": SPD_STATE["running"] and SPD_STATE["rid"] == rid, "speed_phase": SPD_STATE["phase"]}
+            "speed_running": SPD_STATE["running"] and SPD_STATE["rid"] == rid, "speed_phase": tr(SPD_STATE["phase"]) if SPD_STATE["phase"] else ""}
 
 
 @app.post("/routers/{rid}/logip", dependencies=[Depends(admin)])
@@ -2248,20 +2265,20 @@ def clients_api(rid: int, hours: int = 24, s: Session = Depends(db)):
 
 # ---------- analiza logów (tłumacz komunikatów RouterOS) ----------
 MGMT_PORTS = {"21": "FTP", "22": "SSH", "23": "Telnet", "80": "WWW", "443": "WWW (HTTPS)", "8291": "Winbox",
-              "8728": "API", "8729": "API-SSL", "3389": "RDP (Pulpit zdalny)", "53": "DNS", "161": "SNMP"}
-SVC_NAMES = {"ssh": "SSH", "telnet": "Telnet", "winbox": "Winbox", "web": "panelu WWW (WebFig)", "www": "panelu WWW (WebFig)",
-             "api": "API", "ftp": "FTP", "rest-api": "REST API", "local": "konsoli lokalnej", "dude": "The Dude"}
-SVC_PLAIN = {"web": "WWW / WebFig", "www": "WWW / WebFig", "local": "konsola", "rest-api": "REST API"}
+              "8728": "API", "8729": "API-SSL", "3389": "an.001", "53": "DNS", "161": "SNMP"}
+SVC_NAMES = {"ssh": "SSH", "telnet": "Telnet", "winbox": "Winbox", "web": "an.002", "www": "an.002",
+             "api": "API", "ftp": "FTP", "rest-api": "REST API", "local": "an.003", "dude": "The Dude"}
+SVC_PLAIN = {"web": "WWW / WebFig", "www": "WWW / WebFig", "local": "an.004", "rest-api": "REST API"}
 WIFI_REASONS = [
-    ("extensive data loss", "dużo utraconych pakietów: słaby sygnał lub zakłócenia"),
-    ("group key exchange timeout", "klient nie odpowiedział przy wymianie kluczy (często uśpiony telefon lub stary sterownik)"),
-    ("4-way handshake timeout", "nieudane uwierzytelnienie: zwykle błędne hasło Wi-Fi albo problem ze sterownikiem klienta"),
-    ("handshake timeout", "nieudane uwierzytelnienie: zwykle błędne hasło Wi-Fi albo problem ze sterownikiem klienta"),
-    ("inactivity", "klient był nieaktywny (np. uśpiony) i został rozłączony"),
-    ("received deauth", "klient sam się rozłączył (np. wyłączył Wi-Fi albo przeszedł do innej sieci)"),
-    ("received disassoc", "klient sam się rozłączył (np. wyłączył Wi-Fi albo przeszedł do innej sieci)"),
-    ("roamed", "klient przeszedł do innego punktu dostępowego (roaming)"),
-    ("ok", "normalne rozłączenie"),
+    ("extensive data loss", "an.005"),
+    ("group key exchange timeout", "an.006"),
+    ("4-way handshake timeout", "an.007"),
+    ("handshake timeout", "an.007"),
+    ("inactivity", "an.008"),
+    ("received deauth", "an.009"),
+    ("received disassoc", "an.009"),
+    ("roamed", "an.010"),
+    ("ok", "an.011"),
 ]
 
 
@@ -2280,223 +2297,204 @@ def _r(rx):
 # Każda reguła: (id, wyrażenie, funkcja(match, topics) -> dict albo None)
 # dict: title, level ('bad'|'warn'|'info'), explain, advice, det {etykieta: wartość}
 def _login_fail(m, tp):
-    ip, svc = m.group("ip"), SVC_NAMES.get(m.group("svc").lower(), m.group("svc"))
+    ip, svc = m.group("ip"), L(SVC_NAMES.get(m.group("svc").lower(), m.group("svc")))
     if is_public(ip):
-        return {"id": "login_fail_wan", "level": "bad", "title": "Ktoś z internetu próbuje zalogować się do %s" % svc,
-                "explain": "Nieudane próby logowania z adresów spoza Twojej sieci. Zwykle to automatyczne boty, które "
-                           "zgadują hasła (atak brute force) na popularnych usługach.",
-                "advice": "Ogranicz usługę do sieci lokalnej, np. `/ip service set %s address=192.168.88.0/24`, wyłącz nieużywane "
-                          "usługi (`/ip service print`), używaj silnego hasła i innej nazwy użytkownika niż admin. Sprawdź, "
-                          "czy firewall blokuje ruch przychodzący z WAN do routera." % m.group("svc").lower(),
-                "det": {"Adres": ip, "Użytkownik": m.group("user"), "Usługa": svc}}
-    return {"id": "login_fail_lan", "level": "warn", "title": "Nieudane logowanie do %s z sieci lokalnej" % svc,
-            "explain": "Ktoś w Twojej sieci wpisał błędne hasło lub login. Pojedyncze przypadki to zwykle pomyłka; "
-                       "wiele prób z jednego adresu może oznaczać zainfekowane urządzenie lub próbę włamania od środka.",
-            "advice": "Sprawdź, jakie urządzenie ma ten adres (zakładka Urządzenia). Jeśli to nie Ty, zmień hasło routera.",
-            "det": {"Adres": ip, "Użytkownik": m.group("user"), "Usługa": svc}}
+        return {"id": "login_fail_wan", "level": "bad", "title": tr("an.012") % svc,
+                "explain": tr("an.013"),
+                "advice": tr("an.014") % m.group("svc").lower(),
+                "det": {tr("an.015"): ip, tr("an.016"): m.group("user"), tr("an.017"): svc}}
+    return {"id": "login_fail_lan", "level": "warn", "title": tr("an.018") % svc,
+            "explain": tr("an.019"),
+            "advice": tr("an.020"),
+            "det": {tr("an.015"): ip, tr("an.016"): m.group("user"), tr("an.017"): svc}}
 
 
 def _login_ok(m, tp):
     ip, k = m.group("ip"), m.group("svc").lower()
-    svc = SVC_PLAIN.get(k) or SVC_NAMES.get(k, m.group("svc"))
+    svc = L(SVC_PLAIN.get(k) or SVC_NAMES.get(k, m.group("svc")))
     if is_public(ip):
-        return {"id": "login_ok_wan", "level": "warn", "title": "Logowanie do routera z internetu (%s)" % svc,
-                "explain": "Ktoś zalogował się do routera z adresu publicznego, czyli spoza Twojej sieci.",
-                "advice": "Upewnij się, że to Ty (np. zdalnie z pracy). Jeśli nie, natychmiast zmień hasło i ogranicz dostęp "
-                          "do usług zarządzania do sieci lokalnej lub VPN.",
-                "det": {"Adres": ip, "Użytkownik": m.group("user"), "Usługa": svc}}
-    return {"id": "login_ok", "level": "info", "title": "Logowanie do routera (%s)" % svc,
-            "explain": "Udane logowanie z sieci lokalnej. To normalne przy zarządzaniu routerem, również przez Winbox.",
-            "advice": "", "det": {"Użytkownik": m.group("user"), "Adres": ip}}
+        return {"id": "login_ok_wan", "level": "warn", "title": tr("an.021") % svc,
+                "explain": tr("an.022"),
+                "advice": tr("an.023"),
+                "det": {tr("an.015"): ip, tr("an.016"): m.group("user"), tr("an.017"): svc}}
+    return {"id": "login_ok", "level": "info", "title": tr("an.024") % svc,
+            "explain": tr("an.025"),
+            "advice": "", "det": {tr("an.016"): m.group("user"), tr("an.015"): ip}}
 
 
 def _logout(m, tp):
-    return {"id": "logout", "level": "info", "title": "Wylogowanie z routera",
-            "explain": "Sesja zarządzania została zakończona.", "advice": "", "det": {"Użytkownik": m.group("user")}}
+    return {"id": "logout", "level": "info", "title": tr("an.026"),
+            "explain": tr("an.027"), "advice": "", "det": {tr("an.016"): m.group("user")}}
 
 
 def _cfg_change(m, tp):
-    return {"id": "cfg_change", "level": "info", "title": "Zmiana konfiguracji routera",
-            "explain": "Ktoś zmienił ustawienia routera (dodał, zmienił lub usunął element konfiguracji). "
-                       "To wpis kontrolny: pozwala sprawdzić, kto i kiedy coś zmieniał.",
-            "advice": "Jeśli nie rozpoznajesz zmiany, sprawdź ją w `/log print where topics~\"system\"` i rozważ zmianę hasła.",
-            "det": {"Kto": m.group("user"), "Co": m.group("what")[:60]}}
+    return {"id": "cfg_change", "level": "info", "title": tr("an.028"),
+            "explain": tr("an.029"),
+            "advice": tr("an.030"),
+            "det": {tr("an.031"): m.group("user"), tr("an.032"): m.group("what")[:60]}}
 
 
 def _dhcp_assigned(m, tp):
-    return {"id": "dhcp_assigned", "level": "info", "title": "DHCP przydzielił adres urządzeniu",
-            "explain": "Urządzenie podłączyło się do sieci i dostało adres IP. Normalne zdarzenie.",
-            "advice": "", "det": {"Urządzenie": (m.group("host") or "").strip() or m.group("mac"), "Adres": m.group("ip")}}
+    return {"id": "dhcp_assigned", "level": "info", "title": tr("an.033"),
+            "explain": tr("an.034"),
+            "advice": "", "det": {tr("an.035"): (m.group("host") or "").strip() or m.group("mac"), tr("an.015"): m.group("ip")}}
 
 
 def _dhcp_deassigned(m, tp):
-    return {"id": "dhcp_deassigned", "level": "info", "title": "Urządzenie zwolniło adres DHCP",
-            "explain": "Dzierżawa adresu wygasła albo urządzenie odłączyło się od sieci. Normalne zdarzenie.",
-            "advice": "", "det": {"Adres": m.group("ip"), "MAC": m.group("mac")}}
+    return {"id": "dhcp_deassigned", "level": "info", "title": tr("an.036"),
+            "explain": tr("an.037"),
+            "advice": "", "det": {tr("an.015"): m.group("ip"), tr("an.038"): m.group("mac")}}
 
 
 def _dhcp_nosuccess(m, tp):
-    return {"id": "dhcp_fail", "level": "warn", "title": "Urządzenie nie przyjmuje adresu z DHCP",
-            "explain": "Serwer DHCP proponuje adres, ale urządzenie go nie potwierdza. Przyczyną bywa słaby sygnał Wi-Fi, "
-                       "błędna konfiguracja klienta, drugi serwer DHCP w sieci albo wyczerpana pula adresów.",
-            "advice": "Sprawdź pulę adresów (`/ip pool print`), czy w sieci nie ma drugiego routera z włączonym DHCP "
-                      "i jaki sygnał ma to urządzenie.", "det": {"MAC": m.group("mac")}}
+    return {"id": "dhcp_fail", "level": "warn", "title": tr("an.039"),
+            "explain": tr("an.040"),
+            "advice": tr("an.041"), "det": {tr("an.038"): m.group("mac")}}
 
 
 def _dhcp_pool(m, tp):
-    return {"id": "dhcp_pool", "level": "bad", "title": "Zabrakło wolnych adresów w puli DHCP",
-            "explain": "Nowe urządzenia nie dostaną adresu IP, bo wszystkie adresy z puli są zajęte.",
-            "advice": "Powiększ pulę (`/ip pool print`, potem `/ip pool set`) albo skróć czas dzierżawy (lease-time).",
+    return {"id": "dhcp_pool", "level": "bad", "title": tr("an.042"),
+            "explain": tr("an.043"),
+            "advice": tr("an.044"),
             "det": {}}
 
 
 def _conflict(m, tp):
-    return {"id": "ip_conflict", "level": "warn", "title": "Konflikt adresów IP w sieci",
-            "explain": "Dwa urządzenia używają tego samego adresu IP. Może to powodować zrywanie połączeń.",
-            "advice": "Znajdź urządzenie z ręcznie ustawionym adresem z zakresu DHCP i zmień mu adres lub dodaj statyczną dzierżawę.",
+    return {"id": "ip_conflict", "level": "warn", "title": tr("an.045"),
+            "explain": tr("an.046"),
+            "advice": tr("an.047"),
             "det": {}}
 
 
 def _link_down(m, tp):
-    return {"id": "link_down", "level": "warn", "title": "Interfejs stracił połączenie (link down)",
-            "explain": "Port przestał widzieć drugie urządzenie: odłączony kabel, wyłączone urządzenie, restart switcha "
-                       "lub uszkodzony przewód. Częste naprzemienne down/up (\"flapping\") zwykle oznacza problem z kablem lub portem.",
-            "advice": "Jeśli powtarza się wiele razy na tym samym porcie, wymień kabel, sprawdź wtyczki i spróbuj innego portu.",
-            "det": {"Interfejs": m.group("iface")}}
+    return {"id": "link_down", "level": "warn", "title": tr("an.048"),
+            "explain": tr("an.049"),
+            "advice": tr("an.050"),
+            "det": {tr("an.051"): m.group("iface")}}
 
 
 def _link_up(m, tp):
     sp = (m.group("speed") or "").strip()
     if re.match(r"^(10|100)M", sp):
-        return {"id": "link_slow", "level": "warn", "title": "Port połączony z obniżoną prędkością",
-                "explain": "Połączenie działa, ale tylko z prędkością %s zamiast 1 Gb/s. Najczęściej winny jest kabel "
-                           "z uszkodzoną żyłą, zbyt długi przewód albo stare urządzenie po drugiej stronie." % sp,
-                "advice": "Wymień kabel na sprawny (kat. 5e lub lepszy) i sprawdź ustawienia autonegocjacji portu.",
-                "det": {"Interfejs": m.group("iface"), "Prędkość": sp}}
-    return {"id": "link_up", "level": "info", "title": "Interfejs odzyskał połączenie (link up)",
-            "explain": "Port znowu widzi drugie urządzenie.", "advice": "", "det": {"Interfejs": m.group("iface")}}
+        return {"id": "link_slow", "level": "warn", "title": tr("an.052"),
+                "explain": tr("an.053") % sp,
+                "advice": tr("an.054"),
+                "det": {tr("an.051"): m.group("iface"), tr("an.055"): sp}}
+    return {"id": "link_up", "level": "info", "title": tr("an.056"),
+            "explain": tr("an.057"), "advice": "", "det": {tr("an.051"): m.group("iface")}}
 
 
 def _wifi_conn(m, tp):
-    return {"id": "wifi_conn", "level": "info", "title": "Klient połączył się z Wi-Fi",
-            "explain": "Urządzenie podłączyło się do sieci bezprzewodowej. Normalne zdarzenie.", "advice": "",
-            "det": {"Interfejs": m.group("iface"), "MAC": m.group("mac")}}
+    return {"id": "wifi_conn", "level": "info", "title": tr("an.058"),
+            "explain": tr("an.059"), "advice": "",
+            "det": {tr("an.051"): m.group("iface"), tr("an.038"): m.group("mac")}}
 
 
 def _wifi_disc(m, tp):
     reason = (m.group("reason") or "").strip().lower()
-    why = next((txt for key, txt in WIFI_REASONS if key in reason), reason or "brak podanego powodu")
+    why = next((tr(txt) for key, txt in WIFI_REASONS if key in reason), reason or tr("an.060"))
     bad = any(k in reason for k in ("data loss", "handshake", "key exchange"))
     return {"id": "wifi_disc_bad" if bad else "wifi_disc", "level": "warn" if bad else "info",
-            "title": "Klient rozłączony z Wi-Fi: " + why.split(":")[0],
-            "explain": "Powód podany przez router: %s." % why,
-            "advice": ("Jeśli dotyczy wciąż tych samych urządzeń: sprawdź siłę sygnału w zakładce Wi-Fi, odległość od AP "
-                       "i kanał radiowy. Przy błędach handshake sprawdź hasło zapisane na urządzeniu.") if bad else "",
-            "det": {"Interfejs": m.group("iface"), "MAC": m.group("mac")}}
+            "title": tr("an.061") + why.split(":")[0],
+            "explain": tr("an.062") % why,
+            "advice": (tr("an.063")) if bad else "",
+            "det": {tr("an.051"): m.group("iface"), tr("an.038"): m.group("mac")}}
 
 
 def _caps(m, tp):
     up = "disconn" not in m.group(0).lower() and "lost" not in m.group(0).lower()
     return {"id": "caps_up" if up else "caps_down", "level": "info" if up else "warn",
-            "title": "Punkt dostępowy dołączył do CAPsMAN" if up else "Punkt dostępowy odłączył się od CAPsMAN",
-            "explain": "AP (CAP) nawiązał połączenie z kontrolerem CAPsMAN." if up else
-                       "Kontroler CAPsMAN stracił kontakt z AP. Sieć Wi-Fi z tego AP mogła przestać działać.",
-            "advice": "" if up else "Sprawdź zasilanie AP (PoE), kabel i czy AP jest widoczny w sieci.", "det": {}}
+            "title": tr("an.064") if up else tr("an.065"),
+            "explain": tr("an.066") if up else
+                       tr("an.067"),
+            "advice": "" if up else tr("an.068"), "det": {}}
 
 
 def _reboot_bad(m, tp):
-    return {"id": "reboot_unclean", "level": "bad", "title": "Router uruchomił się po nieprawidłowym wyłączeniu",
-            "explain": "Router nie został wyłączony w normalny sposób: najczęściej zanik zasilania, wyrwana wtyczka "
-                       "albo awaria (zawieszenie) systemu.",
-            "advice": "Jeśli powtarza się bez zaników prądu, sprawdź zasilacz, temperaturę i pobierz plik autosupout.rif "
-                      "z Files (raport awarii) dla wsparcia MikroTika. Rozważ zasilacz awaryjny (UPS).", "det": {}}
+    return {"id": "reboot_unclean", "level": "bad", "title": tr("an.069"),
+            "explain": tr("an.070"),
+            "advice": tr("an.071"), "det": {}}
 
 
 def _reboot(m, tp):
-    return {"id": "reboot", "level": "warn", "title": "Router został zrestartowany",
-            "explain": "Router uruchomił się ponownie (ręcznie, po aktualizacji albo z harmonogramu).",
-            "advice": "Jeśli nie restartowałeś go Ty, sprawdź w logach, kto był zalogowany przed restartem.", "det": {}}
+    return {"id": "reboot", "level": "warn", "title": tr("an.072"),
+            "explain": tr("an.073"),
+            "advice": tr("an.074"), "det": {}}
 
 
 def _script_fail(m, tp):
     txt = m.group(0).lower()
     if "502" in txt or "bad gateway" in txt:
-        why = "serwer aplikacji chwilowo nie odpowiadał (np. podczas aktualizacji)"
+        why = tr("an.075")
     elif "timeout" in txt or "timed out" in txt or "connection refused" in txt or "could not connect" in txt:
-        why = "router nie mógł połączyć się z serwerem"
+        why = tr("an.076")
     elif "bad command" in txt or "syntax error" in txt:
-        why = "skrypt zawiera polecenie nieobsługiwane przez tę wersję RouterOS"
+        why = tr("an.077")
     else:
-        why = "skrypt zakończył się błędem"
-    return {"id": "script_fail", "level": "warn", "title": "Błąd skryptu: " + why,
-            "explain": "Skrypt uruchamiany na routerze (np. monitoring lub whitelista tej aplikacji) nie wykonał się poprawnie.",
-            "advice": "Pojedyncze błędy podczas aktualizacji aplikacji są normalne. Jeśli powtarzają się stale, wklej ponownie "
-                      "komendę konfiguracyjną (zakładka Konfiguracja) i sprawdź, czy router widzi serwer.", "det": {}}
+        why = tr("an.078")
+    return {"id": "script_fail", "level": "warn", "title": tr("an.079") + why,
+            "explain": tr("an.080"),
+            "advice": tr("an.081"), "det": {}}
 
 
 def _firewall(m, tp):
     src, dst, dport, chain = m.group("src"), m.group("dst"), m.group("dport") or "", m.group("chain").lower()
-    svc = MGMT_PORTS.get(dport)
+    svc = L(MGMT_PORTS.get(dport))
     if chain == "input" and is_public(src) and svc:
-        return {"id": "fw_mgmt_probe", "level": "warn", "title": "Próby połączenia z internetu do usługi %s na routerze" % svc,
-                "explain": "Reguła firewalla z logowaniem zarejestrowała pakiety z internetu kierowane do portu %s (%s). "
-                           "Zwykle to automatyczne skanowanie w poszukiwaniu otwartych usług." % (dport, svc),
-                "advice": "Upewnij się, że te pakiety są odrzucane (reguła drop dla ruchu z WAN) i że usługa nie jest "
-                          "wystawiona do internetu bez potrzeby.", "det": {"Źródło": src, "Port": "%s (%s)" % (dport, svc)}}
-    return {"id": "fw_log", "level": "info", "title": "Reguła firewalla zarejestrowała pakiet (%s)" % chain,
-            "explain": "To wpis z reguły firewalla, która ma włączone logowanie (log=yes). Pokazuje, skąd i dokąd szedł ruch.",
-            "advice": "Jeśli takich wpisów jest bardzo dużo, wyłącz logowanie w regule albo dodaj log-prefix, żeby je odróżnić.",
-            "det": {"Źródło": src, "Cel": "%s:%s" % (dst, dport) if dport else dst}}
+        return {"id": "fw_mgmt_probe", "level": "warn", "title": tr("an.082") % svc,
+                "explain": tr("an.083") % (dport, svc),
+                "advice": tr("an.084"), "det": {tr("an.085"): src, tr("an.086"): "%s (%s)" % (dport, svc)}}
+    return {"id": "fw_log", "level": "info", "title": tr("an.087") % chain,
+            "explain": tr("an.088"),
+            "advice": tr("an.089"),
+            "det": {tr("an.085"): src, tr("an.090"): "%s:%s" % (dst, dport) if dport else dst}}
 
 
 def _pppoe(m, tp):
-    return {"id": "pppoe_down", "level": "bad", "title": "Zerwane połączenie z operatorem (PPPoE)",
-            "explain": "Router stracił połączenie PPPoE z operatorem, więc przez ten czas nie było internetu.",
-            "advice": "Jeśli zdarza się często, sprawdź kabel do modemu/ONT i zgłoś problem operatorowi "
-                      "(podaj godziny z logów).", "det": {"Interfejs": m.group("iface")}}
+    return {"id": "pppoe_down", "level": "bad", "title": tr("an.091"),
+            "explain": tr("an.092"),
+            "advice": tr("an.093"), "det": {tr("an.051"): m.group("iface")}}
 
 
 def _wg(m, tp):
-    return {"id": "wg_handshake", "level": "warn", "title": "WireGuard: brak połączenia z drugą stroną tunelu",
-            "explain": "Handshake z peerem nie doszedł do skutku. Druga strona jest wyłączona, nie ma internetu "
-                       "albo klucze lub adres endpoint są błędne.",
-            "advice": "Sprawdź w zakładce VPN, którego peera dotyczy, oraz jego klucz publiczny i adres.", "det": {}}
+    return {"id": "wg_handshake", "level": "warn", "title": tr("an.094"),
+            "explain": tr("an.095"),
+            "advice": tr("an.096"), "det": {}}
 
 
 def _loop(m, tp):
-    return {"id": "loop", "level": "bad", "title": "Prawdopodobna pętla w sieci",
-            "explain": "Na porcie pojawia się nadmiar ruchu broadcast/multicast, co zwykle oznacza, że kabel "
-                       "łączy dwa porty tego samego switcha albo dwa switche są połączone podwójnie.",
-            "advice": "Sprawdź okablowanie wskazanego portu i włącz RSTP w bridge (`/interface bridge set [find] protocol-mode=rstp`).",
-            "det": {"Interfejs": m.group("iface")}}
+    return {"id": "loop", "level": "bad", "title": tr("an.097"),
+            "explain": tr("an.098"),
+            "advice": tr("an.099"),
+            "det": {tr("an.051"): m.group("iface")}}
 
 
 def _poe(m, tp):
-    return {"id": "poe", "level": "warn", "title": "Problem z zasilaniem PoE",
-            "explain": "Port PoE wykrył przeciążenie, zwarcie albo zbyt duży pobór mocy przez zasilane urządzenie.",
-            "advice": "Sprawdź kabel i urządzenie zasilane z tego portu oraz limit mocy zasilacza routera.",
-            "det": {"Interfejs": m.group("iface")}}
+    return {"id": "poe", "level": "warn", "title": tr("an.100"),
+            "explain": tr("an.101"),
+            "advice": tr("an.102"),
+            "det": {tr("an.051"): m.group("iface")}}
 
 
 def _memory(m, tp):
-    return {"id": "memory", "level": "bad", "title": "Brak pamięci RAM",
-            "explain": "Routerowi zabrakło pamięci. Usługi mogą działać niestabilnie lub router może się zrestartować.",
-            "advice": "Sprawdź zużycie RAM na wykresie, wyłącz zbędne funkcje (np. duże listy adresów, proxy) lub zaktualizuj RouterOS.",
+    return {"id": "memory", "level": "bad", "title": tr("an.103"),
+            "explain": tr("an.104"),
+            "advice": tr("an.105"),
             "det": {}}
 
 
 _ANA_SERVER = set()  # adresy serwera aplikacji (ustawiane przy każdej analizie)
-CFG_ACTIONS = [("new script scheduled", "dodano zadanie do harmonogramu"), ("removed from scheduler", "usunięto zadanie z harmonogramu"),
-               ("scheduler changed", "zmieniono zadanie harmonogramu"), ("new script added", "dodano skrypt"),
-               ("script added", "dodano skrypt"), ("script removed", "usunięto skrypt"), ("script changed", "zmieniono skrypt"),
-               ("added", "dodano element"), ("removed", "usunięto element"), ("changed", "zmieniono ustawienie"),
-               ("moved", "zmieniono kolejność"), ("enabled", "włączono element"), ("disabled", "wyłączono element")]
+CFG_ACTIONS = [("new script scheduled", "an.106"), ("removed from scheduler", "an.107"),
+               ("scheduler changed", "an.108"), ("new script added", "an.109"),
+               ("script added", "an.109"), ("script removed", "an.110"), ("script changed", "an.111"),
+               ("added", "an.112"), ("removed", "an.113"), ("changed", "an.114"),
+               ("moved", "an.115"), ("enabled", "an.116"), ("disabled", "an.117")]
 
 
 def _client(c):
     c = c.lower()
     for k, v in (("winbox", "Winbox"), ("ssh", "SSH"), ("telnet", "Telnet"), ("web", "WebFig"), ("www", "WebFig"),
-                 ("api", "API"), ("import", "import pliku (.rsc)"), ("scheduler", "harmonogram"), ("script", "skrypt")):
+                 ("api", "API"), ("import", tr("an.118")), ("scheduler", tr("an.119")), ("script", tr("an.120"))):
         if k in c:
             return v
     return c[:30]
@@ -2504,52 +2502,45 @@ def _client(c):
 
 def _cfg_by(m, tp):
     what, cmd = m.group("what").strip(), (m.group("cmd") or "").strip()
-    act = next((v for k, v in CFG_ACTIONS if k in what.lower()), "zmiana konfiguracji")
-    det = {"Kto": m.group("user"), "Akcja": act, "Narzędzie": _client(m.group("client")), "Skąd": m.group("addr")}
+    act = next((tr(v) for k, v in CFG_ACTIONS if k in what.lower()), tr("an.121"))
+    det = {tr("an.031"): m.group("user"), tr("an.122"): act, tr("an.123"): _client(m.group("client")), tr("an.124"): m.group("addr")}
     if "app-" in cmd or "app-" in what:
-        return {"id": "cfg_app", "level": "info", "title": "Zmiany skryptów i harmonogramów aplikacji RouterOS Monitor",
-                "explain": "Ślady konfiguracji tej aplikacji na routerze: wklejenie komendy konfiguracyjnej dodaje i usuwa skrypty "
-                           "oraz zadania app-…, a RouterOS zapisuje każdą taką zmianę w logu. Mogą to być też Twoje ręczne zmiany "
-                           "harmonogramów app-… (np. wyłączenie synchronizacji whitelisty).",
-                "advice": "Nic nie trzeba robić. Jeśli nie wklejałeś komendy ani niczego nie zmieniałeś, sprawdź, kto był zalogowany.",
+        return {"id": "cfg_app", "level": "info", "title": tr("an.125"),
+                "explain": tr("an.126"),
+                "advice": tr("an.127"),
                 "det": det}
-    det["Polecenie"] = cmd[:70]
-    return {"id": "cfg_change", "level": "info", "title": "Zmiana konfiguracji routera",
-            "explain": "Ktoś zmienił ustawienia routera. RouterOS zapisuje kto, czym (np. Winbox) i z jakiego adresu "
-                       "wprowadził zmianę oraz jakie polecenie zostało wykonane.",
-            "advice": "Jeśli nie rozpoznajesz zmiany albo użytkownika, zmień hasło i sprawdź listę użytkowników (`/user print`).",
+    det[tr("an.128")] = cmd[:70]
+    return {"id": "cfg_change", "level": "info", "title": tr("an.028"),
+            "explain": tr("an.129"),
+            "advice": tr("an.130"),
             "det": det}
 
 
 def _script_fragment(m, tp):
-    return {"id": "script_fragment", "level": "info", "title": "Fragmenty treści skryptów w logu (po wklejeniu komendy konfiguracyjnej)",
-            "explain": "Gdy komenda konfiguracyjna dodaje skrypty app-…, RouterOS zapisuje w logu całe polecenie razem z treścią "
-                       "skryptu. Długie wpisy są dzielone na wiele kawałków, stąd fragmenty kodu w logach. To nie są błędy.",
-            "advice": "Nic nie trzeba robić. Pojawiają się tylko przy wklejaniu komendy konfiguracyjnej.", "det": {}}
+    return {"id": "script_fragment", "level": "info", "title": tr("an.131"),
+            "explain": tr("an.132"),
+            "advice": tr("an.133"), "det": {}}
 
 
 def _bad_cmd(m, tp):
     cmd = m.group("cmd") if "cmd" in m.groupdict() and m.group("cmd") else ""
-    known = {"wireless": "stary pakiet Wi-Fi `wireless`, którego nie ma na routerach z nowym pakietem `wifi` (modele ax)",
-             "wifi": "nowy pakiet Wi-Fi `wifi`, którego nie ma na tym routerze",
-             "health": "menu `/system health`, którego nie ma na tym modelu (brak czujników)"}
-    why = known.get(cmd.lower(), "polecenie `%s` niedostępne w tej wersji RouterOS lub na tym modelu" % cmd if cmd else
-                    "składnię nieobsługiwaną przez tę wersję RouterOS")
-    return {"id": "script_syntax", "level": "warn", "title": "Skrypt używa polecenia niedostępnego na tym routerze",
-            "explain": "Skrypt odwołuje się do: %s. RouterOS przerywa taki skrypt przy wczytywaniu." % why,
-            "advice": "Jeśli to skrypt app-… tej aplikacji, wklej ponownie aktualną komendę konfiguracyjną (zakładka Konfiguracja); "
-                      "nowsze wersje uruchamiają tylko skrypty pasujące do routera. Własny skrypt trzeba poprawić ręcznie.",
-            "det": {"Polecenie": cmd, "Miejsce": "linia %s, kolumna %s" % (m.group("line"), m.group("col"))}}
+    known = {"wireless": tr("an.134"),
+             "wifi": tr("an.135"),
+             "health": tr("an.136")}
+    why = known.get(cmd.lower(), tr("an.137") % cmd if cmd else
+                    tr("an.138"))
+    return {"id": "script_syntax", "level": "warn", "title": tr("an.139"),
+            "explain": tr("an.140") % why,
+            "advice": tr("an.141"),
+            "det": {tr("an.128"): cmd, tr("an.142"): "linia %s, kolumna %s" % (m.group("line"), m.group("col"))}}
 
 
 def _exec_script(m, tp):
     name = m.group("name")
-    return {"id": "script_exec_fail", "level": "warn", "title": "Skrypt %s zakończył się błędem" % ("aplikacji" if name.startswith("app-") else "routera"),
-            "explain": "RouterOS zapisuje ten wpis razem z właściwym błędem (zwykle linia obok w logu). Sam w sobie wskazuje "
-                       "tylko, który skrypt się nie wykonał.",
-            "advice": "Sprawdź sąsiedni wpis z opisem błędu. Dla skryptów app-…: pojedyncze przypadki (np. podczas aktualizacji "
-                      "aplikacji) są normalne; stałe błędy naprawia ponowne wklejenie komendy konfiguracyjnej.",
-            "det": {"Skrypt": name}}
+    return {"id": "script_exec_fail", "level": "warn", "title": tr("an.143") % (tr("an.144") if name.startswith("app-") else tr("an.145")),
+            "explain": tr("an.146"),
+            "advice": tr("an.147"),
+            "det": {tr("an.148"): name}}
 
 
 def _fetch(m, tp):
@@ -2557,43 +2548,39 @@ def _fetch(m, tp):
     ours = ip in _ANA_SERVER
     if ok:
         return {"id": "fetch_ok_app" if ours else "fetch_ok", "level": "info",
-                "title": "Synchronizacja whitelisty z serwerem aplikacji" if ours else "Router pobrał plik z %s" % ip,
-                "explain": ("Skrypt app-whitelist co 5 minut pobiera aktualną whitelistę z tej aplikacji. Każde pobranie "
-                            "zostawia ten wpis, więc jest ich ok. 288 na dobę.") if ours else
-                           "Router pobrał plik poleceniem `/tool fetch` (skrypt lub ręczne polecenie).",
-                "advice": ("Nowa komenda konfiguracyjna nie przesyła już tych wpisów do aplikacji. Na routerze możesz je wyciszyć "
-                           "także w jego własnym logu: `/system logging set [find action=memory topics=info] topics=info,!fetch`. "
-                           "Jeśli na tym routerze nie używasz whitelisty, wyłącz zadanie: `/system scheduler disable [find name=app-wl]`.")
-                          if ours else "", "det": {"Serwer": ip}}
-    return {"id": "fetch_fail", "level": "warn", "title": "Nieudane pobieranie pliku z %s" % ip,
-            "explain": "Router nie mógł pobrać pliku (serwer niedostępny, błąd sieci albo błędny adres).",
-            "advice": "Jeśli to serwer aplikacji, sprawdź, czy działa (`docker compose ps`) i czy router go widzi.", "det": {"Serwer": ip}}
+                "title": tr("an.149") if ours else tr("an.150") % ip,
+                "explain": (tr("an.151")) if ours else
+                           tr("an.152"),
+                "advice": (tr("an.153"))
+                          if ours else "", "det": {tr("an.154"): ip}}
+    return {"id": "fetch_fail", "level": "warn", "title": tr("an.155") % ip,
+            "explain": tr("an.156"),
+            "advice": tr("an.157"), "det": {tr("an.154"): ip}}
 
 
 def _cap_connected(m, tp):
-    return {"id": "cap_connected", "level": "info", "title": "AP połączył się z kontrolerem CAPsMAN",
-            "explain": "Ten punkt dostępowy (CAP) nawiązał połączenie z kontrolerem CAPsMAN %s i pobiera od niego konfigurację Wi-Fi."
-                       % m.group("name"), "advice": "", "det": {"Kontroler": "%s (%s)" % (m.group("name"), m.group("ip"))}}
+    return {"id": "cap_connected", "level": "info", "title": tr("an.158"),
+            "explain": tr("an.159")
+                       % m.group("name"), "advice": "", "det": {tr("an.160"): "%s (%s)" % (m.group("name"), m.group("ip"))}}
 
 
 def _cap_selected(m, tp):
-    return {"id": "cap_selected", "level": "info", "title": "AP wybrał kontroler CAPsMAN",
-            "explain": "Punkt dostępowy znalazł w sieci kontroler CAPsMAN %s i wybrał go do zarządzania. Zwykle chwilę później "
-                       "pojawia się wpis o połączeniu." % m.group("name"), "advice": "",
-            "det": {"Kontroler": "%s (%s)" % (m.group("name"), m.group("ip"))}}
+    return {"id": "cap_selected", "level": "info", "title": tr("an.161"),
+            "explain": tr("an.162") % m.group("name"), "advice": "",
+            "det": {tr("an.160"): "%s (%s)" % (m.group("name"), m.group("ip"))}}
 
 
 def _cap_lost(m, tp):
-    return {"id": "cap_lost", "level": "warn", "title": "AP stracił połączenie z kontrolerem CAPsMAN",
-            "explain": "Punkt dostępowy rozłączył się z kontrolerem %s. Przez ten czas Wi-Fi z tego AP mogło nie działać." % m.group("name"),
-            "advice": "Jeśli się powtarza, sprawdź połączenie kablowe AP z siecią i czy kontroler CAPsMAN był dostępny (restart, aktualizacja).",
-            "det": {"Kontroler": "%s (%s)" % (m.group("name"), m.group("ip"))}}
+    return {"id": "cap_lost", "level": "warn", "title": tr("an.163"),
+            "explain": tr("an.164") % m.group("name"),
+            "advice": tr("an.165"),
+            "det": {tr("an.160"): "%s (%s)" % (m.group("name"), m.group("ip"))}}
 
 
 
 def _time_change(m, tp):
     src_ = (m.group("src") or "").lower()
-    who = {"cloud": "usługę MikroTik IP Cloud", "ntp": "klienta NTP", "sntp": "klienta NTP"}.get(src_, "synchronizację czasu")
+    who = {"cloud": tr("an.166"), "ntp": tr("an.167"), "sntp": tr("an.167")}.get(src_, tr("an.168"))
     diff = None
     try:
         a = dt.datetime.strptime(m.group("a"), "%b/%d/%Y %H:%M:%S")
@@ -2603,38 +2590,35 @@ def _time_change(m, tp):
         pass
     big = diff is not None and abs(diff) > 300
     nom = {"cloud": "MikroTik IP Cloud", "ntp": "NTP", "sntp": "NTP"}.get(src_, "synchronizacja czasu")
-    det = {"Źródło": nom, "Korekta": ("%+d s" % diff) if diff is not None else "?"}
+    det = {tr("an.085"): nom, tr("an.169"): ("%+d s" % diff) if diff is not None else "?"}
     return {"id": "time_change_big" if big else "time_change", "level": "warn" if big else "info",
-            "title": "Duża korekta zegara routera" if big else "Korekta zegara routera",
-            "explain": ("Zegar routera został ustawiony przez %s. " % who) +
-                       ("Różnica była duża, więc godziny we wcześniejszych logach mogły być błędne (np. po restarcie routera bez baterii zegara)."
-                        if big else "Drobne korekty o kilka-kilkadziesiąt sekund są normalne."),
-            "advice": "Dla dokładnego czasu włącz klienta NTP: `/system ntp client set enabled=yes servers=pool.ntp.org`. "
-                      "Poprawny czas jest ważny dla logów, certyfikatów i harmonogramów." if big or src_ == "cloud" else "",
+            "title": tr("an.170") if big else tr("an.171"),
+            "explain": (tr("an.172") % who) +
+                       (tr("an.173")
+                        if big else tr("an.174")),
+            "advice": tr("an.175") if big or src_ == "cloud" else "",
             "det": det}
 
 
 def _dhcp_client(m, tp):
     got = m.group("act").lower() == "got"
     return {"id": "dhcp_client_got" if got else "dhcp_client_lost", "level": "info" if got else "warn",
-            "title": "Router otrzymał adres IP z DHCP" if got else "Router stracił adres IP z DHCP",
-            "explain": ("To sam router (jako klient DHCP na interfejsie %s) dostał adres od serwera DHCP w sieci, np. AP od routera głównego "
-                        "albo router od operatora. To nie jest przydzielenie adresu innemu urządzeniu." % m.group("iface")) if got else
-                       ("Klient DHCP routera na interfejsie %s utracił adres: serwer DHCP nie odpowiedział albo łącze było niedostępne." % m.group("iface")),
-            "advice": "" if got else "Sprawdź połączenie na tym interfejsie i dostępność serwera DHCP (np. routera głównego lub modemu operatora).",
-            "det": {"Interfejs": m.group("iface"), "Adres": m.group("ip") or ""}}
+            "title": tr("an.176") if got else tr("an.177"),
+            "explain": (tr("an.178") % m.group("iface")) if got else
+                       (tr("an.179") % m.group("iface")),
+            "advice": "" if got else tr("an.180"),
+            "det": {tr("an.051"): m.group("iface"), tr("an.015"): m.group("ip") or ""}}
 
 
 def _pkg(m, tp):
     name, ver, inst = m.group("pkg"), m.group("ver"), m.group("act").lower() == "installed"
     label = "RouterOS (system)" if name in ("system", "routeros") else name
     return {"id": "pkg_installed" if inst else "pkg_removed", "level": "info",
-            "title": "Zainstalowano pakiet RouterOS" if inst else "Odinstalowano pakiet RouterOS",
-            "explain": ("Na routerze zainstalowano pakiet %s w wersji %s, zwykle w ramach aktualizacji systemu (wpis pojawia się po restarcie)."
-                        % (label, ver)) if inst else "Pakiet %s %s został usunięty z routera." % (label, ver),
-            "advice": "Po aktualizacji RouterOS wgraj też firmware płyty: `/system routerboard upgrade`, a potem zrestartuj router "
-                      "(panel pokaże znaczek „firmware do wgrania”, jeśli to potrzebne)." if inst and name in ("system", "routeros") else "",
-            "det": {"Pakiet": "%s %s" % (label, ver)}}
+            "title": tr("an.181") if inst else tr("an.182"),
+            "explain": (tr("an.183")
+                        % (label, ver)) if inst else tr("an.184") % (label, ver),
+            "advice": tr("an.185") if inst and name in ("system", "routeros") else "",
+            "det": {tr("an.186"): "%s %s" % (label, ver)}}
 
 
 LOG_RULES = [
@@ -2727,16 +2711,15 @@ def logs_analysis(request: Request, rid: int, hours: int = 24, s: Session = Depe
     # brute force: wiele nieudanych logowań z jednego publicznego adresu
     lf = groups.get("login_fail_wan")
     if lf:
-        top = max(lf["det"].get("Adres", {}).values() or [0])
+        top = max(lf["det"].get(tr("an.015"), {}).values() or [0])
         if top >= 5:
-            lf["title"] = "Atak na hasło (brute force) z internetu"
-            lf["explain"] = ("Wiele nieudanych prób logowania z tych samych adresów publicznych (najwięcej: %d). "
-                             "To automatyczny atak polegający na zgadywaniu hasła.") % top + " " + lf["explain"].split(". ", 1)[-1]
+            lf["title"] = tr("an.187")
+            lf["explain"] = (tr("an.188")) % top + " " + lf["explain"].split(". ", 1)[-1]
     # częste zmiany stanu łącza na tym samym porcie = flapping
     ld = groups.get("link_down")
-    if ld and max(ld["det"].get("Interfejs", {}).values() or [0]) >= 5:
+    if ld and max(ld["det"].get(tr("an.051"), {}).values() or [0]) >= 5:
         ld["level"] = "bad"
-        ld["title"] = "Niestabilne łącze na porcie (częste rozłączenia)"
+        ld["title"] = tr("an.189")
     out = []
     for g in groups.values():
         g["det"] = {k: sorted(v.items(), key=lambda x: -x[1])[:5] for k, v in g["det"].items()}
@@ -2864,7 +2847,7 @@ def wl_add(ip: str = Form(), comment: str = Form(""), days: str = Form(""), rout
     try:
         net = parse_ip(ip)
     except ValueError:
-        return back("Niepoprawny adres: podaj IPv4, sieć (np. 10.0.0.0/24) albo domenę")
+        return back(tr("msg.wl_bad_addr"))
     s.add(Whitelist(ip=net, comment=cmt(comment), expires=parse_exp(days), router_id=scope(router)))
     log(s, "whitelist+", "%s (%s) zakres=%s" % (net, cmt(comment), scope(router) or "wszystkie"))
     s.commit()
@@ -2904,7 +2887,7 @@ def wl_import(data: str = Form(""), router: str = Form(""), s: Session = Depends
         added += 1
     log(s, "whitelist import", "dodano %d, błędnych %d" % (added, bad))
     s.commit()
-    return back("Zaimportowano: %d, błędnych linii: %d" % (added, bad), "ok")
+    return back(tr("msg.wl_imported", added=added, bad=bad), "ok")
 
 
 @app.get("/whitelist/export", dependencies=[Depends(admin)])
@@ -2986,25 +2969,25 @@ def user_add(request: Request, username: str = Form(), password: str = Form(), r
              s: Session = Depends(db)):
     username = username.strip()
     if not UNAME_RE.match(username):
-        return users_view(request, s, "Login: 3-40 znaków, litery, cyfry, . _ @ -", False)
+        return users_view(request, s, tr("msg.u_login_rule"), False)
     if len(password) < 8:
-        return users_view(request, s, "Hasło musi mieć co najmniej 8 znaków.", False)
+        return users_view(request, s, tr("msg.pw_short"), False)
     if role not in ROLES:
-        return users_view(request, s, "Nieznana rola.", False)
+        return users_view(request, s, tr("msg.u_bad_role"), False)
     if s.scalar(select(User).where(User.username == username)):
-        return users_view(request, s, "Taki login już istnieje.", False)
+        return users_view(request, s, tr("msg.u_exists"), False)
     s.add(User(username=username, pw=hash_pw(password), role=role, created=now()))
     log(s, "użytkownik+", "%s (%s)" % (username, role))
     s.commit()
-    return users_view(request, s, "Dodano użytkownika %s." % username)
+    return users_view(request, s, tr("msg.u_added", name=username))
 
 
 def guard(request, s, target, me):
     """Nie pozwól zablokować sobie dostępu ani usunąć ostatniego administratora."""
     if not target:
-        return users_view(request, s, "Nie ma takiego użytkownika.", False)
+        return users_view(request, s, tr("msg.u_none"), False)
     if target.id == me.id:
-        return users_view(request, s, "Nie możesz zmienić roli, wyłączyć ani usunąć własnego konta.", False)
+        return users_view(request, s, tr("msg.u_self"), False)
     return None
 
 
@@ -3015,13 +2998,13 @@ def user_role(request: Request, uid: int, role: str = Form(), me: User = Depends
     if err:
         return err
     if role not in ROLES:
-        return users_view(request, s, "Nieznana rola.", False)
+        return users_view(request, s, tr("msg.u_bad_role"), False)
     if t.role == "admin" and role != "admin" and t.active and active_admins(s) <= 1:
         return users_view(request, s, "To ostatni aktywny administrator.", False)
     t.role, t.ver = role, t.ver + 1
     log(s, "rola", "%s: %s" % (t.username, role))
     s.commit()
-    return users_view(request, s, "Zmieniono rolę %s." % t.username)
+    return users_view(request, s, tr("msg.u_role", name=t.username))
 
 
 @app.post("/users/{uid}/toggle")
@@ -3043,15 +3026,15 @@ def user_reset(request: Request, uid: int, password: str = Form(), me: User = De
                s: Session = Depends(db)):
     t = s.get(User, uid)
     if not t:
-        return users_view(request, s, "Nie ma takiego użytkownika.", False)
+        return users_view(request, s, tr("msg.u_none"), False)
     if len(password) < 8:
-        return users_view(request, s, "Hasło musi mieć co najmniej 8 znaków.", False)
+        return users_view(request, s, tr("msg.pw_short"), False)
     t.pw, t.ver = hash_pw(password), t.ver + 1
     log(s, "reset hasła", t.username)
     s.commit()
     if t.id == me.id:
         request.session["v"] = t.ver
-    return users_view(request, s, "Ustawiono nowe hasło dla %s." % t.username)
+    return users_view(request, s, tr("msg.u_pw_set", name=t.username))
 
 
 @app.post("/users/{uid}/delete")
@@ -3065,7 +3048,7 @@ def user_del(request: Request, uid: int, me: User = Depends(admin), s: Session =
     log(s, "użytkownik-", t.username)
     s.delete(t)
     s.commit()
-    return users_view(request, s, "Usunięto użytkownika.")
+    return users_view(request, s, tr("msg.u_deleted"))
 
 
 @app.get("/account")
@@ -3080,16 +3063,16 @@ def account_save(request: Request, current: str = Form(), password: str = Form()
         return templates.TemplateResponse(request, "account.html", {"msg": msg, "ok": ok})
     if not check_pw(current, me.pw):
         time.sleep(1.5)
-        return view("Obecne hasło jest nieprawidłowe.", False)
+        return view(tr("msg.a_bad_current"), False)
     if len(password) < 8:
-        return view("Nowe hasło musi mieć co najmniej 8 znaków.", False)
+        return view(tr("msg.a_short"), False)
     if password != password2:
-        return view("Nowe hasła nie są takie same.", False)
+        return view(tr("msg.a_mismatch"), False)
     me.pw, me.ver = hash_pw(password), me.ver + 1
     log(s, "zmiana hasła", me.username)
     s.commit()
     request.session["v"] = me.ver
-    return view("Hasło zmienione. Inne otwarte sesje zostały wylogowane.", True)
+    return view(tr("msg.a_changed"), True)
 
 
 # ---------- settings / HTTPS ----------
@@ -3151,8 +3134,7 @@ def settings_whitelist(request: Request, on: str = Form(""), s: Session = Depend
     log(s, "moduł whitelisty", "włączony" if on == "1" else "wyłączony")
     s.commit()
     _WL_ON[1] = 0
-    return settings_view(request, s, ("Whitelista włączona." if on == "1" else "Whitelista wyłączona.") +
-                         " Wklej ponownie komendę konfiguracyjną na routerach, aby dodać lub usunąć skrypt synchronizacji.", True)
+    return settings_view(request, s, (tr("msg.wl_on") if on == "1" else tr("msg.wl_off")) + " " + tr("msg.wl_paste"), True)
 
 
 @app.post("/settings/backup-now", dependencies=[Depends(admin)])
@@ -3160,10 +3142,10 @@ def backup_now(request: Request, s: Session = Depends(db)):
     try:
         open(os.path.join(BACKUP_DIR, ".now"), "w").close()
     except OSError as e:
-        return settings_view(request, s, "Nie można zlecić kopii: %s" % e, False)
+        return settings_view(request, s, tr("msg.bk_fail", err=e), False)
     log(s, "kopia bazy", "zlecona ręcznie")
     s.commit()
-    return settings_view(request, s, "Kopia zlecona. Pojawi się na liście w ciągu ok. 30 sekund (odśwież stronę).", True)
+    return settings_view(request, s, tr("msg.bk_ok"), True)
 
 
 @app.get("/backups/{name}", dependencies=[Depends(admin)])
@@ -3189,12 +3171,11 @@ def backup_delete(request: Request, name: str, s: Session = Depends(db)):
 @app.post("/settings/interval", dependencies=[Depends(admin)])
 def settings_interval(request: Request, every: int = Form(60), s: Session = Depends(db)):
     if every not in INTERVALS:
-        return settings_view(request, s, "Niedozwolony interwał.", False)
+        return settings_view(request, s, tr("msg.iv_bad"), False)
     sset(s, "interval", str(every))
     log(s, "interwał", "%d s" % every)
     s.commit()
-    return settings_view(request, s, "Zapisano interwał %d s. Wklej ponownie komendę konfiguracyjną na każdym "
-                                     "routerze, aby zaczął wysyłać dane częściej." % every, True)
+    return settings_view(request, s, tr("msg.iv_ok", n=every), True)
 
 
 @app.get("/settings", dependencies=[Depends(admin)])
@@ -3206,20 +3187,19 @@ def settings_page(request: Request, s: Session = Depends(db)):
 def settings_save(request: Request, domain: str = Form(""), email: str = Form(""), s: Session = Depends(db)):
     domain, email = domain.strip().lower(), email.strip()
     if domain and not DOMAIN_RE.match(domain):
-        return settings_view(request, s, "Niepoprawna nazwa domeny.", False)
+        return settings_view(request, s, tr("msg.dom_bad"), False)
     if email and not EMAIL_RE.match(email):
-        return settings_view(request, s, "Niepoprawny adres e-mail.", False)
+        return settings_view(request, s, tr("msg.mail_bad"), False)
     try:
         r = httpx.post(CADDY + "/load", content=caddyfile(domain, email).encode(),
                        headers={"Content-Type": "text/caddyfile"}, timeout=15)
     except Exception as e:
-        return settings_view(request, s, "Brak połączenia z Caddy: %s" % e, False)
+        return settings_view(request, s, tr("msg.caddy_conn", err=e), False)
     if r.status_code != 200:
-        return settings_view(request, s, "Caddy odrzucił konfigurację: %s" % r.text[:300], False)
+        return settings_view(request, s, tr("msg.caddy_rej", err=r.text[:300]), False)
     sset(s, "domain", domain)
     sset(s, "email", email)
     log(s, "ustawienia", "domena=%s" % (domain or "brak"))
     s.commit()
-    msg = ("Zapisano. Certyfikat Let's Encrypt jest pobierany w tle (sprawdź: docker compose logs caddy)."
-           if domain else "Domena usunięta, działa tylko HTTP.")
+    msg = tr("msg.https_on") if domain else tr("msg.https_off")
     return settings_view(request, s, msg, True)
