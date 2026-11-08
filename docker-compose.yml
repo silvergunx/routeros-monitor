@@ -36,6 +36,7 @@ services:
       TZ: ${TZ:-Europe/Warsaw}
       BACKUP_HOUR: ${BACKUP_HOUR:-3}
       BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+      BACKUP_INCLUDE_METRICS: ${BACKUP_INCLUDE_METRICS:-0}
     volumes:
       - ./backups:/backups
       - ./backup.sh:/backup.sh:ro

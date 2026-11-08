@@ -146,7 +146,7 @@
   "set.bk.download": "Download",
   "set.bk.confirm": "Delete backup {name}?",
   "set.bk.empty": "No backups.",
-  "set.bk.help.html": "Backups are stored on the same server (the <code>backups</code> directory next to docker-compose.yml). For safety, download a backup to another computer from time to time. Also keep the <code>.env</code> file: without it (SECRET_KEY, passwords) restoring is harder. Restore instructions are in README.md.",
+  "set.bk.help.html": "Backups are stored on the same server (the <code>backups</code> directory next to docker-compose.yml). By default they contain everything except the chart history (logs, the change log, users, routers and IP lists are included). For safety, download a backup to another computer from time to time. Also keep the <code>.env</code> file: without it (SECRET_KEY, passwords) restoring is harder. Restore instructions are in README.md.",
   "lv.loading": "loading…",
   "lv.start": "▶ Start",
   "lv.stop": "■ Stop",
@@ -673,5 +673,7 @@
   "msg.bk_limit_saved": "Backup size limit saved: {limit}.",
   "msg.bk_limit_none": "Backup size limit removed.",
   "msg.bk_limit_removed": "Removed the {n} oldest backups.",
-  "msg.bk_limit_bad": "Enter a limit from 0.1 GB to 100000 GB."
+  "msg.bk_limit_bad": "Enter a limit from 0.1 GB to 100000 GB.",
+  "msg.bk_limit_small": "The limit cannot be smaller than the newest backup ({size}). The database grows, and so do the backups; set a larger limit or choose “no limit”.",
+  "set.bk.limit_min": "minimum: {min} GB (size of the newest backup)"
 }

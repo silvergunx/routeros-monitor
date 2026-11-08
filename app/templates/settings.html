@@ -82,8 +82,8 @@ renderBest();if(e.value==='librespeed')pollBest();})();</script>
 <form method="post" action="/settings/backup-now" class="row"><button class="p" {{'disabled' if bk.pending}}>{{ t('set.bk.pending') if bk.pending else t('set.bk.now') }}</button></form>
 <form method="post" action="/settings/backup-limit" class="row" style="margin-top:12px;gap:8px"><b>{{ t('set.bk.limit_title') }}:</b>
 <select name="mode" id="bkmode"><option value="none" {{'selected' if not bk.limit_gb}}>{{ t('set.bk.limit_none') }}</option><option value="limit" {{'selected' if bk.limit_gb}}>{{ t('set.bk.limit_on') }}</option></select>
-<input name="gb" id="bkgb" type="number" min="0.1" step="0.1" value="{{ bk.limit_gb }}" style="width:90px"> <span>GB</span> <button>{{ t('common.save') }}</button></form>
-<script>(function(){const m=document.getElementById('bkmode'),g=document.getElementById('bkgb');const f=()=>{g.disabled=m.value!=='limit';if(!g.disabled&&!g.value)g.value='2'};m.onchange=f;g.disabled=m.value!=='limit'})();</script>
+<input name="gb" id="bkgb" type="number" min="{{ bk.min_gb }}" step="0.1" value="{{ bk.limit_gb }}" style="width:90px" title="{{ t('set.bk.limit_min', min=bk.min_gb) }}"> <span>GB</span> <button>{{ t('common.save') }}</button></form>
+<script>(function(){const m=document.getElementById('bkmode'),g=document.getElementById('bkgb');const f=()=>{g.disabled=m.value!=='limit';if(!g.disabled&&!g.value)g.value=String(Math.max(2,parseFloat(g.min)||2))};m.onchange=f;g.disabled=m.value!=='limit'})();</script>
 <p class="small mut">{{ t('set.bk.usage', used=bk.total, free=bk.free) if bk.free else t('set.bk.usage_nofree', used=bk.total) }}{% if bk.limit_h %} · {{ t('set.bk.limit_fits', limit=bk.limit_h, n=bk.fits, size=bk.files[0].size if bk.files else '-') }}{% endif %}</p>
 {% if bk.too_big %}<p class="warn small">{{ t('set.bk.too_big', size=bk.files[0].size) }}</p>{% endif %}
 {% if bk.low_disk %}<p class="warn small">{{ t('set.bk.low_disk', free=bk.free) }}</p>{% endif %}

@@ -122,11 +122,13 @@ If a change affects the scripts on the routers, the release notes will say that 
 | `DB_PASSWORD` | – | PostgreSQL password (applied only when the database is first created) |
 | `ADMIN_USER` / `ADMIN_PASSWORD` | `admin` / – | the first administrator account |
 | `SECRET_KEY` | – | session key, at least 16 characters (`openssl rand -hex 32`) |
-| `RETENTION_DAYS` | `30` | how many days to keep measurements |
+| `RETENTION_DAYS` | `30` | how many days to keep measurements (CPU, RAM, link quality, ...) |
+| `IFACE_RETENTION_DAYS` | `7` | how many days to keep per-interface traffic samples (the largest table); older samples are removed in the background |
 | `SYSLOG_PORT` | `514` | UDP port on the server for router logs |
 | `LOG_RETENTION_DAYS` | `14` | how many days to keep logs |
 | `TZ` | `Europe/Warsaw` | time zone |
 | `BACKUP_HOUR` / `BACKUP_KEEP_DAYS` | `3` / `14` | backup hour and how long backups are kept |
+| `BACKUP_INCLUDE_METRICS` | `0` | `1` also puts the chart history (measurements) into the backups; by default they are small and hold logs, the change log, users, routers and IP lists, but no chart history |
 | `SPEEDTEST_TIME` | `03:30:00` | time of the nightly speed test |
 | `SPEEDTEST_STREAMS` | `6` | number of connections in the fallback Cloudflare test |
 
@@ -142,6 +144,10 @@ The other settings (polling interval, speed test, whitelist, router order, HTTPS
 The `backup` container makes a backup every day at `BACKUP_HOUR` into the `./backups` directory. On-demand backups, download and
 delete are in **Settings → Database backups**.
 
+By default the backups contain everything except the chart history (per-interface traffic, CPU/RAM measurements and client counts): logs, the change log,
+users, routers, settings and IP lists are included. After a restore the charts start empty. Set `BACKUP_INCLUDE_METRICS=1` to include the history
+(the backups are then much larger).
+
 Restoring (overwrites the current data):
 ```
 docker compose stop app
@@ -151,6 +157,10 @@ docker compose start app
 Moving to a new server: install the application, copy your `.env` and the backup file, start it and run the restore.
 
 ## Troubleshooting
+
+Database size: `docker compose exec db psql -U monitor -d monitor -c "SELECT relname, pg_size_pretty(pg_total_relation_size(relid)) FROM pg_catalog.pg_statio_user_tables ORDER BY pg_total_relation_size(relid) DESC LIMIT 8;"`.
+The per-interface table is usually the largest; lower `IFACE_RETENTION_DAYS` to shrink it. Removing old rows frees space for new ones but does not shrink the files
+on disk; to give the space back run (it locks the table for a moment and needs free space for a copy) `docker compose exec db psql -U monitor -d monitor -c "VACUUM FULL iface_metrics;"`.
 
 ```
 docker compose ps

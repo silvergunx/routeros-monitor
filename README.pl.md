@@ -122,11 +122,13 @@ Jeśli zmiana dotyczy skryptów na routerach, w opisie wersji będzie informacja
 | `DB_PASSWORD` | – | hasło bazy PostgreSQL (ustawiane tylko przy pierwszym starcie bazy) |
 | `ADMIN_USER` / `ADMIN_PASSWORD` | `admin` / – | pierwsze konto administratora |
 | `SECRET_KEY` | – | klucz sesji, min. 16 znaków (`openssl rand -hex 32`) |
-| `RETENTION_DAYS` | `30` | ile dni trzymać pomiary |
+| `RETENTION_DAYS` | `30` | ile dni trzymać pomiary (CPU, RAM, jakość łącza itd.) |
+| `IFACE_RETENTION_DAYS` | `7` | ile dni trzymać próbki ruchu interfejsów (największa tabela); starsze są usuwane w tle |
 | `SYSLOG_PORT` | `514` | port UDP na serwerze dla logów z routerów |
 | `LOG_RETENTION_DAYS` | `14` | ile dni trzymać logi |
 | `TZ` | `Europe/Warsaw` | strefa czasu |
 | `BACKUP_HOUR` / `BACKUP_KEEP_DAYS` | `3` / `14` | godzina kopii zapasowej i czas jej przechowywania |
+| `BACKUP_INCLUDE_METRICS` | `0` | `1` dołącza do kopii także historię wykresów (pomiary); domyślnie kopie są małe i zawierają logi, dziennik zmian, użytkowników, routery i listy IP, ale bez historii wykresów |
 | `SPEEDTEST_TIME` | `03:30:00` | godzina nocnego testu prędkości |
 | `SPEEDTEST_STREAMS` | `6` | liczba połączeń w zapasowym teście Cloudflare |
 
@@ -142,6 +144,10 @@ Pozostałe ustawienia (interwał odczytu, test prędkości, whitelista, kolejno�
 Kontener `backup` robi kopię codziennie o `BACKUP_HOUR` do katalogu `./backups`. Kopię na żądanie, pobieranie i usuwanie
 znajdziesz w **Ustawienia → Kopie zapasowe bazy**.
 
+Domyślnie kopie zawierają wszystko oprócz historii wykresów (ruch interfejsów, pomiary CPU/RAM i liczba klientów): logi, dziennik zmian,
+użytkownicy, routery, ustawienia i listy IP są w kopii. Po przywróceniu wykresy zaczynają od zera. `BACKUP_INCLUDE_METRICS=1` dołącza historię
+(kopie są wtedy znacznie większe).
+
 Przywracanie (nadpisuje obecne dane):
 ```
 docker compose stop app
@@ -151,6 +157,10 @@ docker compose start app
 Przeniesienie na nowy serwer: zainstaluj aplikację, skopiuj swój `.env` i plik kopii, uruchom i wykonaj przywracanie.
 
 ## Diagnostyka
+
+Rozmiar bazy: `docker compose exec db psql -U monitor -d monitor -c "SELECT relname, pg_size_pretty(pg_total_relation_size(relid)) FROM pg_catalog.pg_statio_user_tables ORDER BY pg_total_relation_size(relid) DESC LIMIT 8;"`.
+Zwykle największa jest tabela interfejsów; zmniejsz `IFACE_RETENTION_DAYS`, aby ją odchudzić. Usunięcie starych wierszy zwalnia miejsce na nowe, ale nie zmniejsza plików
+na dysku; aby oddać miejsce systemowi, uruchom (na chwilę blokuje tabelę i potrzebuje wolnego miejsca na kopię) `docker compose exec db psql -U monitor -d monitor -c "VACUUM FULL iface_metrics;"`.
 
 ```
 docker compose ps

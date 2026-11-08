@@ -147,7 +147,7 @@
   "set.bk.download": "Pobierz",
   "set.bk.confirm": "Usunąć kopię {name}?",
   "set.bk.empty": "Brak kopii.",
-  "set.bk.help.html": "Kopie leżą na tym samym serwerze (katalog <code>backups</code> obok docker-compose.yml). Dla bezpieczeństwa co jakiś czas pobierz kopię na inny komputer. Przechowuj też plik <code>.env</code>: bez niego (SECRET_KEY, hasła) odtworzenie będzie trudniejsze. Instrukcja przywracania jest w README.md.",
+  "set.bk.help.html": "Kopie leżą na tym samym serwerze (katalog <code>backups</code> obok docker-compose.yml). Domyślnie zawierają wszystko oprócz historii wykresów (logi, dziennik zmian, użytkownicy, routery i listy IP są w kopii). Dla bezpieczeństwa co jakiś czas pobierz kopię na inny komputer. Przechowuj też plik <code>.env</code>: bez niego (SECRET_KEY, hasła) odtworzenie będzie trudniejsze. Instrukcja przywracania jest w README.md.",
   "lv.loading": "ładowanie…",
   "lv.start": "▶ Włącz",
   "lv.stop": "■ Wyłącz",
@@ -674,5 +674,7 @@
   "msg.bk_limit_saved": "Zapisano limit rozmiaru kopii: {limit}.",
   "msg.bk_limit_none": "Zdjęto limit rozmiaru kopii.",
   "msg.bk_limit_removed": "Usunięto {n} najstarszych kopii.",
-  "msg.bk_limit_bad": "Podaj limit od 0,1 GB do 100000 GB."
+  "msg.bk_limit_bad": "Podaj limit od 0,1 GB do 100000 GB.",
+  "msg.bk_limit_small": "Limit nie może być mniejszy niż najnowsza kopia ({size}). Baza rośnie, więc kopie też; ustaw większy limit albo wybierz „bez limitu”.",
+  "set.bk.limit_min": "minimum: {min} GB (rozmiar najnowszej kopii)"
 }

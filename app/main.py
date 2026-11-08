@@ -23,6 +23,7 @@ if ADMIN_PASSWORD in _EXAMPLES or SECRET_KEY in _EXAMPLES or len(SECRET_KEY) < 1
     raise SystemExit("BLAD KONFIGURACJI: ustaw w pliku .env wlasne ADMIN_PASSWORD i SECRET_KEY "
                      "(SECRET_KEY min. 16 znakow, np. openssl rand -hex 32), potem: docker compose up -d")
 RETENTION = int(os.getenv("RETENTION_DAYS", "30"))
+IFACE_RETENTION = max(1, int(os.getenv("IFACE_RETENTION_DAYS", "7")))  # pomiary interfejsów to największa tabela
 CADDY = os.getenv("CADDY_ADMIN", "http://caddy:2019")
 if os.getenv("DB_PASSWORD"):
     DB_URL = URL.create("postgresql+psycopg2", username="monitor", password=os.environ["DB_PASSWORD"],
@@ -1122,7 +1123,6 @@ def _store_metrics(s, t, raw, ip=None):
     r.last_seen = n
     cutoff = n - dt.timedelta(days=RETENTION)
     s.execute(delete(Metric).where(Metric.router_id == r.id, Metric.ts < cutoff))
-    s.execute(delete(IfaceMetric).where(IfaceMetric.router_id == r.id, IfaceMetric.ts < cutoff))
     s.commit()
     return {"ok": True, "live": 1 if r.live else 0}
 
@@ -1563,6 +1563,25 @@ def purge_logs():
         s.commit()
 
 
+def purge_iface_metrics(chunk=20000, max_seconds=20):
+    """Usuwa pomiary interfejsów starsze niż IFACE_RETENTION_DAYS: porcjami, osobno dla każdego routera (po indeksie),
+    żeby jednorazowe skasowanie milionów wierszy nie blokowało bazy ani zgłoszeń routerów. Zwraca liczbę usuniętych."""
+    cutoff = now() - dt.timedelta(days=IFACE_RETENTION)
+    t0, total = time.monotonic(), 0
+    with Session(engine) as s:
+        rids = list(s.scalars(select(Router.id)))
+    for rid in rids:
+        while time.monotonic() - t0 < max_seconds:
+            with Session(engine) as s:
+                sub_q = select(IfaceMetric.id).where(IfaceMetric.router_id == rid, IfaceMetric.ts < cutoff).limit(chunk)
+                n = s.execute(delete(IfaceMetric).where(IfaceMetric.id.in_(sub_q))).rowcount or 0
+                s.commit()
+            total += n
+            if n < chunk:
+                break
+    return total
+
+
 def record_clients():
     """Co minutę: zapisz liczbę urządzeń online, klientów Wi-Fi i VPN online dla routerów z aktualnym inwentarzem."""
     with Session(engine) as s:
@@ -1626,6 +1645,8 @@ async def log_loop():
                 await run_in_threadpool(update_traffic)
             if n % 150 == 20:
                 await run_in_threadpool(enforce_backup_limit)
+            if n % 150 == 30:
+                await run_in_threadpool(purge_iface_metrics)
             if n % 15 == 7:
                 rid = await run_in_threadpool(speed_due)
                 if rid:
@@ -3404,6 +3425,7 @@ def backups_view(s):
     bk = backups_info()
     lim = backup_limit_mb(s)
     bk["limit_gb"] = round(lim / 1024, 2) if lim else ""
+    bk["min_gb"] = max(0.1, math.ceil(bk.get("newest_b", 0) / 1024 ** 3 * 100) / 100)  # nie mniej niż jedna (najnowsza) kopia
     if lim and bk.get("available"):
         lim_b = lim * 1024 * 1024
         bk["limit_h"] = bytes_h(lim_b)
@@ -3463,6 +3485,9 @@ def settings_backup_limit(request: Request, mode: str = Form("none"), gb: str = 
     mb = backuplib.parse_limit_gb(gb)
     if mb is None:
         return settings_view(request, s, tr("msg.bk_limit_bad"), False)
+    newest = backups_info().get("newest_b", 0)
+    if mb * 1024 * 1024 < newest:
+        return settings_view(request, s, tr("msg.bk_limit_small", size=bytes_h(newest)), False)
     sset(s, "backup_limit_mb", str(mb))
     log(s, "limit kopii", "%d MB" % mb)
     s.commit()
