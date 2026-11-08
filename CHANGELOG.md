@@ -7,8 +7,7 @@ Notes marked **Routers** mean the configuration command has to be pasted again o
 
 ## [Unreleased]
 
-Work in progress on `develop` (version 1.2.0).
-
+## [1.2.0] - 2026-11-08
 ### Added
 - **Ban button in the log analysis**: failed logins from public addresses show a "Ban" button next to each address (administrators, when the blacklist module is on). It adds the address to the blacklist for all routers without expiry, after a confirmation, using the same protections as the blacklist page (own address, application server, monitored routers). Already banned addresses are marked.
 - The blacklist firewall rule is now limited to the WAN interfaces (`in-interface-list=WAN`), removes its older copy when pasted again, and is also shown in the log analysis under the failed logins, next to the Ban buttons. **Routers**: paste the new rule again if you already use the old one (it matches all interfaces).
