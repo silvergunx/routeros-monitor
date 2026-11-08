@@ -19,3 +19,8 @@ First public version.
 - Interface in Polish and English with a cookie-based language switcher; more languages can be added with a JSON file ([docs/TRANSLATING.md](docs/TRANSLATING.md)).
 - Collapsible "Internet outages" section on the link quality tab.
 - English README, `SECURITY.md`, `CONTRIBUTING.md`.
+- Ready-made multi-arch Docker images (amd64, arm64) on GitHub Container Registry, with `stable` and `beta` channels
+  (`APP_CHANNEL` in `.env`); `docker-compose.yml` supports both `docker compose pull` and building from source.
+  The public images do not include Ookla's Speedtest CLI.
+- GitHub Actions: image publishing, GitHub Releases from tags, checks for translation files.
+- `tools/check_locales.py` validates translation files.

@@ -63,9 +63,10 @@ Interfejs jest dostępny po polsku i angielsku, działa w trybie jasnym i ciemny
    ```
    Ustaw własne `DB_PASSWORD` i `ADMIN_PASSWORD`, a jako `SECRET_KEY` wklej wynik `openssl rand -hex 32`.
    Aplikacja nie wystartuje z przykładowymi hasłami.
-4. Uruchom:
+4. Uruchom (jedna z dwóch dróg):
    ```
-   docker compose up -d --build
+   docker compose pull && docker compose up -d      # gotowy obraz (szybko)
+   docker compose up -d --build                     # albo budowa z kodu
    ```
 5. Otwórz `http://ADRES_SERWERA/` i zaloguj się danymi z `.env`.
 6. Dodaj router (**Routery → Dodaj router**), skopiuj komendę ze strony routera i wklej ją w terminalu RouterOS.
@@ -76,13 +77,32 @@ Szczegóły konfiguracji routerów: [docs/ROUTERY.md](docs/ROUTERY.md).
 
 ## Aktualizacja
 
+Wydania są na [stronie Releases](https://github.com/silvergunx/routeros-monitor/releases) i w [CHANGELOG.md](CHANGELOG.md).
+Najpierw zrób kopię bazy, potem zaktualizuj wybraną drogą:
+
 ```
 cd routeros-monitor
 touch backups/.now        # kopia bazy przed aktualizacją (po kilkunastu sekundach pojawi się w backups/)
+```
+
+**Droga A: gotowy obraz** (bez budowania na serwerze)
+```
+docker compose pull
+docker compose up -d
+```
+
+**Droga B: budowa z kodu**
+```
 git pull
 docker compose up -d --build
-docker compose logs app --tail 30
 ```
+
+Potem sprawdź logi: `docker compose logs app --tail 30`.
+
+**Kanały.** `stable` (domyślny) to przetestowane wydanie. Wersje testowe: ustaw `APP_CHANNEL=beta` w `.env` (droga A) albo
+`git checkout develop` (droga B). Wersje testowe mogą zawierać błędy, więc nie używaj ich na routerze, do którego nie masz dostępu.
+Konkretną wersję przypniesz przez `APP_CHANNEL=1.0.0`.
+
 Baza danych jest w wolumenie Dockera `dbdata`, a `.env` i `backups/` nie są częścią repozytorium, więc aktualizacja ich nie nadpisuje.
 Nowe kolumny w bazie aplikacja dodaje sama przy starcie.
 **Nie używaj `docker compose down -v`**, bo przełącznik `-v` usuwa wolumen z bazą.
@@ -93,6 +113,7 @@ Jeśli zmiana dotyczy skryptów na routerach, w opisie wersji będzie informacja
 
 | Zmienna | Domyślnie | Opis |
 |---|---|---|
+| `APP_CHANNEL` | `stable` | kanał obrazu: `stable`, `beta` albo konkretna wersja, np. `1.0.0` |
 | `DB_PASSWORD` | – | hasło bazy PostgreSQL (ustawiane tylko przy pierwszym starcie bazy) |
 | `ADMIN_USER` / `ADMIN_PASSWORD` | `admin` / – | pierwsze konto administratora |
 | `SECRET_KEY` | – | klucz sesji, min. 16 znaków (`openssl rand -hex 32`) |
@@ -149,8 +170,9 @@ Interfejs działa po polsku i angielsku (przełącznik PL / EN w menu i na ekran
 
 Kod projektu: [MIT](LICENSE).
 
-Podczas budowy obrazu pobierany jest program **Speedtest CLI firmy Ookla**, który nie jest częścią tego repozytorium
-i ma własną licencję (użytek osobisty, niekomercyjny). Aplikacja uruchamia go z akceptacją licencji i polityki prywatności Ookla.
-Jeśli tego nie chcesz, wybierz w Ustawieniach silnik Cloudflare.
+Przy własnej budowie obrazu (`docker compose up -d --build`) pobierany jest program **Speedtest CLI firmy Ookla**, który nie jest częścią
+tego repozytorium i ma własną licencję (użytek osobisty, niekomercyjny); aplikacja uruchamia go z akceptacją licencji i polityki prywatności Ookla.
+Gotowe obrazy go **nie zawierają** (w Ustawieniach jest wtedy podpowiedź, jak zbudować obraz z Ooklą) i używają testu Cloudflare.
+Jeśli nie chcesz Ookli, wybierz w Ustawieniach silnik Cloudflare.
 
 Projekt nie jest powiązany z MikroTik, Ookla ani Cloudflare. Nazwy należą do ich właścicieli.

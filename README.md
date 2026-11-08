@@ -63,9 +63,10 @@ The interface is available in Polish and English, works in light and dark mode a
    ```
    Set your own `DB_PASSWORD` and `ADMIN_PASSWORD`, and paste the output of `openssl rand -hex 32` as `SECRET_KEY`.
    The application will not start with the example passwords.
-4. Start it:
+4. Start it (pick one):
    ```
-   docker compose up -d --build
+   docker compose pull && docker compose up -d      # ready-made image (fast)
+   docker compose up -d --build                     # or build it from the source
    ```
 5. Open `http://SERVER_ADDRESS/` and log in with the data from `.env`.
 6. Add a router (**Routers → Add router**), copy the command from the router page and paste it into the RouterOS terminal.
@@ -76,13 +77,32 @@ Router configuration details: [docs/ROUTERY.md](docs/ROUTERY.md) (Polish).
 
 ## Updating
 
+Releases are listed on the [Releases page](https://github.com/silvergunx/routeros-monitor/releases) and in [CHANGELOG.md](CHANGELOG.md).
+Take a database backup first, then update in the way you prefer:
+
 ```
 cd routeros-monitor
 touch backups/.now        # database backup before the update (the file appears in backups/ after a few seconds)
+```
+
+**Option A: ready-made image** (no building on the server)
+```
+docker compose pull
+docker compose up -d
+```
+
+**Option B: build from the source**
+```
 git pull
 docker compose up -d --build
-docker compose logs app --tail 30
 ```
+
+Then check the log: `docker compose logs app --tail 30`.
+
+**Channels.** `stable` (default) is the tested release. For test versions set `APP_CHANNEL=beta` in `.env` (option A) or use
+`git checkout develop` (option B). Test versions may contain bugs, so do not use them on a router you cannot reach.
+To pin an exact version use `APP_CHANNEL=1.0.0`.
+
 The database lives in the Docker volume `dbdata`, and `.env` and `backups/` are not part of the repository, so an update does not overwrite them.
 The application adds new database columns on its own at startup.
 **Do not use `docker compose down -v`**: the `-v` switch deletes the volume with the database.
@@ -93,6 +113,7 @@ If a change affects the scripts on the routers, the release notes will say that 
 
 | Variable | Default | Description |
 |---|---|---|
+| `APP_CHANNEL` | `stable` | image channel: `stable`, `beta` or an exact version such as `1.0.0` |
 | `DB_PASSWORD` | – | PostgreSQL password (applied only when the database is first created) |
 | `ADMIN_USER` / `ADMIN_PASSWORD` | `admin` / – | the first administrator account |
 | `SECRET_KEY` | – | session key, at least 16 characters (`openssl rand -hex 32`) |
@@ -154,8 +175,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Changes are listed in [CHANGELOG.md](CHA
 
 Project code: [MIT](LICENSE).
 
-The image build downloads **Ookla's Speedtest CLI**, which is not part of this repository and has its own licence
-(personal, non-commercial use). The application runs it accepting Ookla's licence and privacy policy.
-If you do not want that, choose the Cloudflare engine in Settings.
+When you build the image yourself (`docker compose up -d --build`), **Ookla's Speedtest CLI** is downloaded. It is not part of this repository
+and has its own licence (personal, non-commercial use); the application runs it accepting Ookla's licence and privacy policy.
+The ready-made images do **not** include it (Settings then shows how to build with it) and use the Cloudflare test.
+If you do not want Ookla, choose the Cloudflare engine in Settings.
 
 This project is not affiliated with MikroTik, Ookla or Cloudflare. The names belong to their owners.
