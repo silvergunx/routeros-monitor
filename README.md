@@ -113,6 +113,7 @@ If a change affects the scripts on the routers, the release notes will say that 
 
 | Variable | Default | Description |
 |---|---|---|
+| `UPDATE_CHECK` | `1` | set to `0` to stop the panel from asking GitHub for new releases (see below) |
 | `APP_CHANNEL` | `stable` | image channel: `stable`, `beta` or an exact version such as `1.0.0` |
 | `DB_PASSWORD` | – | PostgreSQL password (applied only when the database is first created) |
 | `ADMIN_USER` / `ADMIN_PASSWORD` | `admin` / – | the first administrator account |
@@ -124,6 +125,10 @@ If a change affects the scripts on the routers, the release notes will say that 
 | `BACKUP_HOUR` / `BACKUP_KEEP_DAYS` | `3` / `14` | backup hour and how long backups are kept |
 | `SPEEDTEST_TIME` | `03:30:00` | time of the nightly speed test |
 | `SPEEDTEST_STREAMS` | `6` | number of connections in the fallback Cloudflare test |
+
+**Update notice.** The panel (administrators only) shows a badge when a newer release exists on GitHub. The server asks the public
+GitHub API (`api.github.com`) at most every 6 hours, in the background, and sends nothing but its IP address and the application version
+in the User-Agent. Test versions (`-beta`) also see test releases. Disable it with `UPDATE_CHECK=0`. The panel never updates itself.
 
 Do not use the `$` character in values (Compose treats it as a variable).
 The other settings (polling interval, speed test, whitelist, router order, HTTPS) are in the panel under **Settings**.

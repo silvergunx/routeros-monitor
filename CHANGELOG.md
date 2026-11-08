@@ -23,4 +23,5 @@ First public version.
   (`APP_CHANNEL` in `.env`); `docker-compose.yml` supports both `docker compose pull` and building from source.
   The public images do not include Ookla's Speedtest CLI.
 - GitHub Actions: image publishing, GitHub Releases from tags, checks for translation files.
-- `tools/check_locales.py` validates translation files.
+- `tools/check_locales.py` validates translation files; `tests/test_version.py` tests version handling.
+- Application version in the page footer and a badge for administrators when a newer release is available on GitHub (`UPDATE_CHECK=0` disables it).

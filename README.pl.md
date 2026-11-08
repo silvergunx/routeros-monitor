@@ -113,6 +113,7 @@ Jeśli zmiana dotyczy skryptów na routerach, w opisie wersji będzie informacja
 
 | Zmienna | Domyślnie | Opis |
 |---|---|---|
+| `UPDATE_CHECK` | `1` | `0` wyłącza sprawdzanie nowych wydań na GitHubie (patrz niżej) |
 | `APP_CHANNEL` | `stable` | kanał obrazu: `stable`, `beta` albo konkretna wersja, np. `1.0.0` |
 | `DB_PASSWORD` | – | hasło bazy PostgreSQL (ustawiane tylko przy pierwszym starcie bazy) |
 | `ADMIN_USER` / `ADMIN_PASSWORD` | `admin` / – | pierwsze konto administratora |
@@ -124,6 +125,10 @@ Jeśli zmiana dotyczy skryptów na routerach, w opisie wersji będzie informacja
 | `BACKUP_HOUR` / `BACKUP_KEEP_DAYS` | `3` / `14` | godzina kopii zapasowej i czas jej przechowywania |
 | `SPEEDTEST_TIME` | `03:30:00` | godzina nocnego testu prędkości |
 | `SPEEDTEST_STREAMS` | `6` | liczba połączeń w zapasowym teście Cloudflare |
+
+**Powiadomienie o aktualizacji.** Panel (tylko administratorowi) pokazuje znaczek, gdy na GitHubie jest nowsze wydanie. Serwer pyta publiczne
+API GitHuba (`api.github.com`) najwyżej co 6 godzin, w tle, i nie wysyła nic poza adresem IP i wersją aplikacji w nagłówku User-Agent.
+Wersje testowe (`-beta`) widzą też wydania testowe. Wyłączysz to przez `UPDATE_CHECK=0`. Panel nigdy sam się nie aktualizuje.
 
 Nie używaj znaku `$` w wartościach (Compose traktuje go jako zmienną).
 Pozostałe ustawienia (interwał odczytu, test prędkości, whitelista, kolejność routerów, HTTPS) są w panelu w zakładce **Ustawienia**.

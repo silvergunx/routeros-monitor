@@ -4,7 +4,7 @@ Thank you for your interest! Bug reports, ideas, translations and pull requests 
 
 ## Reporting a problem or suggesting something
 
-Open an issue and include: the application version (file `VERSION`), the RouterOS version of the router involved,
+Open an issue and include: the application version (file `app/VERSION`, also shown in the page footer), the RouterOS version of the router involved,
 what you expected and what happened, and the relevant lines of `docker compose logs app`.
 Remove passwords, tokens and public IP addresses from anything you paste.
 For security problems see [SECURITY.md](SECURITY.md) instead.
@@ -20,10 +20,10 @@ Open pull requests against **`develop`**. Maintainers merge `develop` into `main
 Update [CHANGELOG.md](CHANGELOG.md) in your pull request.
 
 Releasing (maintainers):
-1. Set the version in `VERSION` and add a section `## [x.y.z] - date` to `CHANGELOG.md`.
+1. Set the version in `app/VERSION` and add a section `## [x.y.z] - date` to `CHANGELOG.md`.
 2. Test a beta first: tag `vX.Y.Z-beta.1` on `develop`. GitHub Actions publishes the image `:beta` and a pre-release.
 3. When it is good, merge `develop` into `main` and tag `vX.Y.Z`. Actions publishes `:X.Y.Z` and `:stable` and creates the Release
-   (the tag must match `VERSION`).
+   (the tag must match `app/VERSION`).
 
 ## Translations
 
@@ -46,6 +46,6 @@ The panel is then at `http://localhost/`. After changing Python or template file
 - Keep changes small and focused; one topic per pull request.
 - Every text shown to the user goes through the translation files (`app/locales/*.json`), never hard-coded in templates or Python.
   Provide at least the English and Polish text.
-- Run `python tools/check_locales.py` after touching `app/locales/*.json`.
+- Run `python tests/test_version.py` and `python tools/check_locales.py` before opening a pull request.
 - Do not add new dependencies without a good reason; the project is intentionally small.
 - Do not commit secrets, `.env` files, backups or real router data.

@@ -21,4 +21,5 @@ See [docs/BEZPIECZENSTWO.md](docs/BEZPIECZENSTWO.md) (Polish). The main points:
 - The router token in the configuration command works like a password; use HTTPS (Settings → HTTPS) or a VPN for routers that connect over the internet.
 - Prefer exposing the panel only on the local network or through a VPN.
 - Syslog (UDP 514) has no authentication; restrict the port in the server firewall to your routers.
+- The panel asks `api.github.com` for new releases (at most every 6 hours, administrators' badge only); disable with `UPDATE_CHECK=0`.
 - Backups in `./backups` contain the whole database (password hashes and router tokens). Do not share them.

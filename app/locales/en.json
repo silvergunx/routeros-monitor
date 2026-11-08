@@ -622,5 +622,7 @@
   "an.186": "Package",
   "an.187": "Password attack (brute force) from the internet",
   "an.188": "Many failed login attempts from the same public addresses (most: %d). This is an automated attack that guesses the password.",
-  "an.189": "Unstable link on a port (frequent disconnects)"
+  "an.189": "Unstable link on a port (frequent disconnects)",
+  "nav.update": "Update available: {v}",
+  "nav.update_title": "Click to see what changed"
 }

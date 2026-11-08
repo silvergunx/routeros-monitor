@@ -20,5 +20,7 @@ jobs:
         run: python tools/check_locales.py
       - name: Python syntax
         run: python -m compileall -q app
+      - name: Unit tests
+        run: python tests/test_version.py
       - name: Docker image builds
         run: docker build --build-arg OOKLA_VERSION= ./app

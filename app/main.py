@@ -1,6 +1,7 @@
 import os, re, csv, io, json, math, asyncio, socket, hashlib, hmac, secrets, time, ipaddress, datetime as dt
 from urllib.parse import quote, urlparse
 import i18n
+import version as appver
 import httpx
 from fastapi import FastAPI, Request, Form, Depends, HTTPException, Body
 from fastapi.responses import RedirectResponse, PlainTextResponse, Response, FileResponse, StreamingResponse
@@ -39,6 +40,8 @@ def L(v):
 
 templates.env.globals["th"] = i18n.th
 templates.env.globals["tn"] = i18n.tn
+templates.env.globals["app_version"] = appver.current()
+templates.env.globals["update_info"] = appver.update_info
 templates.env.globals["languages"] = i18n.languages
 
 
