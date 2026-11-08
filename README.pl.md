@@ -7,7 +7,23 @@ którą routery pobierają same. Całość działa w Dockerze (`docker compose`)
 
 Interfejs jest dostępny po polsku i angielsku, działa w trybie jasnym i ciemnym oraz na telefonie.
 
-**Spis treści:** [Co potrafi](#co-potrafi) · [Wymagania](#wymagania) · [Instalacja](#instalacja) · [Aktualizacja](#aktualizacja) · [Konfiguracja](#konfiguracja-env) · [Kopie zapasowe](#kopie-zapasowe) · [Diagnostyka](#diagnostyka) · [Języki](#języki) · [Dokumentacja](#dokumentacja) · [Licencja](#licencja)
+**Spis treści:** [Zrzuty ekranu](#zrzuty-ekranu) · [Co potrafi](#co-potrafi) · [Wymagania](#wymagania) · [Instalacja](#instalacja) · [Aktualizacja](#aktualizacja) · [Konfiguracja](#konfiguracja-env) · [Kopie zapasowe](#kopie-zapasowe) · [Diagnostyka](#diagnostyka) · [Języki](#języki) · [Dokumentacja](#dokumentacja) · [Licencja](#licencja)
+
+## Zrzuty ekranu
+
+<p align="center"><img src="docs/img/routers-dark.png" alt="Lista routerów w ciemnym motywie" width="900"></p>
+
+| | |
+|---|---|
+| ![Strona routera: CPU, RAM, temperatura, ruch WAN i wykresy](docs/img/router-system-light.png)<br>*Strona routera: CPU, RAM, temperatura, ruch WAN i wykresy* | ![Jakość łącza: sondy, przerwy i nocny test prędkości](docs/img/link-quality-dark.png)<br>*Jakość łącza: sondy, przerwy i nocny test prędkości* |
+| ![Klienci Wi-Fi z oceną jakości połączenia](docs/img/wifi-dark.png)<br>*Klienci Wi-Fi z oceną jakości połączenia* | ![Logi routerów wyjaśnione po ludzku, z poradami](docs/img/log-analysis-dark.png)<br>*Logi routerów wyjaśnione po ludzku, z poradami* |
+| ![Tryb ustawiania Wi-Fi na żywo (szukanie miejsca dla AP)](docs/img/live-wifi-dark.png)<br>*Tryb ustawiania Wi-Fi na żywo (szukanie miejsca dla AP)* | ![Whitelista i blacklista z gotową regułą firewalla do wklejenia](docs/img/blacklist-light.png)<br>*Whitelista i blacklista z gotową regułą firewalla do wklejenia* |
+| ![Test prędkości: wybór silnika i automatyczny wybór najlepszego serwera](docs/img/settings-speedtest-expanded-light.png)<br>*Test prędkości: wybór silnika i automatyczny wybór najlepszego serwera* | ![Kopie zapasowe bazy z limitem rozmiaru](docs/img/settings-backups-light.png)<br>*Kopie zapasowe bazy z limitem rozmiaru* |
+
+<p align="center"><img src="docs/img/mobile-routers-light.png" alt="Działa na telefonie, w jasnym i ciemnym motywie" width="260"> &nbsp; <img src="docs/img/mobile-router-dark.png" alt="Działa na telefonie, w jasnym i ciemnym motywie" width="260"></p>
+<p align="center"><em>Działa na telefonie, w jasnym i ciemnym motywie</em></p>
+
+<sub>Zrzuty pokazują fikcyjne dane demonstracyjne (`tools/demo_data.py`); wszystkie nazwy i adresy są zmyślone.</sub>
 
 ## Co potrafi
 

@@ -7,7 +7,23 @@ fetch on their own. Everything runs in Docker (`docker compose`); nothing but Do
 
 The interface is available in Polish and English, works in light and dark mode and on phones.
 
-**Contents:** [Features](#features) · [Requirements](#requirements) · [Installation](#installation) · [Updating](#updating) · [Configuration](#configuration-env) · [Backups](#backups) · [Troubleshooting](#troubleshooting) · [Languages](#languages) · [Documentation](#documentation) · [License](#license)
+**Contents:** [Screenshots](#screenshots) · [Features](#features) · [Requirements](#requirements) · [Installation](#installation) · [Updating](#updating) · [Configuration](#configuration-env) · [Backups](#backups) · [Troubleshooting](#troubleshooting) · [Languages](#languages) · [Documentation](#documentation) · [License](#license)
+
+## Screenshots
+
+<p align="center"><img src="docs/img/routers-dark.png" alt="Router list in the dark theme" width="900"></p>
+
+| | |
+|---|---|
+| ![A router page: CPU, RAM, temperature, WAN traffic and charts](docs/img/router-system-light.png)<br>*A router page: CPU, RAM, temperature, WAN traffic and charts* | ![Link quality: probes, outages and the nightly speed test](docs/img/link-quality-dark.png)<br>*Link quality: probes, outages and the nightly speed test* |
+| ![Wi-Fi clients with a quality rating](docs/img/wifi-dark.png)<br>*Wi-Fi clients with a quality rating* | ![Router logs explained in plain language, with advice](docs/img/log-analysis-dark.png)<br>*Router logs explained in plain language, with advice* |
+| ![Live Wi-Fi setup mode for placing an access point](docs/img/live-wifi-dark.png)<br>*Live Wi-Fi setup mode for placing an access point* | ![Whitelist and blacklist with a ready-to-paste firewall rule](docs/img/blacklist-light.png)<br>*Whitelist and blacklist with a ready-to-paste firewall rule* |
+| ![Speed test: engine choice and automatic best-server selection](docs/img/settings-speedtest-expanded-light.png)<br>*Speed test: engine choice and automatic best-server selection* | ![Database backups with a size limit](docs/img/settings-backups-light.png)<br>*Database backups with a size limit* |
+
+<p align="center"><img src="docs/img/mobile-routers-light.png" alt="Works on phones, in light and dark mode" width="260"> &nbsp; <img src="docs/img/mobile-router-dark.png" alt="Works on phones, in light and dark mode" width="260"></p>
+<p align="center"><em>Works on phones, in light and dark mode</em></p>
+
+<sub>Screenshots show fictional demo data (`tools/demo_data.py`); all names and addresses are made up.</sub>
 
 ## Features
 

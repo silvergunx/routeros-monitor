@@ -41,6 +41,16 @@ docker compose up -d --build
 
 The panel is then at `http://localhost/`. After changing Python or template files rebuild with `docker compose up -d --build`.
 
+## Demo data and screenshots
+
+To try the panel without routers (or to retake the screenshots in `docs/img`), use the fictional demo data. All names and addresses are made up and the
+tools refuse to work on anything but a SQLite file:
+```
+DATABASE_URL=sqlite:///demo.db python tools/demo_data.py       # creates the demo database
+DATABASE_URL=sqlite:///demo.db python tools/demo_server.py     # http://127.0.0.1:8765  (admin / demo-admin-2026)
+python tools/screenshots.py http://127.0.0.1:8765              # needs Microsoft Edge; writes docs/img/*.png
+```
+
 ## Code guidelines
 
 - Keep changes small and focused; one topic per pull request.
