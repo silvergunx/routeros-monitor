@@ -9,6 +9,9 @@ Notes marked **Routers** mean the configuration command has to be pasted again o
 
 Work in progress on `develop` (version 1.2.0).
 
+### Added
+- **Ban button in the log analysis**: failed logins from public addresses show a "Ban" button next to each address (administrators, when the blacklist module is on). It adds the address to the blacklist for all routers without expiry, after a confirmation, using the same protections as the blacklist page (own address, application server, monitored routers). Already banned addresses are marked.
+
 ### Fixed
 - The router page showed "RouterOS {'v': ...} available" instead of the RouterOS version: the application update notice in the menu shadowed the RouterOS update variable.
 

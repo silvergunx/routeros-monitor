@@ -7,7 +7,7 @@ import netguard
 import backups as backuplib
 import httpx
 from fastapi import FastAPI, Request, Form, Depends, HTTPException, Body
-from fastapi.responses import RedirectResponse, PlainTextResponse, Response, FileResponse, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, PlainTextResponse, Response, FileResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.concurrency import run_in_threadpool
@@ -2991,8 +2991,33 @@ def logs_analysis(request: Request, rid: int, hours: int = 24, s: Session = Depe
     unk = sorted(unknown.values(), key=lambda u: -u["count"])[:15]
     for u in unk:
         u["last"] = u["last"].isoformat(timespec="seconds")
-    return {"groups": out, "unknown": unk, "total": len(rows),
+    can_ban = bool(request.state.user.is_admin and blacklist_on(s))
+    banned = []
+    if can_ban:
+        for g in out:
+            if g["id"] == "login_fail_wan":
+                g["ban_key"] = tr("an.015")
+        banned = [w.ip for w in s.scalars(select(Whitelist).where(Whitelist.kind == "black", Whitelist.active == True))]  # noqa: E712
+    return {"groups": out, "unknown": unk, "total": len(rows), "can_ban": can_ban, "banned": banned,
             "summary": {k: sum(g["count"] for g in out if g["level"] == k) for k in order}}
+
+
+@app.post("/api/blacklist/ban", dependencies=[Depends(admin)])
+def ban_from_log(request: Request, ip: str = Form(), rid: str = Form(""), s: Session = Depends(db)):
+    """Przycisk 'Banuj' w analizie logów: dodaje adres do blacklisty (bez wygaśnięcia, dla wszystkich routerów)."""
+    try:
+        net = parse_ip(ip)
+    except ValueError:
+        return JSONResponse({"ok": False, "msg": tr("msg.wl_bad_addr")}, 400)
+    why = ban_error(net, request, s)
+    if why:
+        return JSONResponse({"ok": False, "msg": why}, 400)
+    if s.scalar(select(Whitelist.id).where(Whitelist.kind == "black", Whitelist.ip == net, Whitelist.active == True)):  # noqa: E712
+        return {"ok": True, "msg": tr("msg.ban_dup"), "ip": net}
+    s.add(Whitelist(kind="black", ip=net, comment=cmt(tr("msg.ban_comment")), expires=None, router_id=None))
+    log(s, "blacklist+", "%s (%s) zakres=wszystkie, z analizy logów routera %s" % (net, cmt(tr("msg.ban_comment")), rid or "?"))
+    s.commit()
+    return {"ok": True, "msg": tr("msg.ban_ok"), "ip": net}
 
 
 # ---------- RouterOS update check ----------
