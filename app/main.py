@@ -300,7 +300,7 @@ class Whitelist(Base):
 class Setting(Base):
     __tablename__ = "settings"
     key: Mapped[str] = mapped_column(String(50), primary_key=True)
-    value: Mapped[str] = mapped_column(String(255), default="")
+    value: Mapped[str] = mapped_column(Text, default="")  # TEXT: np. wynik wyboru serwera LibreSpeed ma kilkaset znaków
 
 
 MIGRATIONS = [
@@ -309,6 +309,7 @@ MIGRATIONS = [
     "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS loss DOUBLE PRECISION",
     "ALTER TABLE whitelist ADD COLUMN IF NOT EXISTS router_id INTEGER",
     "ALTER TABLE whitelist ADD COLUMN IF NOT EXISTS kind VARCHAR(5) NOT NULL DEFAULT 'white'",
+    "ALTER TABLE settings ALTER COLUMN value TYPE TEXT",
     "ALTER TABLE routers ADD COLUMN IF NOT EXISTS wan VARCHAR(40)",
     "ALTER TABLE whitelist ALTER COLUMN ip TYPE VARCHAR(255)",
     "ALTER TABLE audit ADD COLUMN IF NOT EXISTS who VARCHAR(40)",
