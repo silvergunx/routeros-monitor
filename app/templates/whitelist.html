@@ -1,20 +1,24 @@
 {% extends "base.html" %}{% block c %}
-<div class="card"><h2>{{ t('wl.title') }}</h2>
-<p class="mut">{{ th('wl.help.html') }}</p>
+{% set black = kind == 'black' %}
+<div class="ltabs">{% if wl_enabled or not black %}<a href="/whitelist" class="{{'on' if not black}}">{{ t('wl.title') }}</a>{% endif %}{% if bl_enabled or black %}<a href="/blacklist" class="{{'on' if black}}">{{ t('bl.title') }}</a>{% endif %}</div>
+<div class="card"><h2>{{ t('bl.title') if black else t('wl.title') }}</h2>
+<p class="mut">{{ th('bl.help.html') if black else th('wl.help.html') }}</p>
 {% if err %}<p class="err">{{err}}</p>{% endif %}{% if ok %}<p class="ok">{{ok}}</p>{% endif %}
-{% if request.state.user.is_admin %}<form method="post" action="/whitelist" class="row"><input name="ip" placeholder="{{ t('wl.ip_ph') }}" style="width:220px" required> <input name="comment" placeholder="{{ t('wl.comment_ph') }}">
-<input name="days" type="number" min="1" placeholder="{{ t('wl.days_ph') }}" style="width:110px">
-<select name="router"><option value="">{{ t('wl.all_routers') }}</option>{% for r in routers %}<option value="{{r.id}}">{{r.name}}</option>{% endfor %}</select> <button class="p">{{ t('common.add') }}</button></form>{% endif %}</div>
-<div class="card scroll"><table><tr><th>{{ t('wl.address') }}</th><th>{{ t('wl.comment') }}</th><th>{{ t('wl.scope') }}</th><th>{{ t('wl.expires') }}</th><th>{{ t('wl.status') }}</th><th></th></tr>
+{% if request.state.user.is_admin %}<form method="post" action="{{base}}" class="row"><input name="ip" placeholder="{{ t('wl.ip_ph') }}" style="width:220px" required> <input name="comment" placeholder="{{ t('bl.reason_ph') if black else t('wl.comment_ph') }}">
+<input name="days" type="number" min="1" placeholder="{{ t('bl.days_ph') if black else t('wl.days_ph') }}" style="width:110px">
+<select name="router"><option value="">{{ t('wl.all_routers') }}</option>{% for r in routers %}<option value="{{r.id}}">{{r.name}}</option>{% endfor %}</select> <button class="p">{{ t('bl.ban') if black else t('common.add') }}</button></form>{% endif %}</div>
+{% if black %}<div class="card"><h3 style="margin-top:0">{{ t('bl.rule_title') }}</h3><p class="mut small">{{ t('bl.rule_help') }}</p>
+<pre>/ip firewall raw add chain=prerouting src-address-list=blacklist action=drop comment="app-blacklist"</pre></div>{% endif %}
+<div class="card scroll"><table><tr><th>{{ t('wl.address') }}</th><th>{{ t('bl.reason') if black else t('wl.comment') }}</th><th>{{ t('wl.scope') }}</th><th>{{ t('wl.expires') }}</th><th>{{ t('wl.status') }}</th><th></th></tr>
 {% for w in items %}{% set dead = w.expires and w.expires < now %}<tr><td>{{w.ip}}</td><td>{{w.comment}}</td>
 <td>{{names.get(w.router_id, t('wl.all')) if w.router_id else t('wl.all')}}</td>
 <td>{% if w.expires %}<span class="t" data-t="{{w.expires|iso}}Z"></span>{% else %}-{% endif %}</td>
 <td class="{{'ok' if w.active and not dead else 'off'}}">{{ t('wl.expired') if dead else (t('users.active') if w.active else t('users.disabled')) }}</td>
-<td>{% if request.state.user.is_admin %}<form class="i" method="post" action="/whitelist/{{w.id}}/toggle"><button>{{ t('common.disable') if w.active else t('common.enable') }}</button></form>
-<form class="i" method="post" action="/whitelist/{{w.id}}/delete"><button>{{ t('common.delete') }}</button></form>{% endif %}</td></tr>{% endfor %}</table></div>
+<td>{% if request.state.user.is_admin %}<form class="i" method="post" action="{{base}}/{{w.id}}/toggle"><button>{{ t('common.disable') if w.active else t('common.enable') }}</button></form>
+<form class="i" method="post" action="{{base}}/{{w.id}}/delete"><button>{{ t('common.delete') }}</button></form>{% endif %}</td></tr>{% else %}<tr><td colspan="6" class="mut">{{ t('bl.empty') if black else t('wl.empty') }}</td></tr>{% endfor %}</table></div>
 {% if request.state.user.is_admin %}<div class="card"><h2>{{ t('wl.import_title') }}</h2>
 <p class="mut">{{ th('wl.import_help.html') }}</p>
-<form method="post" action="/whitelist/import"><textarea name="data" rows="5" style="width:100%" placeholder="203.0.113.5,Biuro&#10;198.51.100.0/24,Partner,30"></textarea>
+<form method="post" action="{{base}}/import"><textarea name="data" rows="5" style="width:100%" placeholder="203.0.113.5,Biuro&#10;198.51.100.0/24,Partner,30"></textarea>
 <div class="row" style="margin-top:8px"><select name="router"><option value="">{{ t('wl.default_all') }}</option>{% for r in routers %}<option value="{{r.id}}">{{ t('wl.default_one', name=r.name) }}</option>{% endfor %}</select>
-<button class="p">{{ t('wl.import') }}</button> <a href="/whitelist/export">{{ t('wl.export') }}</a></div></form></div>{% endif %}
+<button class="p">{{ t('wl.import') }}</button> <a href="{{base}}/export">{{ t('wl.export') }}</a></div></form></div>{% endif %}
 {% endblock %}

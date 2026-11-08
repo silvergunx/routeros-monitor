@@ -2,7 +2,7 @@
 
 **English** · [Polski](README.pl.md)
 
-A web panel for monitoring **MikroTik RouterOS 7** routers and a central source of an **IP address whitelist** that the routers
+A web panel for monitoring **MikroTik RouterOS 7** routers and a central source of an **IP whitelist and blacklist** that the routers
 fetch on their own. Everything runs in Docker (`docker compose`); nothing but Docker has to be installed on the server.
 
 The interface is available in Polish and English, works in light and dark mode and on phones.
@@ -27,9 +27,12 @@ The interface is available in Polish and English, works in light and dark mode a
 - receiving router logs over syslog (UDP), colouring by severity, acknowledging, export with a date range
 - translation of common RouterOS messages into plain language and an analysis tab with advice
 
-**Whitelist**
-- IP addresses, networks and domains stored in the application; routers fetch the list with a script into `/ip firewall address-list`
-- import and export, enabling/disabling entries; the whole module can be switched off in Settings
+**Whitelist and blacklist**
+- IP addresses, networks and domains stored in the application; routers fetch the lists with scripts into `/ip firewall address-list`
+  (lists `whitelist` and `blacklist`), for all routers or for one
+- blacklist (ban list): optional expiry for temporary bans, protection against banning yourself, the application server or a monitored router,
+  and a ready-to-paste firewall drop rule (the application itself never changes the firewall)
+- import and export, enabling/disabling entries; each module can be switched off in Settings
 
 **Other**
 - live Wi-Fi setup / analysis mode (readings every 2 s) for finding the best place for an access point

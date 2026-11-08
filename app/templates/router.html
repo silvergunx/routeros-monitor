@@ -150,6 +150,8 @@ o.querySelector('summary').addEventListener('click',e=>{if(o.classList.contains(
 :do {/system logging action remove [find name=appsyslog]} on-error={}
 /tool netwatch remove [find comment~"^app-nw:"]
 /ip firewall address-list remove [find comment~"^wl:"]
+/ip firewall address-list remove [find comment~"^bl:"]
+:do {/ip firewall raw remove [find comment="app-blacklist"]} on-error={}
 /file remove [find name~"^app-"]</pre>
 <h3 style="margin-top:20px">{{ t('rp.cfg_feats') }}</h3>
 <p class="small">{% if si.known %}{{ si.feats|join(' · ') if si.feats else t('rp.cfg_nofeats') }}{% else %}{{ t('rp.cfg_unknown') }}{% endif %}</p>

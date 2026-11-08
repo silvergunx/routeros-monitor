@@ -17,6 +17,10 @@ Work in progress on `develop` (version 1.1.0).
   and repeats the check every 7 days (button "Find the best server now" in Settings). It uses 8 parallel connections. On fast links its download result can be well below Ookla's (it depends on the community server), so Ookla stays the
   recommended engine when you build the image yourself.
 - `THIRD_PARTY.md` with the licences of bundled components.
+- **Blacklist** (ban list) next to the whitelist: the same entries (IP, network or domain, reason, optional expiry, all routers or one,
+  import/export, enable/disable), a separate router script `app-blacklist` (**Routers**: paste the configuration command again) and a
+  ready-to-paste firewall rule. The application refuses to ban your own address, the application server, a monitored router,
+  loopback/multicast addresses and networks broader than /8. The module can be switched off in Settings.
 
 ## [1.0.0] - 2026-11-08
 

@@ -27,9 +27,12 @@ Interfejs jest dostępny po polsku i angielsku, działa w trybie jasnym i ciemny
 - odbiór logów z routerów przez syslog (UDP), kolorowanie wg ważności, potwierdzanie, eksport z zakresem dat
 - tłumaczenie typowych komunikatów RouterOS na zrozumiały opis po polsku i zakładka analizy z poradami
 
-**Whitelista**
-- adresy IP, sieci i domeny w bazie aplikacji; routery pobierają listę skryptem do `/ip firewall address-list`
-- import i eksport, włączanie/wyłączanie wpisów; cały moduł można wyłączyć w Ustawieniach
+**Whitelista i blacklista**
+- adresy IP, sieci i domeny w bazie aplikacji; routery pobierają listy skryptami do `/ip firewall address-list`
+  (listy `whitelist` i `blacklist`), dla wszystkich routerów albo jednego
+- blacklista (banowanie): opcjonalny termin ważności dla banów czasowych, ochrona przed zbanowaniem siebie, serwera aplikacji
+  i monitorowanego routera oraz gotowa reguła firewalla do wklejenia (sama aplikacja nigdy nie zmienia firewalla)
+- import i eksport, włączanie/wyłączanie wpisów; każdy moduł można wyłączyć w Ustawieniach
 
 **Pozostałe**
 - tryb ustawiania / analizy Wi-Fi na żywo (odczyt co 2 s) do szukania najlepszego miejsca dla punktu dostępowego

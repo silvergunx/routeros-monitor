@@ -3,6 +3,7 @@ from urllib.parse import quote, urlparse
 import i18n
 import version as appver
 import speedengines
+import netguard
 import httpx
 from fastapi import FastAPI, Request, Form, Depends, HTTPException, Body
 from fastapi.responses import RedirectResponse, PlainTextResponse, Response, FileResponse, StreamingResponse
@@ -293,6 +294,7 @@ class Whitelist(Base):
     expires: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     router_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    kind: Mapped[str] = mapped_column(String(5), default="white", server_default="white")  # white = whitelista, black = blacklista
 
 
 class Setting(Base):
@@ -306,6 +308,7 @@ MIGRATIONS = [
     "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS ping_ms DOUBLE PRECISION",
     "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS loss DOUBLE PRECISION",
     "ALTER TABLE whitelist ADD COLUMN IF NOT EXISTS router_id INTEGER",
+    "ALTER TABLE whitelist ADD COLUMN IF NOT EXISTS kind VARCHAR(5) NOT NULL DEFAULT 'white'",
     "ALTER TABLE routers ADD COLUMN IF NOT EXISTS wan VARCHAR(40)",
     "ALTER TABLE whitelist ALTER COLUMN ip TYPE VARCHAR(255)",
     "ALTER TABLE audit ADD COLUMN IF NOT EXISTS who VARCHAR(40)",
@@ -655,6 +658,16 @@ WL = r'''
 '''
 
 
+BLK = r'''
+:do {/tool fetch url="@URL@/api/blacklist.rsc?t=@TOKEN@&list=blacklist" dst-path=app-blacklist.rsc} on-error={
+  :delay 5s
+  /tool fetch url="@URL@/api/blacklist.rsc?t=@TOKEN@&list=blacklist" dst-path=app-blacklist.rsc
+}
+:delay 2s
+/import file-name=app-blacklist.rsc
+'''
+
+
 def clean(v, default):
     return re.sub(r"[^\w\-.]", "", v)[:30] or default
 
@@ -731,6 +744,7 @@ def setup_rsc(request: Request, t: str, iface: str = "ether1", list: str = "whit
                ping: str = "1.1.1.1", every: int = 60, s: Session = Depends(db)):
     r = get_router(s, t)
     wl = 1 if whitelist_on(s) else 0
+    bl = 1 if blacklist_on(s) else 0
     base = str(request.base_url).rstrip("/")
     rep = {"@URL@": base, "@TOKEN@": t, "@IFACE@": clean(iface, "ether1"), "@LIST@": clean(list, "whitelist"),
            "@SPEEDURL@": SPEED_URL, "@SPEEDBYTES@": str(SPEED_BYTES), "@SPEEDN@": str(SPEED_STREAMS_ROUTER)}
@@ -744,6 +758,7 @@ def setup_rsc(request: Request, t: str, iface: str = "ether1", list: str = "whit
         '/system script remove [find name~"^app-"]',
         '/system script add name=app-monitor source="%s"' % q(fill(MON)),
     ] + ['/system script add name=app-whitelist source="%s"' % q(fill(WL))] * wl + [
+        '/system script add name=app-blacklist source="%s"' % q(fill(BLK))] * bl + [
         ':global appHasWifi 0',
         ':global appHasWl 0',
         ':do {:local f [:parse ":global appHasWifi; :set appHasWifi [:len [/interface wifi find]]"]; $f} on-error={}',
@@ -759,12 +774,13 @@ def setup_rsc(request: Request, t: str, iface: str = "ether1", list: str = "whit
         '/system scheduler remove [find name~"^app-"]',
         "/system scheduler add name=app-mon interval=%ds on-event=app-monitor" % (every if every in INTERVALS else 60),
     ] + ["/system scheduler add name=app-wl interval=5m on-event=app-whitelist"] * wl + [
+        "/system scheduler add name=app-bl interval=5m on-event=app-blacklist"] * bl + [
         "/system scheduler add name=app-inv interval=1m on-event=app-inventory",
     ] + netwatch_lines(r) + [
         "/system scheduler add name=app-spd start-time=%s interval=1d on-event=app-speed" % SPEED_TIME
     ] * bool(r.edge and sget(s, "speed_router") != str(r.id)) + [
         "/system script run app-monitor",
-    ] + ["/system script run app-whitelist"] * wl + [
+    ] + ["/system script run app-whitelist"] * wl + ["/system script run app-blacklist"] * bl + [
         "/system script run app-inventory",
     ] + syslog_lines(request) + [
         ':put ("RouterOS Monitor: zainstalowano. Wi-Fi (pakiet wifi): " . [:tostr ($appHasWifi > 0)] . ", Wi-Fi (wireless): " '
@@ -1347,7 +1363,7 @@ def whitelist_on(s):
     v = sget(s, "whitelist_on", "")
     if v in ("0", "1"):
         return v == "1"
-    return bool(s.scalar(select(func.count(Whitelist.id))))
+    return bool(s.scalar(select(func.count(Whitelist.id)).where(Whitelist.kind == "white")))
 
 
 def wl_on():
@@ -1363,6 +1379,30 @@ def wl_on():
 
 
 templates.env.globals["wl_on"] = wl_on
+_BL_ON = [None, 0.0]
+
+
+def blacklist_on(s):
+    """Moduł blacklisty: ustawienie z panelu; domyślnie włączony tylko jeśli blacklista ma już wpisy."""
+    v = sget(s, "blacklist_on", "")
+    if v in ("0", "1"):
+        return v == "1"
+    return bool(s.scalar(select(func.count(Whitelist.id)).where(Whitelist.kind == "black")))
+
+
+def bl_on():
+    if time.time() - _BL_ON[1] < 30:
+        return _BL_ON[0]
+    try:
+        with Session(engine) as s:
+            val = blacklist_on(s)
+    except Exception:
+        val = True
+    _BL_ON[:] = [val, time.time()]
+    return val
+
+
+templates.env.globals["bl_on"] = bl_on
 
 
 def inventory_view(s, r):
@@ -2986,37 +3026,60 @@ def fmt_exp(e):
     return e.strftime("%Y-%m-%d %H:%M")
 
 
-def back(msg="", kind="err"):
-    return RedirectResponse("/whitelist" + ("?%s=%s" % (kind, quote(msg)) if msg else ""), 303)
+def list_kind(request):
+    return "black" if request.url.path.startswith("/blacklist") else "white"
+
+
+def back(kind="white", msg="", level="err"):
+    return RedirectResponse(("/blacklist" if kind == "black" else "/whitelist") + ("?%s=%s" % (level, quote(msg)) if msg else ""), 303)
+
+
+def ban_error(net, request, s):
+    """Zabezpieczenie blacklisty przed odcięciem sobie dostępu: tekst błędu albo ""."""
+    mine = [request.client.host if request.client else "", syslog_target(request), os.getenv("SYSLOG_HOST", "")]
+    mine += [ip for ip in s.scalars(select(Router.log_ip)) if ip]
+    code = netguard.check_ban(net, mine, request.url.hostname or "")
+    return {"": "", "bad": tr("msg.bl_bad"), "broad": tr("msg.bl_broad"), "self": tr("msg.bl_self")}[code]
 
 
 @app.get("/whitelist", dependencies=[Depends(user)])
+@app.get("/blacklist", dependencies=[Depends(user)])
 def wl_page(request: Request, s: Session = Depends(db), err: str = "", ok: str = ""):
-    items = s.scalars(select(Whitelist).order_by(Whitelist.id)).all()
+    kind = list_kind(request)
+    items = s.scalars(select(Whitelist).where(Whitelist.kind == kind).order_by(Whitelist.id)).all()
     routers = ordered_routers(s)
     return templates.TemplateResponse(request, "whitelist.html", {
         "items": items, "routers": routers, "names": {r.id: r.name for r in routers},
-        "err": err, "ok": ok, "now": now()})
+        "err": err, "ok": ok, "now": now(), "kind": kind, "base": "/blacklist" if kind == "black" else "/whitelist",
+        "wl_enabled": whitelist_on(s), "bl_enabled": blacklist_on(s)})
 
 
 @app.post("/whitelist", dependencies=[Depends(admin)])
-def wl_add(ip: str = Form(), comment: str = Form(""), days: str = Form(""), router: str = Form(""),
+@app.post("/blacklist", dependencies=[Depends(admin)])
+def wl_add(request: Request, ip: str = Form(), comment: str = Form(""), days: str = Form(""), router: str = Form(""),
            s: Session = Depends(db)):
+    kind = list_kind(request)
     try:
         net = parse_ip(ip)
     except ValueError:
-        return back(tr("msg.wl_bad_addr"))
-    s.add(Whitelist(ip=net, comment=cmt(comment), expires=parse_exp(days), router_id=scope(router)))
-    log(s, "whitelist+", "%s (%s) zakres=%s" % (net, cmt(comment), scope(router) or "wszystkie"))
+        return back(kind, tr("msg.wl_bad_addr"))
+    if kind == "black":
+        why = ban_error(net, request, s)
+        if why:
+            return back(kind, why)
+    s.add(Whitelist(kind=kind, ip=net, comment=cmt(comment), expires=parse_exp(days), router_id=scope(router)))
+    log(s, ("blacklist+" if kind == "black" else "whitelist+"), "%s (%s) zakres=%s" % (net, cmt(comment), scope(router) or "wszystkie"))
     s.commit()
-    return back()
+    return back(kind)
 
 
 @app.post("/whitelist/import", dependencies=[Depends(admin)])
-def wl_import(data: str = Form(""), router: str = Form(""), s: Session = Depends(db)):
+@app.post("/blacklist/import", dependencies=[Depends(admin)])
+def wl_import(request: Request, data: str = Form(""), router: str = Form(""), s: Session = Depends(db)):
+    kind = list_kind(request)
     default = scope(router)
     ids = {r.name: r.id for r in s.scalars(select(Router))}
-    have = {(w.ip, w.router_id) for w in s.scalars(select(Whitelist))}
+    have = {(w.ip, w.router_id) for w in s.scalars(select(Whitelist).where(Whitelist.kind == kind))}
     added = bad = 0
     for line in data.splitlines():
         line = line.strip()
@@ -3030,6 +3093,9 @@ def wl_import(data: str = Form(""), router: str = Form(""), s: Session = Depends
         except ValueError:
             bad += 1
             continue
+        if kind == "black" and ban_error(ip, request, s):
+            bad += 1
+            continue
         if len(p) > 3 and p[3]:
             if p[3] not in ids:  # nieznany router: nie rozszerzaj po cichu na wszystkie routery
                 bad += 1
@@ -3039,63 +3105,80 @@ def wl_import(data: str = Form(""), router: str = Form(""), s: Session = Depends
             rid = default
         if (ip, rid) in have:
             continue
-        s.add(Whitelist(ip=ip, comment=cmt(p[1] if len(p) > 1 else ""),
+        s.add(Whitelist(kind=kind, ip=ip, comment=cmt(p[1] if len(p) > 1 else ""),
                         expires=parse_exp(p[2]) if len(p) > 2 else None, router_id=rid))
         have.add((ip, rid))
         added += 1
-    log(s, "whitelist import", "dodano %d, błędnych %d" % (added, bad))
+    log(s, ("blacklist" if kind == "black" else "whitelist") + " import", "dodano %d, błędnych %d" % (added, bad))
     s.commit()
-    return back(tr("msg.wl_imported", added=added, bad=bad), "ok")
+    return back(kind, tr("msg.wl_imported", added=added, bad=bad), "ok")
 
 
 @app.get("/whitelist/export", dependencies=[Depends(admin)])
-def wl_export(s: Session = Depends(db)):
+@app.get("/blacklist/export", dependencies=[Depends(admin)])
+def wl_export(request: Request, s: Session = Depends(db)):
+    kind = list_kind(request)
     names = {r.id: r.name for r in s.scalars(select(Router))}
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["ip", "comment", "expires", "router"])
-    for x in s.scalars(select(Whitelist).order_by(Whitelist.id)):
+    for x in s.scalars(select(Whitelist).where(Whitelist.kind == kind).order_by(Whitelist.id)):
         w.writerow([x.ip, x.comment, fmt_exp(x.expires), names.get(x.router_id, "")])
     return Response(buf.getvalue(), media_type="text/csv",
-                    headers={"Content-Disposition": "attachment; filename=whitelist.csv"})
+                    headers={"Content-Disposition": "attachment; filename=%slist.csv" % ("black" if kind == "black" else "white")})
 
 
 @app.post("/whitelist/{wid}/toggle", dependencies=[Depends(admin)])
-def wl_toggle(wid: int, s: Session = Depends(db)):
+@app.post("/blacklist/{wid}/toggle", dependencies=[Depends(admin)])
+def wl_toggle(request: Request, wid: int, s: Session = Depends(db)):
+    kind = list_kind(request)
     w = s.get(Whitelist, wid)
-    if w:
+    if w and w.kind == kind:
         w.active = not w.active
-        log(s, "whitelist " + ("włączono" if w.active else "wyłączono"), w.ip)
+        log(s, ("blacklist " if kind == "black" else "whitelist ") + ("włączono" if w.active else "wyłączono"), w.ip)
         s.commit()
-    return back()
+    return back(kind)
 
 
 @app.post("/whitelist/{wid}/delete", dependencies=[Depends(admin)])
-def wl_del(wid: int, s: Session = Depends(db)):
+@app.post("/blacklist/{wid}/delete", dependencies=[Depends(admin)])
+def wl_del(request: Request, wid: int, s: Session = Depends(db)):
+    kind = list_kind(request)
     w = s.get(Whitelist, wid)
-    if w:
-        log(s, "whitelist-", "%s (%s)" % (w.ip, w.comment))
+    if w and w.kind == kind:
+        log(s, "blacklist-" if kind == "black" else "whitelist-", "%s (%s)" % (w.ip, w.comment))
         s.delete(w)
         s.commit()
-    return back()
+    return back(kind)
 
 
-@app.get("/api/whitelist.rsc", response_class=PlainTextResponse)
-def wl_rsc(t: str, list: str = "whitelist", s: Session = Depends(db)):
+def list_rsc(t, lst, kind, s):
+    """Skrypt .rsc synchronizujący /ip firewall address-list z wpisami danego rodzaju (wl: / bl: w komentarzu)."""
     r = get_router(s, t)
-    lst = clean(list, "whitelist")
-    items = s.scalars(select(Whitelist).where(Whitelist.active == True,  # noqa: E712
+    pfx = "bl" if kind == "black" else "wl"
+    lst = clean(lst, "blacklist" if kind == "black" else "whitelist")
+    items = s.scalars(select(Whitelist).where(Whitelist.kind == kind, Whitelist.active == True,  # noqa: E712
                                               or_(Whitelist.router_id.is_(None), Whitelist.router_id == r.id))).all()
     keep, lines = [], []
     for w in items:
         if (w.expires and w.expires < now()) or w.ip in keep:
             continue
         keep.append(w.ip)
-        lines.append(':do {/ip firewall address-list add list="%s" address=%s comment="wl:%s"} on-error={}'
-                     % (lst, w.ip, w.comment))
+        lines.append(':do {/ip firewall address-list add list="%s" address=%s comment="%s:%s"} on-error={}'
+                     % (lst, w.ip, pfx, w.comment))
     cond = "".join(' and address!="%s"' % ip for ip in keep)
-    lines.append('/ip firewall address-list remove [find where list="%s" and dynamic=no and comment~"^wl:"%s]' % (lst, cond))
+    lines.append('/ip firewall address-list remove [find where list="%s" and dynamic=no and comment~"^%s:"%s]' % (lst, pfx, cond))
     return "\n".join(lines) + "\n"
+
+
+@app.get("/api/whitelist.rsc", response_class=PlainTextResponse)
+def wl_rsc(t: str, list: str = "whitelist", s: Session = Depends(db)):
+    return list_rsc(t, list, "white", s)
+
+
+@app.get("/api/blacklist.rsc", response_class=PlainTextResponse)
+def bl_rsc(t: str, list: str = "blacklist", s: Session = Depends(db)):
+    return list_rsc(t, list, "black", s)
 
 
 @app.get("/log", dependencies=[Depends(admin)])
@@ -3282,7 +3365,7 @@ def settings_view(request, s, msg="", ok=True):
     return templates.TemplateResponse(request, "settings.html", {
         "domain": sget(s, "domain"), "email": sget(s, "email"), "msg": msg, "ok": ok,
         "interval": interval(s), "intervals": INTERVALS, "routers": ordered_routers(s), "bk": backups_info(),
-        "wl_enabled": whitelist_on(s), "speed_router": sget(s, "speed_router"), "speed_time": SPEED_TIME[:5],
+        "wl_enabled": whitelist_on(s), "bl_enabled": blacklist_on(s), "speed_router": sget(s, "speed_router"), "speed_time": SPEED_TIME[:5],
         "speed_engine": sget(s, "speed_engine", "") or default_engine(),
         "speed_server": server_setting(s, sget(s, "speed_engine", "") or default_engine()),
         "ookla": bool(OOKLA_BIN), "librespeed": bool(LS_BIN), "ls_best": best_result(s)})
@@ -3295,6 +3378,15 @@ def settings_whitelist(request: Request, on: str = Form(""), s: Session = Depend
     s.commit()
     _WL_ON[1] = 0
     return settings_view(request, s, (tr("msg.wl_on") if on == "1" else tr("msg.wl_off")) + " " + tr("msg.wl_paste"), True)
+
+
+@app.post("/settings/blacklist", dependencies=[Depends(admin)])
+def settings_blacklist(request: Request, on: str = Form(""), s: Session = Depends(db)):
+    sset(s, "blacklist_on", "1" if on == "1" else "0")
+    log(s, "moduł blacklisty", "włączony" if on == "1" else "wyłączony")
+    s.commit()
+    _BL_ON[1] = 0
+    return settings_view(request, s, (tr("msg.bl_on") if on == "1" else tr("msg.bl_off")) + " " + tr("msg.wl_paste"), True)
 
 
 @app.post("/settings/backup-now", dependencies=[Depends(admin)])
