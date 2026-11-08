@@ -95,6 +95,16 @@ docker compose pull
 docker compose up -d
 ```
 
+Option A only updates the **application image**. The files next to `docker-compose.yml` (`docker-compose.yml`, `backup.sh`, `Caddyfile`) are
+not part of the image. When the release notes say that one of them changed, download it again (`develop` below is the beta branch; use `main` for `stable`):
+```
+cd routeros-monitor
+curl -fsSL https://raw.githubusercontent.com/silvergunx/routeros-monitor/main/backup.sh -o backup.sh
+curl -fsSL https://raw.githubusercontent.com/silvergunx/routeros-monitor/main/docker-compose.yml -o docker-compose.yml
+docker compose up -d
+```
+(Keep your own `.env`; new variables have defaults.) With option B `git pull` refreshes these files for you.
+
 **Option B: build from the source**
 ```
 git pull

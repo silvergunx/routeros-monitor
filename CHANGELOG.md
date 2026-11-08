@@ -23,6 +23,8 @@ Work in progress on `develop` (version 1.1.0).
 - `IFACE_RETENTION_DAYS` (default **7**): per-interface traffic samples, the largest table in the database, are now kept for fewer days than
   the other measurements (`RETENTION_DAYS`). **Older interface samples are deleted** (in the background, in chunks, so routers are not blocked); the
   interface charts for ranges longer than this show less history. The daily WAN transfer statistics are not affected.
+- **Changed files outside the image: `backup.sh`** (users of the ready-made image must download it again, see the README, and restart the `backup`
+  container: `docker compose restart backup`).
 - Backups no longer contain the chart history by default (`BACKUP_INCLUDE_METRICS=1` restores the old behaviour); logs, the change log, users, routers,
   settings and IP lists are always included. Backups become much smaller.
 - **Backup size limit** (Settings → Database backups): optionally cap the total size of the stored backups (for small SD cards or disks). The oldest

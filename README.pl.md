@@ -95,6 +95,16 @@ docker compose pull
 docker compose up -d
 ```
 
+Droga A aktualizuje tylko **obraz aplikacji**. Pliki obok `docker-compose.yml` (`docker-compose.yml`, `backup.sh`, `Caddyfile`) nie są częścią obrazu.
+Gdy notatki wydania mówią, że któryś się zmienił, pobierz go ponownie (poniżej `main` dla wersji `stable`; dla beta użyj `develop`):
+```
+cd routeros-monitor
+curl -fsSL https://raw.githubusercontent.com/silvergunx/routeros-monitor/main/backup.sh -o backup.sh
+curl -fsSL https://raw.githubusercontent.com/silvergunx/routeros-monitor/main/docker-compose.yml -o docker-compose.yml
+docker compose up -d
+```
+(Własny `.env` zostaje; nowe zmienne mają wartości domyślne.) W drodze B `git pull` odświeża te pliki za Ciebie.
+
 **Droga B: budowa z kodu**
 ```
 git pull
