@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Translation files
+        run: python tools/check_locales.py
+      - name: Python syntax
+        run: python -m compileall -q app
+      - name: Unit tests
+        run: python tests/test_version.py
+      - name: Docker image builds
+        run: docker build --build-arg OOKLA_VERSION= ./app

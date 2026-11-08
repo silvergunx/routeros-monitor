@@ -13,6 +13,8 @@ services:
       interval: 5s
       retries: 10
   app:
+    # Gotowy obraz (docker compose pull) albo budowa z kodu (docker compose up -d --build):
+    image: ghcr.io/silvergunx/routeros-monitor:${APP_CHANNEL:-stable}
     build: ./app
     restart: unless-stopped
     env_file: .env

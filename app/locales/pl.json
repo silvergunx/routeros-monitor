@@ -623,5 +623,7 @@
   "an.186": "Pakiet",
   "an.187": "Atak na hasło (brute force) z internetu",
   "an.188": "Wiele nieudanych prób logowania z tych samych adresów publicznych (najwięcej: %d). To automatyczny atak polegający na zgadywaniu hasła.",
-  "an.189": "Niestabilne łącze na porcie (częste rozłączenia)"
+  "an.189": "Niestabilne łącze na porcie (częste rozłączenia)",
+  "nav.update": "Dostępna wersja {v}",
+  "nav.update_title": "Kliknij, aby zobaczyć, co się zmieniło"
 }

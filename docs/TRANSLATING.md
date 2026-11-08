@@ -32,4 +32,6 @@ Missing keys fall back to English, so a partial translation works.
 
 ## Checking your work
 
+Run `python tools/check_locales.py`: it reports unknown keys, changed placeholders and untranslated keys (CI runs it too).
+
 Open the panel with your language selected and click through every tab. A quick sanity check: search the file for keys whose value is still the English text.
