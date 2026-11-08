@@ -1,3 +1,4 @@
+import unicodedata
 import os, re, csv, io, json, math, asyncio, socket, hashlib, hmac, secrets, time, ipaddress, datetime as dt
 from urllib.parse import quote, urlparse
 import i18n
@@ -3244,6 +3245,13 @@ def wl_del(request: Request, wid: int, s: Session = Depends(db)):
     return back(kind)
 
 
+def ascii_rsc(text):
+    """Skrypt .rsc trafia do terminala RouterOS, który psuje znaki spoza ASCII (także w komentarzach): ąęł... -> aeł..."""
+    text = (text or "").translate(str.maketrans({"ł": "l", "Ł": "L", "ø": "o", "Ø": "O", "đ": "d", "Đ": "D"}))
+    text = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in text if ord(c) < 128)
+
+
 def list_rsc(t, lst, kind, s):
     """Skrypt .rsc synchronizujący /ip firewall address-list z wpisami danego rodzaju (wl: / bl: w komentarzu)."""
     r = get_router(s, t)
@@ -3257,7 +3265,7 @@ def list_rsc(t, lst, kind, s):
             continue
         keep.append(w.ip)
         lines.append(':do {/ip firewall address-list add list="%s" address=%s comment="%s:%s"} on-error={}'
-                     % (lst, w.ip, pfx, w.comment))
+                     % (lst, w.ip, pfx, ascii_rsc(w.comment)))
     cond = "".join(' and address!="%s"' % ip for ip in keep)
     lines.append('/ip firewall address-list remove [find where list="%s" and dynamic=no and comment~"^%s:"%s]' % (lst, pfx, cond))
     return "\n".join(lines) + "\n"
