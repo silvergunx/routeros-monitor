@@ -2021,7 +2021,7 @@ async def ookla_test(server_id=""):
 
 async def librespeed_test(server_id=""):
     """Test LibreSpeed (librespeed.org): pobieranie, wysyłanie, ping, jitter. Bez --share, więc nic nie jest wysyłane do LibreSpeed."""
-    args = [LS_BIN, "--json", "--duration", "10", "--timeout", "15"]
+    args = [LS_BIN, "--json", "--duration", "10", "--timeout", "15", "--concurrent", "8"]  # 8 połączeń: przy 3 wysyłanie nie wysycało łącza
     if server_id.isdigit():
         args += ["--server", server_id]
     code, out, err = await _run(args, 180)

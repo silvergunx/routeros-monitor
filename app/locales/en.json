@@ -627,5 +627,5 @@
   "nav.update_title": "Click to see what changed",
   "spd.librespeed": "LibreSpeed (about 40 s)",
   "set.sp.ls": "LibreSpeed (librespeed.org)",
-  "set.sp.help_ls": "LibreSpeed (the default in the ready-made image) is an open-source test (LGPL) run against the public community servers of librespeed.org; it does not send your results to anyone. Results can differ from speedtest.net because the servers vary in quality."
+  "set.sp.help_ls": "LibreSpeed (the default in the ready-made image) is an open-source test (LGPL) run against the public community servers of librespeed.org; it does not send your results to anyone. Results can be lower than on speedtest.net because the servers vary in quality and bandwidth: if a result looks too low, choose another server from the list. For more accurate measurements of fast links use Speedtest by Ookla (after building the image yourself)."
 }

@@ -628,5 +628,5 @@
   "nav.update_title": "Kliknij, aby zobaczyć, co się zmieniło",
   "spd.librespeed": "LibreSpeed (ok. 40 s)",
   "set.sp.ls": "LibreSpeed (librespeed.org)",
-  "set.sp.help_ls": "LibreSpeed (domyślnie w gotowym obrazie) to otwartoźródłowy test (LGPL) wykonywany do publicznych serwerów społeczności librespeed.org; nie wysyła Twoich wyników do nikogo. Wyniki mogą się różnić od speedtest.net, bo serwery są różnej jakości."
+  "set.sp.help_ls": "LibreSpeed (domyślnie w gotowym obrazie) to otwartoźródłowy test (LGPL) wykonywany do publicznych serwerów społeczności librespeed.org; nie wysyła Twoich wyników do nikogo. Wyniki mogą być niższe niż w speedtest.net, bo serwery są różnej jakości i przepustowości: jeśli wynik wydaje się za niski, wybierz inny serwer z listy. Do dokładniejszych pomiarów szybkich łączy użyj Speedtest by Ookla (po własnej budowie obrazu)."
 }
