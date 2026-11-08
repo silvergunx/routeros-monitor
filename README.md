@@ -1,124 +1,126 @@
 # RouterOS Monitor
 
-Panel WWW do monitorowania routerów **MikroTik RouterOS 7** oraz centralne źródło **whitelisty adresów IP**,
-którą routery pobierają same. Całość działa w Dockerze (`docker compose`), bez instalowania czegokolwiek na serwerze poza Dockerem.
+**English** · [Polski](README.pl.md)
 
-Interfejs jest po polsku, działa w trybie jasnym i ciemnym oraz na telefonie.
+A web panel for monitoring **MikroTik RouterOS 7** routers and a central source of an **IP address whitelist** that the routers
+fetch on their own. Everything runs in Docker (`docker compose`); nothing but Docker has to be installed on the server.
 
-## Co potrafi
+The interface is available in Polish and English, works in light and dark mode and on phones.
 
-**Monitoring routerów**
-- CPU, RAM, dysk, temperatura, uptime, wersja RouterOS i firmware, informacja o dostępnej aktualizacji
-- interfejsy i ruch (także łącze WAN), grupy interfejsów, wykresy historii
-- klienci DHCP z nazwami urządzeń i stanem online
-- klienci Wi-Fi (wifi-qcom / CAPsMAN i starszy wireless) z sygnałem, SNR, prędkością i oceną jakości połączenia
-- tunele VPN (WireGuard i inne)
+## Features
 
-**Jakość łącza**
-- sondy Netwatch: opóźnienie, jitter i utrata pakietów do bramy, a na routerze brzegowym także DNS, HTTP i dostępność internetu w %
-- lista przerw z typem (brak internetu / nie działa DNS / nie działa HTTP)
-- **test prędkości Speedtest by Ookla** (ten sam co speedtest.net) wbudowany w kontener, z wyborem serwera testowego,
-  jitterem, utratą pakietów i linkiem do wyniku; zapasowo test Cloudflare; codziennie w nocy i na żądanie
+**Router monitoring**
+- CPU, RAM, disk, temperature, uptime, RouterOS and firmware version, notice about an available update
+- interfaces and traffic (including the WAN link), interface groups, history charts
+- DHCP clients with device names and online state
+- Wi-Fi clients (wifi-qcom / CAPsMAN and the older wireless package) with signal, SNR, speed and a connection quality rating
+- VPN tunnels (WireGuard and others)
 
-**Logi**
-- odbiór logów z routerów przez syslog (UDP), kolorowanie wg ważności, potwierdzanie, eksport z zakresem dat
-- tłumaczenie typowych komunikatów RouterOS na zrozumiały opis po polsku i zakładka analizy z poradami
+**Link quality**
+- Netwatch probes: latency, jitter and packet loss to the gateway and, on the edge router, also DNS, HTTP and internet availability in %
+- list of outages with their type (no internet / DNS not working / HTTP not working)
+- **Speedtest by Ookla** (the same test as speedtest.net) built into the container, with a choice of test server,
+  jitter, packet loss and a link to the result; Cloudflare as a fallback; every night and on demand
 
-**Whitelista**
-- adresy IP, sieci i domeny w bazie aplikacji; routery pobierają listę skryptem do `/ip firewall address-list`
-- import i eksport, włączanie/wyłączanie wpisów; cały moduł można wyłączyć w Ustawieniach
+**Logs**
+- receiving router logs over syslog (UDP), colouring by severity, acknowledging, export with a date range
+- translation of common RouterOS messages into plain language and an analysis tab with advice
 
-**Pozostałe**
-- tryb ustawiania / analizy Wi-Fi na żywo (odczyt co 2 s) do szukania najlepszego miejsca dla punktu dostępowego
-- użytkownicy z rolami (administrator / podgląd), dziennik zmian
-- automatyczne kopie zapasowe bazy z pobieraniem i usuwaniem w panelu
-- HTTPS jednym kliknięciem: podajesz domenę w Ustawieniach, certyfikat Let's Encrypt wystawia się sam (Caddy)
+**Whitelist**
+- IP addresses, networks and domains stored in the application; routers fetch the list with a script into `/ip firewall address-list`
+- import and export, enabling/disabling entries; the whole module can be switched off in Settings
 
-## Wymagania
+**Other**
+- live Wi-Fi setup / analysis mode (readings every 2 s) for finding the best place for an access point
+- users with roles (administrator / view only), change log
+- automatic database backups with download and delete in the panel
+- HTTPS in one click: enter a domain in Settings and a Let's Encrypt certificate is issued automatically (Caddy)
 
-- serwer z Linuksem (testowane na Ubuntu 26.04 LTS) i Dockerem z wtyczką Compose
-- routery MikroTik z **RouterOS 7** (testowane na 7.24), które widzą serwer aplikacji w sieci
-- porty na serwerze: TCP 80 i 443 (panel), UDP 514 (logi z routerów)
+## Requirements
 
-## Instalacja
+- a Linux server (tested on Ubuntu 26.04 LTS) with Docker and the Compose plugin
+- MikroTik routers running **RouterOS 7** (tested on 7.24) that can reach the application server on the network
+- server ports: TCP 80 and 443 (panel), UDP 514 (router logs)
 
-1. Zainstaluj Dockera:
+## Installation
+
+1. Install Docker:
    ```
    curl -fsSL https://get.docker.com | sudo sh
    sudo usermod -aG docker $USER
    ```
-   Wyloguj się i zaloguj ponownie, żeby grupa `docker` zaczęła działać.
-2. Pobierz projekt:
+   Log out and in again so the `docker` group takes effect.
+2. Get the project:
    ```
    git clone https://github.com/silvergunx/routeros-monitor.git
    cd routeros-monitor
    ```
-3. Przygotuj konfigurację:
+3. Prepare the configuration:
    ```
    cp .env.example .env
    openssl rand -hex 32
    nano .env
    ```
-   Ustaw własne `DB_PASSWORD` i `ADMIN_PASSWORD`, a jako `SECRET_KEY` wklej wynik `openssl rand -hex 32`.
-   Aplikacja nie wystartuje z przykładowymi hasłami.
-4. Uruchom:
+   Set your own `DB_PASSWORD` and `ADMIN_PASSWORD`, and paste the output of `openssl rand -hex 32` as `SECRET_KEY`.
+   The application will not start with the example passwords.
+4. Start it:
    ```
    docker compose up -d --build
    ```
-5. Otwórz `http://ADRES_SERWERA/` i zaloguj się danymi z `.env`.
-6. Dodaj router (**Routery → Dodaj router**), skopiuj komendę ze strony routera i wklej ją w terminalu RouterOS.
-   Po kilkudziesięciu sekundach pojawią się pierwsze dane.
-7. Opcjonalnie HTTPS: **Ustawienia → HTTPS**, podaj domenę wskazującą na serwer (porty 80 i 443 muszą być dostępne z internetu).
+5. Open `http://SERVER_ADDRESS/` and log in with the data from `.env`.
+6. Add a router (**Routers → Add router**), copy the command from the router page and paste it into the RouterOS terminal.
+   The first data appears after a few dozen seconds.
+7. Optional HTTPS: **Settings → HTTPS**, enter a domain that points to the server (ports 80 and 443 must be reachable from the internet).
 
-Szczegóły konfiguracji routerów: [docs/ROUTERY.md](docs/ROUTERY.md).
+Router configuration details: [docs/ROUTERY.md](docs/ROUTERY.md) (Polish).
 
-## Aktualizacja
+## Updating
 
 ```
 cd routeros-monitor
-touch backups/.now        # kopia bazy przed aktualizacją (po kilkunastu sekundach pojawi się w backups/)
+touch backups/.now        # database backup before the update (the file appears in backups/ after a few seconds)
 git pull
 docker compose up -d --build
 docker compose logs app --tail 30
 ```
-Baza danych jest w wolumenie Dockera `dbdata`, a `.env` i `backups/` nie są częścią repozytorium, więc aktualizacja ich nie nadpisuje.
-Nowe kolumny w bazie aplikacja dodaje sama przy starcie.
-**Nie używaj `docker compose down -v`**, bo przełącznik `-v` usuwa wolumen z bazą.
+The database lives in the Docker volume `dbdata`, and `.env` and `backups/` are not part of the repository, so an update does not overwrite them.
+The application adds new database columns on its own at startup.
+**Do not use `docker compose down -v`**: the `-v` switch deletes the volume with the database.
 
-Jeśli zmiana dotyczy skryptów na routerach, w opisie wersji będzie informacja, że trzeba ponownie wkleić komendę konfiguracyjną.
+If a change affects the scripts on the routers, the release notes will say that the configuration command has to be pasted again.
 
-## Konfiguracja (`.env`)
+## Configuration (`.env`)
 
-| Zmienna | Domyślnie | Opis |
+| Variable | Default | Description |
 |---|---|---|
-| `DB_PASSWORD` | – | hasło bazy PostgreSQL (ustawiane tylko przy pierwszym starcie bazy) |
-| `ADMIN_USER` / `ADMIN_PASSWORD` | `admin` / – | pierwsze konto administratora |
-| `SECRET_KEY` | – | klucz sesji, min. 16 znaków (`openssl rand -hex 32`) |
-| `RETENTION_DAYS` | `30` | ile dni trzymać pomiary |
-| `SYSLOG_PORT` | `514` | port UDP na serwerze dla logów z routerów |
-| `LOG_RETENTION_DAYS` | `14` | ile dni trzymać logi |
-| `TZ` | `Europe/Warsaw` | strefa czasu |
-| `BACKUP_HOUR` / `BACKUP_KEEP_DAYS` | `3` / `14` | godzina kopii zapasowej i czas jej przechowywania |
-| `SPEEDTEST_TIME` | `03:30:00` | godzina nocnego testu prędkości |
-| `SPEEDTEST_STREAMS` | `6` | liczba połączeń w zapasowym teście Cloudflare |
+| `DB_PASSWORD` | – | PostgreSQL password (applied only when the database is first created) |
+| `ADMIN_USER` / `ADMIN_PASSWORD` | `admin` / – | the first administrator account |
+| `SECRET_KEY` | – | session key, at least 16 characters (`openssl rand -hex 32`) |
+| `RETENTION_DAYS` | `30` | how many days to keep measurements |
+| `SYSLOG_PORT` | `514` | UDP port on the server for router logs |
+| `LOG_RETENTION_DAYS` | `14` | how many days to keep logs |
+| `TZ` | `Europe/Warsaw` | time zone |
+| `BACKUP_HOUR` / `BACKUP_KEEP_DAYS` | `3` / `14` | backup hour and how long backups are kept |
+| `SPEEDTEST_TIME` | `03:30:00` | time of the nightly speed test |
+| `SPEEDTEST_STREAMS` | `6` | number of connections in the fallback Cloudflare test |
 
-Nie używaj znaku `$` w wartościach (Compose traktuje go jako zmienną).
-Pozostałe ustawienia (interwał odczytu, test prędkości, whitelista, kolejność routerów, HTTPS) są w panelu w zakładce **Ustawienia**.
+Do not use the `$` character in values (Compose treats it as a variable).
+The other settings (polling interval, speed test, whitelist, router order, HTTPS) are in the panel under **Settings**.
 
-## Kopie zapasowe
+## Backups
 
-Kontener `backup` robi kopię codziennie o `BACKUP_HOUR` do katalogu `./backups`. Kopię na żądanie, pobieranie i usuwanie
-znajdziesz w **Ustawienia → Kopie zapasowe bazy**.
+The `backup` container makes a backup every day at `BACKUP_HOUR` into the `./backups` directory. On-demand backups, download and
+delete are in **Settings → Database backups**.
 
-Przywracanie (nadpisuje obecne dane):
+Restoring (overwrites the current data):
 ```
 docker compose stop app
-docker compose exec -T db pg_restore -U monitor -d monitor --clean --if-exists < backups/NAZWA_PLIKU.dump
+docker compose exec -T db pg_restore -U monitor -d monitor --clean --if-exists < backups/FILE_NAME.dump
 docker compose start app
 ```
-Przeniesienie na nowy serwer: zainstaluj aplikację, skopiuj swój `.env` i plik kopii, uruchom i wykonaj przywracanie.
+Moving to a new server: install the application, copy your `.env` and the backup file, start it and run the restore.
 
-## Diagnostyka
+## Troubleshooting
 
 ```
 docker compose ps
@@ -126,29 +128,34 @@ docker compose logs -f app caddy
 docker compose exec app speedtest --version
 ```
 
-## Budowa
+## Architecture
 
-| Usługa | Obraz | Zadanie |
+| Service | Image | Role |
 |---|---|---|
-| `app` | Python 3.12, FastAPI | panel, API dla routerów, odbiór syslog, testy prędkości |
-| `db` | PostgreSQL 16 | dane |
-| `backup` | PostgreSQL 16 | kopie `pg_dump` |
-| `caddy` | Caddy 2 | reverse proxy i certyfikaty HTTPS |
+| `app` | Python 3.12, FastAPI | panel, API for routers, syslog receiver, speed tests |
+| `db` | PostgreSQL 16 | data |
+| `backup` | PostgreSQL 16 | `pg_dump` backups |
+| `caddy` | Caddy 2 | reverse proxy and HTTPS certificates |
 
-Routery same wysyłają dane do aplikacji (`/tool fetch`), więc aplikacja nie potrzebuje loginu ani hasła do routerów.
+The routers send data to the application themselves (`/tool fetch`), so the application needs no login or password for the routers.
 
-Bezpieczeństwo: [docs/BEZPIECZENSTWO.md](docs/BEZPIECZENSTWO.md).
+Security: [SECURITY.md](SECURITY.md) and [docs/BEZPIECZENSTWO.md](docs/BEZPIECZENSTWO.md) (Polish).
 
-## Języki
+## Languages
 
-Interfejs działa po polsku i angielsku (przełącznik PL / EN w menu i na ekranie logowania, wybór zapamiętuje ciasteczko). Kolejne języki dodaje się samym plikiem JSON, bez zmian w kodzie: [docs/TRANSLATING.md](docs/TRANSLATING.md).
+The interface is available in Polish and English (PL / EN switcher in the menu and on the login screen; the choice is remembered in a cookie).
+More languages are added with a single JSON file and no code changes: [docs/TRANSLATING.md](docs/TRANSLATING.md).
 
-## Licencja
+## Contributing
 
-Kod projektu: [MIT](LICENSE).
+See [CONTRIBUTING.md](CONTRIBUTING.md). Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
-Podczas budowy obrazu pobierany jest program **Speedtest CLI firmy Ookla**, który nie jest częścią tego repozytorium
-i ma własną licencję (użytek osobisty, niekomercyjny). Aplikacja uruchamia go z akceptacją licencji i polityki prywatności Ookla.
-Jeśli tego nie chcesz, wybierz w Ustawieniach silnik Cloudflare.
+## License
 
-Projekt nie jest powiązany z MikroTik, Ookla ani Cloudflare. Nazwy należą do ich właścicieli.
+Project code: [MIT](LICENSE).
+
+The image build downloads **Ookla's Speedtest CLI**, which is not part of this repository and has its own licence
+(personal, non-commercial use). The application runs it accepting Ookla's licence and privacy policy.
+If you do not want that, choose the Cloudflare engine in Settings.
+
+This project is not affiliated with MikroTik, Ookla or Cloudflare. The names belong to their owners.
