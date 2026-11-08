@@ -824,8 +824,8 @@ def setup_rsc(request: Request, t: str, iface: str = "ether1", list: str = "whit
     ] + ["/system script run app-whitelist"] * wl + ["/system script run app-blacklist"] * bl + [
         "/system script run app-inventory",
     ] + syslog_lines(request) + [
-        ':put ("RouterOS Monitor: zainstalowano. Wi-Fi (pakiet wifi): " . [:tostr ($appHasWifi > 0)] . ", Wi-Fi (wireless): " '
-        '. [:tostr ($appHasWl > 0)] . ", serwer DHCP: " . [:tostr ([:len [/ip dhcp-server find]] > 0)])',
+        ':put ("RouterOS Monitor: installed. Wi-Fi (wifi package): " . [:tostr ($appHasWifi > 0)] . ", Wi-Fi (wireless): " '
+        '. [:tostr ($appHasWl > 0)] . ", DHCP server: " . [:tostr ([:len [/ip dhcp-server find]] > 0)])',
     ]) + "\n"
 
 
@@ -1347,7 +1347,7 @@ def sys_info(s, r):
     n = num(d.get("capsn"))
     role = None
     if "manager" in caps:
-        role = "CAPsMAN serwer" + (" · %d AP" % n if n else "")
+        role = tr("si.manager") + (" · %d AP" % n if n else "")
     if "cap" in caps:
         role = (role + " + CAP") if role else "CAP · AP"
     wq = (num(d.get("wq")) or 0) > 0
@@ -1356,16 +1356,16 @@ def sys_info(s, r):
     wifi_n, wl_n = int(num(d.get("wifi")) or 0), int(num(d.get("wl")) or 0)
     feats = []
     if wifi_n:
-        feats.append("Wi-Fi (pakiet wifi, %d interf.)" % wifi_n)
+        feats.append(tr("si.wifi_pkg") % wifi_n)
     if wl_n:
-        feats.append("Wi-Fi (pakiet wireless, %d interf.)" % wl_n)
+        feats.append(tr("si.wireless_pkg") % wl_n)
     if role:
         feats.append(role)
     if num(d.get("dhs")):
-        feats.append("serwer DHCP")
+        feats.append(tr("si.dhcp_server"))
     if num(d.get("wgs")):
         feats.append("WireGuard")
-    return {"model": d.get("model") or "", "role": role, "fw": fwc, "fw_upd": fwu if fwu and fwc and fwu != fwc else "",
+    return {"model": d.get("model") or "", "role": role, "manager": "manager" in caps, "fw": fwc, "fw_upd": fwu if fwu and fwc and fwu != fwc else "",
             "qcom": wq, "ram_w": 90 if wq else 75, "ram_b": 94 if wq else 90, "mem_total": tm,
             "has_wifi": bool(wifi_n or wl_n or role), "feats": feats, "known": bool(d)}
 
@@ -1496,7 +1496,7 @@ def inventory_view(s, r):
         vpn.append({"type": "WireGuard", "name": d.get("name") or d.get("comment") or d.get("key", "")[:10] + "…",
                     "iface": d.get("iface", ""), "remote": d.get("endpoint") or "-",
                     "state": "disabled" if dis else ("online" if ms is not None and ms <= 180_000 else "offline"),
-                    "info": ("handshake " + d["hs"] + " temu") if d.get("hs") else "brak handshake",
+                    "info": tr("vpn.hs_ago", t=d["hs"]) if d.get("hs") else tr("vpn.no_hs"),
                     "rx": bytes_h(d.get("rx")), "tx": bytes_h(d.get("tx"))})
     for d in by["ppp"]:
         vpn.append({"type": (d.get("service") or "ppp").upper(), "name": d.get("name", "-"), "iface": "",
@@ -1883,7 +1883,7 @@ def set_live(rid: int, minutes: int = Form(15), s: Session = Depends(db)):
     targets = {r.id: r}
     if until:
         for x in s.scalars(select(Router)).all():
-            if "CAPsMAN serwer" in (sys_info(s, x)["role"] or ""):
+            if sys_info(s, x)["manager"]:
                 targets[x.id] = x
     else:
         targets = {x.id: x for x in s.scalars(select(Router)).all() if x.live}
@@ -2099,7 +2099,7 @@ async def _run(args, timeout):
         out, err = await asyncio.wait_for(p.communicate(), timeout)
     except asyncio.TimeoutError:
         p.kill()
-        raise RuntimeError("przekroczony czas testu")
+        raise RuntimeError(tr("err.test_timeout"))
     return p.returncode, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
 
 
@@ -2112,7 +2112,7 @@ async def ookla_test(server_id=""):
     line = next((l for l in out.splitlines()[::-1] if l.strip().startswith("{") and '"type":"result"' in l.replace(" ", "")), "")
     if not line:
         msg = (err or out).strip().splitlines()
-        raise RuntimeError((msg[-1] if msg else "brak wyniku (kod %s)" % code)[:180])
+        raise RuntimeError((msg[-1] if msg else tr("err.no_result", code=code))[:180])
     d = json.loads(line)
     srv = d.get("server") or {}
     bw = lambda k: (d.get(k) or {}).get("bandwidth")
@@ -2132,7 +2132,7 @@ async def librespeed_test(server_id=""):
         return speedengines.parse_librespeed_json(out)
     except (ValueError, TypeError) as e:
         msg = (err or out).strip().splitlines()
-        raise RuntimeError((msg[-1] if msg else "%s (kod %s)" % (e, code))[:180])
+        raise RuntimeError((msg[-1] if msg else tr("err.bad_result", err=e, code=code))[:180])
 
 
 @app.get("/api/speedtest/servers", dependencies=[Depends(admin)])
@@ -2245,12 +2245,12 @@ async def find_best_librespeed():
         code, out, err = await _run([LS_BIN, "--list"], 40)
         servers = speedengines.parse_librespeed_servers(out)
         if not servers:
-            raise RuntimeError("brak listy serwerów")
+            raise RuntimeError(tr("err.no_server_list"))
         async with httpx.AsyncClient(timeout=4, follow_redirects=True) as c:
             lats = await asyncio.gather(*[_server_latency(c, sv["url"]) for sv in servers])
         cands = speedengines.pick_candidates(servers, {sv["id"]: l for sv, l in zip(servers, lats)}, BEST_CANDIDATES)
         if not cands:
-            raise RuntimeError("żaden serwer nie odpowiada")
+            raise RuntimeError(tr("err.no_server_reply"))
         results = []
         for i, sv in enumerate(cands, 1):
             BEST_STATE["phase"] = ("best.test", {"i": i, "n": len(cands), "name": sv["name"]})
@@ -2265,7 +2265,7 @@ async def find_best_librespeed():
             results.append(row)
         best = speedengines.pick_best(results)
         if not best:
-            raise RuntimeError("żaden test nie zakończył się wynikiem")
+            raise RuntimeError(tr("err.no_test_result"))
         data = {"at": now().isoformat(timespec="seconds"), "best": best, "tested": results}
 
         def save():

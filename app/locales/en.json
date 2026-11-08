@@ -675,5 +675,18 @@
   "msg.bk_limit_removed": "Removed the {n} oldest backups.",
   "msg.bk_limit_bad": "Enter a limit from 0.1 GB to 100000 GB.",
   "msg.bk_limit_small": "The limit cannot be smaller than the newest backup ({size}). The database grows, and so do the backups; set a larger limit or choose “no limit”.",
-  "set.bk.limit_min": "minimum: {min} GB (size of the newest backup)"
+  "set.bk.limit_min": "minimum: {min} GB (size of the newest backup)",
+  "si.manager": "CAPsMAN server",
+  "si.wifi_pkg": "Wi-Fi (wifi package, %d interface(s))",
+  "si.wireless_pkg": "Wi-Fi (wireless package, %d interface(s))",
+  "si.dhcp_server": "DHCP server",
+  "vpn.hs_ago": "handshake {t} ago",
+  "vpn.no_hs": "no handshake",
+  "err.test_timeout": "the test timed out",
+  "err.no_result": "no result (code {code})",
+  "err.bad_result": "{err} (code {code})",
+  "err.no_server_list": "no server list",
+  "err.no_server_reply": "no server responds",
+  "err.no_test_result": "no test finished with a result",
+  "wl.import_ph": "203.0.113.5,Office\n198.51.100.0/24,Partner,30"
 }

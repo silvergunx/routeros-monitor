@@ -676,5 +676,18 @@
   "msg.bk_limit_removed": "Usunięto {n} najstarszych kopii.",
   "msg.bk_limit_bad": "Podaj limit od 0,1 GB do 100000 GB.",
   "msg.bk_limit_small": "Limit nie może być mniejszy niż najnowsza kopia ({size}). Baza rośnie, więc kopie też; ustaw większy limit albo wybierz „bez limitu”.",
-  "set.bk.limit_min": "minimum: {min} GB (rozmiar najnowszej kopii)"
+  "set.bk.limit_min": "minimum: {min} GB (rozmiar najnowszej kopii)",
+  "si.manager": "CAPsMAN serwer",
+  "si.wifi_pkg": "Wi-Fi (pakiet wifi, %d interf.)",
+  "si.wireless_pkg": "Wi-Fi (pakiet wireless, %d interf.)",
+  "si.dhcp_server": "serwer DHCP",
+  "vpn.hs_ago": "handshake {t} temu",
+  "vpn.no_hs": "brak handshake",
+  "err.test_timeout": "przekroczony czas testu",
+  "err.no_result": "brak wyniku (kod {code})",
+  "err.bad_result": "{err} (kod {code})",
+  "err.no_server_list": "brak listy serwerów",
+  "err.no_server_reply": "żaden serwer nie odpowiada",
+  "err.no_test_result": "żaden test nie zakończył się wynikiem",
+  "wl.import_ph": "203.0.113.5,Biuro\n198.51.100.0/24,Partner,30"
 }

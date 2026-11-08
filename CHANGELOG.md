@@ -17,6 +17,8 @@ Work in progress on `develop` (version 1.1.0).
   and repeats the check every 7 days (button "Find the best server now" in Settings). It uses 8 parallel connections. On fast links its download result can be well below Ookla's (it depends on the community server), so Ookla stays the
   recommended engine when you build the image yourself.
 - `THIRD_PARTY.md` with the licences of bundled components.
+- Screenshots in the README, taken from fictional demo data (`tools/demo_data.py`, `tools/demo_server.py`, `tools/screenshots.py`).
+- Fixed texts that stayed in Polish in the English interface (CAPsMAN role and router features, VPN handshake info, speed-test error messages, import example).
 - Faster and safer application start: database migrations are executed only when something actually has to change (they used to run on every
   start and waited for a running backup to finish, which could delay the start by minutes), and the one-off data fixes no longer scan the whole
   `metrics` table on every start. Waiting for a table lock is limited to 15 s per attempt.
