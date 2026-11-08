@@ -7,6 +7,12 @@ fetch on their own. Everything runs in Docker (`docker compose`); nothing but Do
 
 The interface is available in Polish and English, works in light and dark mode and on phones.
 
+<p align="center">
+  <img src="docs/img/routers-dark.png" alt="Router list" width="48%">
+  <img src="docs/img/router-system-dark.png" alt="A router page with charts" width="48%">
+</p>
+<p align="center"><sub>The router list and a router page (fictional demo data)</sub></p>
+
 ## Features
 
 **Router monitoring**

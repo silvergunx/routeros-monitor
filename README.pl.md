@@ -7,6 +7,12 @@ którą routery pobierają same. Całość działa w Dockerze (`docker compose`)
 
 Interfejs jest dostępny po polsku i angielsku, działa w trybie jasnym i ciemnym oraz na telefonie.
 
+<p align="center">
+  <img src="docs/img/routers-dark.png" alt="Router list" width="48%">
+  <img src="docs/img/router-system-dark.png" alt="A router page with charts" width="48%">
+</p>
+<p align="center"><sub>Lista routerów i strona routera (fikcyjne dane demonstracyjne)</sub></p>
+
 ## Co potrafi
 
 **Monitoring routerów**
