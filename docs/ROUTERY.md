@@ -25,11 +25,13 @@ Wszystkie elementy mają nazwy zaczynające się od `app-`, dzięki czemu łatwo
 | skrypt + harmonogram | `app-monitor` / `app-mon` | parametry systemu i interfejsów co interwał (domyślnie 60 s) |
 | skrypty + harmonogram | `app-inventory` (`app-inv-dhcp`, `app-inv-wifi`, `app-inv-wireless`, `app-inv-vpn`, `app-inv-sys`) / `app-inv` | klienci DHCP, Wi-Fi, VPN, informacje o systemie co minutę |
 | skrypt + harmonogram | `app-whitelist` / `app-wl` | pobranie whitelisty co 5 min (tylko gdy moduł włączony) |
+| skrypt + harmonogram | `app-blacklist` / `app-bl` | pobranie blacklisty co 5 min (tylko gdy moduł włączony) |
 | skrypt + harmonogram | `app-speed` / `app-spd` | test prędkości na routerze (router brzegowy, gdy serwer aplikacji nie stoi w jego sieci) |
 | skrypt | `app-live` | tryb ustawiania Wi-Fi na żywo, uruchamiany tylko na żądanie z panelu |
 | sondy Netwatch | komentarz `app-nw:` | brama, a na routerze brzegowym: DNS 1.1.1.1, 8.8.8.8, 9.9.9.9, test DNS i HTTP |
 | akcja i reguły logowania | `appsyslog` | wysyłanie logów (critical, error, warning, info bez fetch) na serwer, UDP `SYSLOG_PORT` |
 | lista adresów | `whitelist`, komentarz `wl:` | wpisy whitelisty; inne wpisy na tej liście nie są ruszane |
+| lista adresów | `blacklist`, komentarz `bl:` | wpisy blacklisty; inne wpisy na tej liście nie są ruszane |
 
 Skrypty, które nie mają sensu na danym urządzeniu (Wi-Fi bez interfejsów Wi-Fi, DHCP bez serwera DHCP), nie są instalowane.
 
@@ -40,6 +42,18 @@ Aplikacja tylko wypełnia listę adresów `whitelist`. Regułę, która z niej k
 /ip firewall filter add chain=input src-address-list=whitelist action=accept comment="dostep z whitelisty" place-before=0
 ```
 Zanim dodasz regułę blokującą resztę, sprawdź, że Twój adres jest na liście, żeby nie odciąć sobie dostępu.
+
+## Blacklista w firewallu
+
+Aplikacja tylko wypełnia listę adresów `blacklist`; sama niczego nie blokuje. Regułę blokującą dodajesz raz na każdym routerze
+(tabela raw działa przed śledzeniem połączeń, więc mało obciąża procesor):
+```
+/ip firewall raw add chain=prerouting src-address-list=blacklist action=drop comment="app-blacklist"
+```
+O kolejności decydują reguły firewalla. Jeśli adresy z whitelisty nigdy nie mają być blokowane, dodaj dla nich regułę `accept`
+przed regułą z blacklisty. Aplikacja nie pozwoli zbanować Twojego aktualnego adresu, adresu serwera aplikacji, monitorowanych
+routerów ani sieci szerszych niż /8, ale pilnuje tylko adresów, które zna: reguły na routerze sprawdzaj ostrożnie.
+Usunięcie konfiguracji z routera (strona routera → Konfiguracja) usuwa też wpisy `bl:` i regułę `app-blacklist`.
 
 ## Router poza siecią lokalną
 

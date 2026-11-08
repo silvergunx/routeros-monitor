@@ -41,11 +41,21 @@ docker compose up -d --build
 
 The panel is then at `http://localhost/`. After changing Python or template files rebuild with `docker compose up -d --build`.
 
+## Demo data and screenshots
+
+To try the panel without routers (or to retake the screenshots in `docs/img`), use the fictional demo data. All names and addresses are made up and the
+tools refuse to work on anything but a SQLite file:
+```
+DATABASE_URL=sqlite:///demo.db python tools/demo_data.py       # creates the demo database
+DATABASE_URL=sqlite:///demo.db python tools/demo_server.py     # http://127.0.0.1:8765  (admin / demo-admin-2026)
+python tools/screenshots.py http://127.0.0.1:8765              # needs Microsoft Edge; writes docs/img/*.png
+```
+
 ## Code guidelines
 
 - Keep changes small and focused; one topic per pull request.
 - Every text shown to the user goes through the translation files (`app/locales/*.json`), never hard-coded in templates or Python.
   Provide at least the English and Polish text.
-- Run `python tests/test_version.py` and `python tools/check_locales.py` before opening a pull request.
+- Run `python tests/test_version.py`, `python tests/test_speed.py`, `python tests/test_netguard.py`, `python tests/test_backups.py` and `python tools/check_locales.py` before opening a pull request.
 - Do not add new dependencies without a good reason; the project is intentionally small.
 - Do not commit secrets, `.env` files, backups or real router data.

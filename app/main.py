@@ -2,6 +2,9 @@ import os, re, csv, io, json, math, asyncio, socket, hashlib, hmac, secrets, tim
 from urllib.parse import quote, urlparse
 import i18n
 import version as appver
+import speedengines
+import netguard
+import backups as backuplib
 import httpx
 from fastapi import FastAPI, Request, Form, Depends, HTTPException, Body
 from fastapi.responses import RedirectResponse, PlainTextResponse, Response, FileResponse, StreamingResponse
@@ -9,7 +12,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.concurrency import run_in_threadpool
 from sqlalchemy.engine import URL
-from sqlalchemy import extract, create_engine, Date, Text, UniqueConstraint, String, Float, DateTime, Integer, Boolean, BigInteger, ForeignKey, Index, select, delete, func, or_, text
+from sqlalchemy import inspect as sa_inspect, extract, create_engine, Date, Text, UniqueConstraint, String, Float, DateTime, Integer, Boolean, BigInteger, ForeignKey, Index, select, delete, func, or_, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
 
 ADMIN_USER = os.getenv("ADMIN_USER", "admin")
@@ -20,6 +23,7 @@ if ADMIN_PASSWORD in _EXAMPLES or SECRET_KEY in _EXAMPLES or len(SECRET_KEY) < 1
     raise SystemExit("BLAD KONFIGURACJI: ustaw w pliku .env wlasne ADMIN_PASSWORD i SECRET_KEY "
                      "(SECRET_KEY min. 16 znakow, np. openssl rand -hex 32), potem: docker compose up -d")
 RETENTION = int(os.getenv("RETENTION_DAYS", "30"))
+IFACE_RETENTION = max(1, int(os.getenv("IFACE_RETENTION_DAYS", "7")))  # pomiary interfejsów to największa tabela
 CADDY = os.getenv("CADDY_ADMIN", "http://caddy:2019")
 if os.getenv("DB_PASSWORD"):
     DB_URL = URL.create("postgresql+psycopg2", username="monitor", password=os.environ["DB_PASSWORD"],
@@ -292,12 +296,13 @@ class Whitelist(Base):
     expires: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     router_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    kind: Mapped[str] = mapped_column(String(5), default="white", server_default="white")  # white = whitelista, black = blacklista
 
 
 class Setting(Base):
     __tablename__ = "settings"
     key: Mapped[str] = mapped_column(String(50), primary_key=True)
-    value: Mapped[str] = mapped_column(String(255), default="")
+    value: Mapped[str] = mapped_column(Text, default="")  # TEXT: np. wynik wyboru serwera LibreSpeed ma kilkaset znaków
 
 
 MIGRATIONS = [
@@ -305,6 +310,8 @@ MIGRATIONS = [
     "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS ping_ms DOUBLE PRECISION",
     "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS loss DOUBLE PRECISION",
     "ALTER TABLE whitelist ADD COLUMN IF NOT EXISTS router_id INTEGER",
+    "ALTER TABLE whitelist ADD COLUMN IF NOT EXISTS kind VARCHAR(5) NOT NULL DEFAULT 'white'",
+    "ALTER TABLE settings ALTER COLUMN value TYPE TEXT",
     "ALTER TABLE routers ADD COLUMN IF NOT EXISTS wan VARCHAR(40)",
     "ALTER TABLE whitelist ALTER COLUMN ip TYPE VARCHAR(255)",
     "ALTER TABLE audit ADD COLUMN IF NOT EXISTS who VARCHAR(40)",
@@ -336,9 +343,46 @@ MIGRATIONS = [
     "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS dns_ms DOUBLE PRECISION",
     "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS http_ms DOUBLE PRECISION",
     "ALTER TABLE routers ADD COLUMN IF NOT EXISTS iface_types TEXT",
-    "UPDATE metrics SET mem = NULL WHERE mem < 0 OR mem > 100",
-    "UPDATE metrics SET cpu = NULL WHERE cpu < 0 OR cpu > 100",
 ]
+# Poprawki danych wykonywane RAZ (znacznik w tabeli settings); wcześniej szły przy każdym starcie i czytały całą tabelę metrics.
+ONCE_MIGRATIONS = [
+    ("migr_metrics_clamp", ["UPDATE metrics SET mem = NULL WHERE mem < 0 OR mem > 100",
+                            "UPDATE metrics SET cpu = NULL WHERE cpu < 0 OR cpu > 100"]),
+]
+_ADD_COL = re.compile(r"^ALTER TABLE (\w+) ADD COLUMN IF NOT EXISTS (\w+) ", re.I)
+_COL_TYPE = re.compile(r"^ALTER TABLE (\w+) ALTER COLUMN (\w+) TYPE (\w+)(?:\((\d+)\))?$", re.I)
+
+
+def migration_needed(insp, stmt):
+    """Czy komenda migracji coś zmieni? ALTER TABLE zawsze bierze blokadę wyłączną (czeka m.in. na trwającą kopię pg_dump),
+    więc wykonujemy ją tylko wtedy, gdy kolumny brakuje albo ma inny typ. Nieznana postać komendy = wykonaj."""
+    m = _ADD_COL.match(stmt)
+    if m:
+        return m.group(2) not in {c["name"] for c in insp.get_columns(m.group(1))}
+    m = _COL_TYPE.match(stmt)
+    if m:
+        col = next((c for c in insp.get_columns(m.group(1)) if c["name"] == m.group(2)), None)
+        if col is None:
+            return True
+        t, want = col["type"], m.group(3).upper()
+        if want == "TEXT":
+            return not isinstance(t, Text)
+        if want == "VARCHAR" and m.group(4):
+            return not (isinstance(t, String) and not isinstance(t, Text) and getattr(t, "length", None) == int(m.group(4)))
+    return True
+
+
+def apply_migrations(c):
+    insp = sa_inspect(c)
+    for stmt in MIGRATIONS:
+        if migration_needed(insp, stmt):
+            c.execute(text(stmt))
+            insp.clear_cache()
+    for key, stmts in ONCE_MIGRATIONS:
+        if not c.execute(text('SELECT 1 FROM settings WHERE "key" = :k'), {"k": key}).first():
+            for st in stmts:
+                c.execute(text(st))
+            c.execute(text('INSERT INTO settings ("key", value) VALUES (:k, \'1\')'), {"k": key})
 
 
 @app.on_event("startup")
@@ -348,8 +392,9 @@ def start():
         try:
             Base.metadata.create_all(engine)
             with engine.begin() as c:
-                for stmt in MIGRATIONS:
-                    c.execute(text(stmt))
+                if engine.dialect.name == "postgresql":
+                    c.execute(text("SET LOCAL lock_timeout = '15s'"))  # nie wisi bez końca na trwającej kopii; pętla ponawia
+                apply_migrations(c)
             with Session(engine) as s:
                 if not s.scalar(select(func.count(User.id))):
                     s.add(User(username=ADMIN_USER[:40], pw=hash_pw(ADMIN_PASSWORD), role="admin", created=now()))
@@ -654,6 +699,16 @@ WL = r'''
 '''
 
 
+BLK = r'''
+:do {/tool fetch url="@URL@/api/blacklist.rsc?t=@TOKEN@&list=blacklist" dst-path=app-blacklist.rsc} on-error={
+  :delay 5s
+  /tool fetch url="@URL@/api/blacklist.rsc?t=@TOKEN@&list=blacklist" dst-path=app-blacklist.rsc
+}
+:delay 2s
+/import file-name=app-blacklist.rsc
+'''
+
+
 def clean(v, default):
     return re.sub(r"[^\w\-.]", "", v)[:30] or default
 
@@ -730,6 +785,7 @@ def setup_rsc(request: Request, t: str, iface: str = "ether1", list: str = "whit
                ping: str = "1.1.1.1", every: int = 60, s: Session = Depends(db)):
     r = get_router(s, t)
     wl = 1 if whitelist_on(s) else 0
+    bl = 1 if blacklist_on(s) else 0
     base = str(request.base_url).rstrip("/")
     rep = {"@URL@": base, "@TOKEN@": t, "@IFACE@": clean(iface, "ether1"), "@LIST@": clean(list, "whitelist"),
            "@SPEEDURL@": SPEED_URL, "@SPEEDBYTES@": str(SPEED_BYTES), "@SPEEDN@": str(SPEED_STREAMS_ROUTER)}
@@ -743,6 +799,7 @@ def setup_rsc(request: Request, t: str, iface: str = "ether1", list: str = "whit
         '/system script remove [find name~"^app-"]',
         '/system script add name=app-monitor source="%s"' % q(fill(MON)),
     ] + ['/system script add name=app-whitelist source="%s"' % q(fill(WL))] * wl + [
+        '/system script add name=app-blacklist source="%s"' % q(fill(BLK))] * bl + [
         ':global appHasWifi 0',
         ':global appHasWl 0',
         ':do {:local f [:parse ":global appHasWifi; :set appHasWifi [:len [/interface wifi find]]"]; $f} on-error={}',
@@ -758,16 +815,17 @@ def setup_rsc(request: Request, t: str, iface: str = "ether1", list: str = "whit
         '/system scheduler remove [find name~"^app-"]',
         "/system scheduler add name=app-mon interval=%ds on-event=app-monitor" % (every if every in INTERVALS else 60),
     ] + ["/system scheduler add name=app-wl interval=5m on-event=app-whitelist"] * wl + [
+        "/system scheduler add name=app-bl interval=5m on-event=app-blacklist"] * bl + [
         "/system scheduler add name=app-inv interval=1m on-event=app-inventory",
     ] + netwatch_lines(r) + [
         "/system scheduler add name=app-spd start-time=%s interval=1d on-event=app-speed" % SPEED_TIME
     ] * bool(r.edge and sget(s, "speed_router") != str(r.id)) + [
         "/system script run app-monitor",
-    ] + ["/system script run app-whitelist"] * wl + [
+    ] + ["/system script run app-whitelist"] * wl + ["/system script run app-blacklist"] * bl + [
         "/system script run app-inventory",
     ] + syslog_lines(request) + [
-        ':put ("RouterOS Monitor: zainstalowano. Wi-Fi (pakiet wifi): " . [:tostr ($appHasWifi > 0)] . ", Wi-Fi (wireless): " '
-        '. [:tostr ($appHasWl > 0)] . ", serwer DHCP: " . [:tostr ([:len [/ip dhcp-server find]] > 0)])',
+        ':put ("RouterOS Monitor: installed. Wi-Fi (wifi package): " . [:tostr ($appHasWifi > 0)] . ", Wi-Fi (wireless): " '
+        '. [:tostr ($appHasWl > 0)] . ", DHCP server: " . [:tostr ([:len [/ip dhcp-server find]] > 0)])',
     ]) + "\n"
 
 
@@ -1103,7 +1161,6 @@ def _store_metrics(s, t, raw, ip=None):
     r.last_seen = n
     cutoff = n - dt.timedelta(days=RETENTION)
     s.execute(delete(Metric).where(Metric.router_id == r.id, Metric.ts < cutoff))
-    s.execute(delete(IfaceMetric).where(IfaceMetric.router_id == r.id, IfaceMetric.ts < cutoff))
     s.commit()
     return {"ok": True, "live": 1 if r.live else 0}
 
@@ -1290,7 +1347,7 @@ def sys_info(s, r):
     n = num(d.get("capsn"))
     role = None
     if "manager" in caps:
-        role = "CAPsMAN serwer" + (" · %d AP" % n if n else "")
+        role = tr("si.manager") + (" · %d AP" % n if n else "")
     if "cap" in caps:
         role = (role + " + CAP") if role else "CAP · AP"
     wq = (num(d.get("wq")) or 0) > 0
@@ -1299,16 +1356,16 @@ def sys_info(s, r):
     wifi_n, wl_n = int(num(d.get("wifi")) or 0), int(num(d.get("wl")) or 0)
     feats = []
     if wifi_n:
-        feats.append("Wi-Fi (pakiet wifi, %d interf.)" % wifi_n)
+        feats.append(tr("si.wifi_pkg") % wifi_n)
     if wl_n:
-        feats.append("Wi-Fi (pakiet wireless, %d interf.)" % wl_n)
+        feats.append(tr("si.wireless_pkg") % wl_n)
     if role:
         feats.append(role)
     if num(d.get("dhs")):
-        feats.append("serwer DHCP")
+        feats.append(tr("si.dhcp_server"))
     if num(d.get("wgs")):
         feats.append("WireGuard")
-    return {"model": d.get("model") or "", "role": role, "fw": fwc, "fw_upd": fwu if fwu and fwc and fwu != fwc else "",
+    return {"model": d.get("model") or "", "role": role, "manager": "manager" in caps, "fw": fwc, "fw_upd": fwu if fwu and fwc and fwu != fwc else "",
             "qcom": wq, "ram_w": 90 if wq else 75, "ram_b": 94 if wq else 90, "mem_total": tm,
             "has_wifi": bool(wifi_n or wl_n or role), "feats": feats, "known": bool(d)}
 
@@ -1346,7 +1403,7 @@ def whitelist_on(s):
     v = sget(s, "whitelist_on", "")
     if v in ("0", "1"):
         return v == "1"
-    return bool(s.scalar(select(func.count(Whitelist.id))))
+    return bool(s.scalar(select(func.count(Whitelist.id)).where(Whitelist.kind == "white")))
 
 
 def wl_on():
@@ -1362,6 +1419,30 @@ def wl_on():
 
 
 templates.env.globals["wl_on"] = wl_on
+_BL_ON = [None, 0.0]
+
+
+def blacklist_on(s):
+    """Moduł blacklisty: ustawienie z panelu; domyślnie włączony tylko jeśli blacklista ma już wpisy."""
+    v = sget(s, "blacklist_on", "")
+    if v in ("0", "1"):
+        return v == "1"
+    return bool(s.scalar(select(func.count(Whitelist.id)).where(Whitelist.kind == "black")))
+
+
+def bl_on():
+    if time.time() - _BL_ON[1] < 30:
+        return _BL_ON[0]
+    try:
+        with Session(engine) as s:
+            val = blacklist_on(s)
+    except Exception:
+        val = True
+    _BL_ON[:] = [val, time.time()]
+    return val
+
+
+templates.env.globals["bl_on"] = bl_on
 
 
 def inventory_view(s, r):
@@ -1415,7 +1496,7 @@ def inventory_view(s, r):
         vpn.append({"type": "WireGuard", "name": d.get("name") or d.get("comment") or d.get("key", "")[:10] + "…",
                     "iface": d.get("iface", ""), "remote": d.get("endpoint") or "-",
                     "state": "disabled" if dis else ("online" if ms is not None and ms <= 180_000 else "offline"),
-                    "info": ("handshake " + d["hs"] + " temu") if d.get("hs") else "brak handshake",
+                    "info": tr("vpn.hs_ago", t=d["hs"]) if d.get("hs") else tr("vpn.no_hs"),
                     "rx": bytes_h(d.get("rx")), "tx": bytes_h(d.get("tx"))})
     for d in by["ppp"]:
         vpn.append({"type": (d.get("service") or "ppp").upper(), "name": d.get("name", "-"), "iface": "",
@@ -1520,6 +1601,25 @@ def purge_logs():
         s.commit()
 
 
+def purge_iface_metrics(chunk=20000, max_seconds=20):
+    """Usuwa pomiary interfejsów starsze niż IFACE_RETENTION_DAYS: porcjami, osobno dla każdego routera (po indeksie),
+    żeby jednorazowe skasowanie milionów wierszy nie blokowało bazy ani zgłoszeń routerów. Zwraca liczbę usuniętych."""
+    cutoff = now() - dt.timedelta(days=IFACE_RETENTION)
+    t0, total = time.monotonic(), 0
+    with Session(engine) as s:
+        rids = list(s.scalars(select(Router.id)))
+    for rid in rids:
+        while time.monotonic() - t0 < max_seconds:
+            with Session(engine) as s:
+                sub_q = select(IfaceMetric.id).where(IfaceMetric.router_id == rid, IfaceMetric.ts < cutoff).limit(chunk)
+                n = s.execute(delete(IfaceMetric).where(IfaceMetric.id.in_(sub_q))).rowcount or 0
+                s.commit()
+            total += n
+            if n < chunk:
+                break
+    return total
+
+
 def record_clients():
     """Co minutę: zapisz liczbę urządzeń online, klientów Wi-Fi i VPN online dla routerów z aktualnym inwentarzem."""
     with Session(engine) as s:
@@ -1581,6 +1681,10 @@ async def log_loop():
                 await run_in_threadpool(record_clients)
             if n % 300 == 10:
                 await run_in_threadpool(update_traffic)
+            if n % 150 == 20:
+                await run_in_threadpool(enforce_backup_limit)
+            if n % 150 == 30:
+                await run_in_threadpool(purge_iface_metrics)
             if n % 15 == 7:
                 rid = await run_in_threadpool(speed_due)
                 if rid:
@@ -1779,7 +1883,7 @@ def set_live(rid: int, minutes: int = Form(15), s: Session = Depends(db)):
     targets = {r.id: r}
     if until:
         for x in s.scalars(select(Router)).all():
-            if "CAPsMAN serwer" in (sys_info(s, x)["role"] or ""):
+            if sys_info(s, x)["manager"]:
                 targets[x.id] = x
     else:
         targets = {x.id: x for x in s.scalars(select(Router)).all() if x.live}
@@ -1980,6 +2084,13 @@ import shutil
 
 OOKLA_BIN = shutil.which("speedtest")
 OOKLA_ARGS = ["--accept-license", "--accept-gdpr"]
+LS_BIN = shutil.which("librespeed-cli")  # LibreSpeed CLI (LGPL-3.0), dołączony do obrazu
+SPEED_ENGINES = ("librespeed", "ookla", "cloudflare")
+
+
+def default_engine():
+    """Silnik, gdy nic nie zapisano: Ookla (jeśli jest, zachowanie jak dawniej), inaczej LibreSpeed, inaczej Cloudflare."""
+    return "ookla" if OOKLA_BIN else "librespeed" if LS_BIN else "cloudflare"
 
 
 async def _run(args, timeout):
@@ -1988,7 +2099,7 @@ async def _run(args, timeout):
         out, err = await asyncio.wait_for(p.communicate(), timeout)
     except asyncio.TimeoutError:
         p.kill()
-        raise RuntimeError("przekroczony czas testu")
+        raise RuntimeError(tr("err.test_timeout"))
     return p.returncode, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
 
 
@@ -2001,7 +2112,7 @@ async def ookla_test(server_id=""):
     line = next((l for l in out.splitlines()[::-1] if l.strip().startswith("{") and '"type":"result"' in l.replace(" ", "")), "")
     if not line:
         msg = (err or out).strip().splitlines()
-        raise RuntimeError((msg[-1] if msg else "brak wyniku (kod %s)" % code)[:180])
+        raise RuntimeError((msg[-1] if msg else tr("err.no_result", code=code))[:180])
     d = json.loads(line)
     srv = d.get("server") or {}
     bw = lambda k: (d.get(k) or {}).get("bandwidth")
@@ -2011,8 +2122,29 @@ async def ookla_test(server_id=""):
             "server": ", ".join(x for x in (srv.get("name"), srv.get("location")) if x)[:120] or None}
 
 
+async def librespeed_test(server_id=""):
+    """Test LibreSpeed (librespeed.org): pobieranie, wysyłanie, ping, jitter. Bez --share, więc nic nie jest wysyłane do LibreSpeed."""
+    args = [LS_BIN, "--json", "--duration", "10", "--timeout", "15", "--concurrent", "8"]  # 8 połączeń: przy 3 wysyłanie nie wysycało łącza
+    if server_id.isdigit():
+        args += ["--server", server_id]
+    code, out, err = await _run(args, 180)
+    try:
+        return speedengines.parse_librespeed_json(out)
+    except (ValueError, TypeError) as e:
+        msg = (err or out).strip().splitlines()
+        raise RuntimeError((msg[-1] if msg else tr("err.bad_result", err=e, code=code))[:180])
+
+
 @app.get("/api/speedtest/servers", dependencies=[Depends(admin)])
-async def ookla_servers():
+async def speed_servers(engine: str = "ookla"):
+    if engine == "librespeed":
+        if not LS_BIN:
+            return {"available": False, "servers": []}
+        try:
+            code, out, err = await _run([LS_BIN, "--list"], 40)
+            return {"available": True, "servers": speedengines.parse_librespeed_list(out)}
+        except Exception as e:
+            return {"available": True, "servers": [], "error": str(e)[:200]}
     if not OOKLA_BIN:
         return {"available": False, "servers": []}
     try:
@@ -2025,7 +2157,7 @@ async def ookla_servers():
 
 
 async def server_speedtest(rid):
-    if SPD_STATE["running"]:
+    if SPD_STATE["running"] or BEST_STATE["running"]:
         return
     SPD_STATE.update(running=True, rid=rid)
     res = {"ok": False, "down": None, "up": None, "ping": None, "jitter": None, "loss": None, "server": None, "url": None}
@@ -2034,19 +2166,24 @@ async def server_speedtest(rid):
 
     def cfg():
         with Session(engine) as s:
-            return sget(s, "speed_engine", "ookla"), sget(s, "speed_server", "")
+            e = sget(s, "speed_engine", "") or default_engine()
+            return e, server_setting(s, e)
     eng, sid = await run_in_threadpool(cfg)
+    runners = {"librespeed": (LS_BIN, librespeed_test, "LibreSpeed"), "ookla": (OOKLA_BIN, ookla_test, "Ookla")}
     try:
-        if eng != "cloudflare" and OOKLA_BIN:
-            src = "ookla"
-            SPD_STATE["phase"] = "spd.ookla"
+        if eng in runners and runners[eng][0]:
+            src = eng
+            if eng == "librespeed" and sid == "best":
+                SPD_STATE["phase"] = "spd.best"
+                sid = await resolve_best_server()
+            SPD_STATE["phase"] = "spd." + eng
             try:
-                res.update(await ookla_test(sid))
+                res.update(await runners[eng][1](sid))
             except Exception as e:
-                error = "Ookla: %s" % e
-                print("speedtest ookla: %s" % e, flush=True)
-        if eng == "cloudflare" or not OOKLA_BIN or not res["down"]:
-            if src == "ookla":
+                error = "%s: %s" % (runners[eng][2], e)
+                print("speedtest %s: %s" % (eng, e), flush=True)
+        if eng not in runners or not runners[eng][0] or not res["down"]:
+            if src != "server":
                 src = "server"
             SPD_STATE["phase"] = "spd.ping"
             res["ping"] = await _ping()
@@ -2071,6 +2208,126 @@ async def server_speedtest(rid):
                 s.commit()
         await run_in_threadpool(store)
         SPD_STATE.update(running=False, phase="", rid=None)
+
+
+BEST_STATE = {"running": False, "phase": None, "error": None}  # phase: (klucz tłumaczenia, parametry)
+BEST_MAX_AGE = 7 * 86400  # wybór najlepszego serwera jest powtarzany co 7 dni
+BEST_CANDIDATES = 8       # tylu najbliższych (wg opóźnienia) serwerów porównujemy (lista ma ok. 20)
+
+
+def best_result(s):
+    try:
+        d = json.loads(sget(s, "speed_ls_best", "") or "null")
+    except ValueError:
+        return None
+    return d if isinstance(d, dict) else None
+
+
+async def _server_latency(client, url):
+    """Najkrótszy z dwóch czasów odpowiedzi serwera (pierwsze zapytanie zawiera nawiązanie połączenia)."""
+    best = None
+    for _ in range(2):
+        t = time.monotonic()
+        try:
+            async with client.stream("GET", url):
+                pass  # wystarczą nagłówki
+        except Exception:
+            continue
+        ms = (time.monotonic() - t) * 1000
+        best = ms if best is None else min(best, ms)
+    return best
+
+
+async def find_best_librespeed():
+    """Porównuje kilka najbliższych serwerów LibreSpeed krótkim testem pobierania i zapamiętuje najszybszy."""
+    BEST_STATE.update(running=True, phase=("best.ping", {}), error=None)
+    try:
+        code, out, err = await _run([LS_BIN, "--list"], 40)
+        servers = speedengines.parse_librespeed_servers(out)
+        if not servers:
+            raise RuntimeError(tr("err.no_server_list"))
+        async with httpx.AsyncClient(timeout=4, follow_redirects=True) as c:
+            lats = await asyncio.gather(*[_server_latency(c, sv["url"]) for sv in servers])
+        cands = speedengines.pick_candidates(servers, {sv["id"]: l for sv, l in zip(servers, lats)}, BEST_CANDIDATES)
+        if not cands:
+            raise RuntimeError(tr("err.no_server_reply"))
+        results = []
+        for i, sv in enumerate(cands, 1):
+            BEST_STATE["phase"] = ("best.test", {"i": i, "n": len(cands), "name": sv["name"]})
+            row = {"id": sv["id"], "name": sv["name"], "ping": sv["ping"], "down": None}
+            try:
+                code, out, err = await _run([LS_BIN, "--json", "--no-upload", "--duration", "5", "--timeout", "10",
+                                             "--concurrent", "8", "--server", sv["id"]], 60)
+                d = speedengines.parse_librespeed_json(out)
+                row["down"] = round(d["down"], 1) if d["down"] else None
+            except Exception as e:
+                print("librespeed best: serwer %s: %s" % (sv["id"], e), flush=True)
+            results.append(row)
+        best = speedengines.pick_best(results)
+        if not best:
+            raise RuntimeError(tr("err.no_test_result"))
+        data = {"at": now().isoformat(timespec="seconds"), "best": best, "tested": results}
+
+        def save():
+            with Session(engine) as s:
+                sset(s, "speed_ls_best", json.dumps(data))
+                s.commit()
+        await run_in_threadpool(save)
+        return data
+    except Exception as e:
+        BEST_STATE["error"] = str(e)[:200]
+        raise
+    finally:
+        BEST_STATE.update(running=False, phase=None)
+
+
+async def resolve_best_server():
+    """Id serwera do testu: zapamiętany najlepszy; gdy go brak lub jest starszy niż 7 dni, szuka od nowa. Błąd = "" (wybór programu)."""
+    def load():
+        with Session(engine) as s:
+            return best_result(s)
+    d = await run_in_threadpool(load)
+    try:
+        age = (now() - dt.datetime.fromisoformat(d["at"])).total_seconds() if d else None
+    except (KeyError, ValueError, TypeError):
+        age = None
+    if d is None or age is None or age > BEST_MAX_AGE:
+        try:
+            d = await find_best_librespeed()
+        except Exception as e:
+            print("librespeed best: %s" % e, flush=True)
+    sid = str(((d or {}).get("best") or {}).get("id") or "")
+    return sid if sid.isdigit() else ""
+
+
+async def _best_task():
+    try:
+        await find_best_librespeed()
+    except Exception as e:
+        print("librespeed best: %s" % e, flush=True)
+
+
+@app.post("/api/speedtest/best", dependencies=[Depends(admin)])
+async def best_start():
+    if not LS_BIN:
+        raise HTTPException(400, tr("err.ls_missing"))
+    if BEST_STATE["running"] or SPD_STATE["running"]:
+        return {"ok": False, "busy": True}
+    asyncio.create_task(_best_task())
+    return {"ok": True}
+
+
+@app.get("/api/speedtest/best", dependencies=[Depends(admin)])
+def best_status(s: Session = Depends(db)):
+    ph = BEST_STATE["phase"]
+    return {"running": BEST_STATE["running"], "phase": tr(ph[0], **ph[1]) if ph else "",
+            "error": BEST_STATE["error"], "result": best_result(s)}
+
+
+def server_setting(s, engine):
+    """Serwer testowy zapisany osobno dla każdego silnika (numeracja serwerów różni się między silnikami)."""
+    default = sget(s, "speed_server", "") if engine == "ookla" else "best" if engine == "librespeed" else ""
+    return sget(s, "speed_server_" + engine, default)
 
 
 def speed_due():
@@ -2099,17 +2356,18 @@ async def speedtest_now(rid: int):
             return sget(s, "speed_router") == str(rid)
     if not await run_in_threadpool(check):
         raise HTTPException(400, tr("err.speed_router"))
-    if not SPD_STATE["running"]:
+    if not SPD_STATE["running"] and not BEST_STATE["running"]:
         asyncio.create_task(server_speedtest(rid))
     return {"ok": True}
 
 
 @app.post("/settings/speed", dependencies=[Depends(admin)])
-def settings_speed(request: Request, rid: str = Form(""), engine_: str = Form("ookla", alias="engine"),
+def settings_speed(request: Request, rid: str = Form(""), engine_: str = Form("", alias="engine"),
                    server: str = Form(""), s: Session = Depends(db)):
     sset(s, "speed_router", rid if rid.isdigit() else "")
-    sset(s, "speed_engine", "cloudflare" if engine_ == "cloudflare" else "ookla")
-    sset(s, "speed_server", server if server.isdigit() else "")
+    engine_ = engine_ if engine_ in SPEED_ENGINES else default_engine()
+    sset(s, "speed_engine", engine_)
+    sset(s, "speed_server_" + engine_, server if server.isdigit() or (engine_ == "librespeed" and server == "best") else "")
     r = s.get(Router, int(rid)) if rid.isdigit() else None
     log(s, "test prędkości", "z serwera za routerem: %s" % (r.name if r else "wyłączony"))
     s.commit()
@@ -2831,37 +3089,60 @@ def fmt_exp(e):
     return e.strftime("%Y-%m-%d %H:%M")
 
 
-def back(msg="", kind="err"):
-    return RedirectResponse("/whitelist" + ("?%s=%s" % (kind, quote(msg)) if msg else ""), 303)
+def list_kind(request):
+    return "black" if request.url.path.startswith("/blacklist") else "white"
+
+
+def back(kind="white", msg="", level="err"):
+    return RedirectResponse(("/blacklist" if kind == "black" else "/whitelist") + ("?%s=%s" % (level, quote(msg)) if msg else ""), 303)
+
+
+def ban_error(net, request, s):
+    """Zabezpieczenie blacklisty przed odcięciem sobie dostępu: tekst błędu albo ""."""
+    mine = [request.client.host if request.client else "", syslog_target(request), os.getenv("SYSLOG_HOST", "")]
+    mine += [ip for ip in s.scalars(select(Router.log_ip)) if ip]
+    code = netguard.check_ban(net, mine, request.url.hostname or "")
+    return {"": "", "bad": tr("msg.bl_bad"), "broad": tr("msg.bl_broad"), "self": tr("msg.bl_self")}[code]
 
 
 @app.get("/whitelist", dependencies=[Depends(user)])
+@app.get("/blacklist", dependencies=[Depends(user)])
 def wl_page(request: Request, s: Session = Depends(db), err: str = "", ok: str = ""):
-    items = s.scalars(select(Whitelist).order_by(Whitelist.id)).all()
+    kind = list_kind(request)
+    items = s.scalars(select(Whitelist).where(Whitelist.kind == kind).order_by(Whitelist.id)).all()
     routers = ordered_routers(s)
     return templates.TemplateResponse(request, "whitelist.html", {
         "items": items, "routers": routers, "names": {r.id: r.name for r in routers},
-        "err": err, "ok": ok, "now": now()})
+        "err": err, "ok": ok, "now": now(), "kind": kind, "base": "/blacklist" if kind == "black" else "/whitelist",
+        "wl_enabled": whitelist_on(s), "bl_enabled": blacklist_on(s)})
 
 
 @app.post("/whitelist", dependencies=[Depends(admin)])
-def wl_add(ip: str = Form(), comment: str = Form(""), days: str = Form(""), router: str = Form(""),
+@app.post("/blacklist", dependencies=[Depends(admin)])
+def wl_add(request: Request, ip: str = Form(), comment: str = Form(""), days: str = Form(""), router: str = Form(""),
            s: Session = Depends(db)):
+    kind = list_kind(request)
     try:
         net = parse_ip(ip)
     except ValueError:
-        return back(tr("msg.wl_bad_addr"))
-    s.add(Whitelist(ip=net, comment=cmt(comment), expires=parse_exp(days), router_id=scope(router)))
-    log(s, "whitelist+", "%s (%s) zakres=%s" % (net, cmt(comment), scope(router) or "wszystkie"))
+        return back(kind, tr("msg.wl_bad_addr"))
+    if kind == "black":
+        why = ban_error(net, request, s)
+        if why:
+            return back(kind, why)
+    s.add(Whitelist(kind=kind, ip=net, comment=cmt(comment), expires=parse_exp(days), router_id=scope(router)))
+    log(s, ("blacklist+" if kind == "black" else "whitelist+"), "%s (%s) zakres=%s" % (net, cmt(comment), scope(router) or "wszystkie"))
     s.commit()
-    return back()
+    return back(kind)
 
 
 @app.post("/whitelist/import", dependencies=[Depends(admin)])
-def wl_import(data: str = Form(""), router: str = Form(""), s: Session = Depends(db)):
+@app.post("/blacklist/import", dependencies=[Depends(admin)])
+def wl_import(request: Request, data: str = Form(""), router: str = Form(""), s: Session = Depends(db)):
+    kind = list_kind(request)
     default = scope(router)
     ids = {r.name: r.id for r in s.scalars(select(Router))}
-    have = {(w.ip, w.router_id) for w in s.scalars(select(Whitelist))}
+    have = {(w.ip, w.router_id) for w in s.scalars(select(Whitelist).where(Whitelist.kind == kind))}
     added = bad = 0
     for line in data.splitlines():
         line = line.strip()
@@ -2875,6 +3156,9 @@ def wl_import(data: str = Form(""), router: str = Form(""), s: Session = Depends
         except ValueError:
             bad += 1
             continue
+        if kind == "black" and ban_error(ip, request, s):
+            bad += 1
+            continue
         if len(p) > 3 and p[3]:
             if p[3] not in ids:  # nieznany router: nie rozszerzaj po cichu na wszystkie routery
                 bad += 1
@@ -2884,63 +3168,80 @@ def wl_import(data: str = Form(""), router: str = Form(""), s: Session = Depends
             rid = default
         if (ip, rid) in have:
             continue
-        s.add(Whitelist(ip=ip, comment=cmt(p[1] if len(p) > 1 else ""),
+        s.add(Whitelist(kind=kind, ip=ip, comment=cmt(p[1] if len(p) > 1 else ""),
                         expires=parse_exp(p[2]) if len(p) > 2 else None, router_id=rid))
         have.add((ip, rid))
         added += 1
-    log(s, "whitelist import", "dodano %d, błędnych %d" % (added, bad))
+    log(s, ("blacklist" if kind == "black" else "whitelist") + " import", "dodano %d, błędnych %d" % (added, bad))
     s.commit()
-    return back(tr("msg.wl_imported", added=added, bad=bad), "ok")
+    return back(kind, tr("msg.wl_imported", added=added, bad=bad), "ok")
 
 
 @app.get("/whitelist/export", dependencies=[Depends(admin)])
-def wl_export(s: Session = Depends(db)):
+@app.get("/blacklist/export", dependencies=[Depends(admin)])
+def wl_export(request: Request, s: Session = Depends(db)):
+    kind = list_kind(request)
     names = {r.id: r.name for r in s.scalars(select(Router))}
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["ip", "comment", "expires", "router"])
-    for x in s.scalars(select(Whitelist).order_by(Whitelist.id)):
+    for x in s.scalars(select(Whitelist).where(Whitelist.kind == kind).order_by(Whitelist.id)):
         w.writerow([x.ip, x.comment, fmt_exp(x.expires), names.get(x.router_id, "")])
     return Response(buf.getvalue(), media_type="text/csv",
-                    headers={"Content-Disposition": "attachment; filename=whitelist.csv"})
+                    headers={"Content-Disposition": "attachment; filename=%slist.csv" % ("black" if kind == "black" else "white")})
 
 
 @app.post("/whitelist/{wid}/toggle", dependencies=[Depends(admin)])
-def wl_toggle(wid: int, s: Session = Depends(db)):
+@app.post("/blacklist/{wid}/toggle", dependencies=[Depends(admin)])
+def wl_toggle(request: Request, wid: int, s: Session = Depends(db)):
+    kind = list_kind(request)
     w = s.get(Whitelist, wid)
-    if w:
+    if w and w.kind == kind:
         w.active = not w.active
-        log(s, "whitelist " + ("włączono" if w.active else "wyłączono"), w.ip)
+        log(s, ("blacklist " if kind == "black" else "whitelist ") + ("włączono" if w.active else "wyłączono"), w.ip)
         s.commit()
-    return back()
+    return back(kind)
 
 
 @app.post("/whitelist/{wid}/delete", dependencies=[Depends(admin)])
-def wl_del(wid: int, s: Session = Depends(db)):
+@app.post("/blacklist/{wid}/delete", dependencies=[Depends(admin)])
+def wl_del(request: Request, wid: int, s: Session = Depends(db)):
+    kind = list_kind(request)
     w = s.get(Whitelist, wid)
-    if w:
-        log(s, "whitelist-", "%s (%s)" % (w.ip, w.comment))
+    if w and w.kind == kind:
+        log(s, "blacklist-" if kind == "black" else "whitelist-", "%s (%s)" % (w.ip, w.comment))
         s.delete(w)
         s.commit()
-    return back()
+    return back(kind)
 
 
-@app.get("/api/whitelist.rsc", response_class=PlainTextResponse)
-def wl_rsc(t: str, list: str = "whitelist", s: Session = Depends(db)):
+def list_rsc(t, lst, kind, s):
+    """Skrypt .rsc synchronizujący /ip firewall address-list z wpisami danego rodzaju (wl: / bl: w komentarzu)."""
     r = get_router(s, t)
-    lst = clean(list, "whitelist")
-    items = s.scalars(select(Whitelist).where(Whitelist.active == True,  # noqa: E712
+    pfx = "bl" if kind == "black" else "wl"
+    lst = clean(lst, "blacklist" if kind == "black" else "whitelist")
+    items = s.scalars(select(Whitelist).where(Whitelist.kind == kind, Whitelist.active == True,  # noqa: E712
                                               or_(Whitelist.router_id.is_(None), Whitelist.router_id == r.id))).all()
     keep, lines = [], []
     for w in items:
         if (w.expires and w.expires < now()) or w.ip in keep:
             continue
         keep.append(w.ip)
-        lines.append(':do {/ip firewall address-list add list="%s" address=%s comment="wl:%s"} on-error={}'
-                     % (lst, w.ip, w.comment))
+        lines.append(':do {/ip firewall address-list add list="%s" address=%s comment="%s:%s"} on-error={}'
+                     % (lst, w.ip, pfx, w.comment))
     cond = "".join(' and address!="%s"' % ip for ip in keep)
-    lines.append('/ip firewall address-list remove [find where list="%s" and dynamic=no and comment~"^wl:"%s]' % (lst, cond))
+    lines.append('/ip firewall address-list remove [find where list="%s" and dynamic=no and comment~"^%s:"%s]' % (lst, pfx, cond))
     return "\n".join(lines) + "\n"
+
+
+@app.get("/api/whitelist.rsc", response_class=PlainTextResponse)
+def wl_rsc(t: str, list: str = "whitelist", s: Session = Depends(db)):
+    return list_rsc(t, list, "white", s)
+
+
+@app.get("/api/blacklist.rsc", response_class=PlainTextResponse)
+def bl_rsc(t: str, list: str = "blacklist", s: Session = Depends(db)):
+    return list_rsc(t, list, "black", s)
 
 
 @app.get("/log", dependencies=[Depends(admin)])
@@ -3106,7 +3407,7 @@ def backups_info():
             p = os.path.join(BACKUP_DIR, n)
             if BACKUP_RE.match(n) and os.path.isfile(p):
                 st = os.stat(p)
-                files.append({"name": n, "size": bytes_h(st.st_size),
+                files.append({"name": n, "size": bytes_h(st.st_size), "bytes": st.st_size,
                               "ts": dt.datetime.fromtimestamp(st.st_mtime, dt.timezone.utc).replace(tzinfo=None)})
     except OSError:
         return {"available": False, "files": [], "pending": False, "error": None, "stale": False}
@@ -3117,18 +3418,70 @@ def backups_info():
             err = fh.read().strip()
     except OSError:
         pass
+    try:
+        free = shutil.disk_usage(BACKUP_DIR).free
+    except OSError:
+        free = None
+    total_b = sum(f["bytes"] for f in files)
     return {"available": True, "files": files, "pending": os.path.exists(os.path.join(BACKUP_DIR, ".now")),
             "error": err, "stale": not files or (now() - files[0]["ts"]).total_seconds() > 2 * 86400,
-            "total": bytes_h(sum(os.path.getsize(os.path.join(BACKUP_DIR, f["name"])) for f in files)),
+            "total": bytes_h(total_b), "total_b": total_b, "newest_b": files[0]["bytes"] if files else 0,
+            "free_b": free, "free": bytes_h(free) if free is not None else "",
             "hour": os.getenv("BACKUP_HOUR", "3"), "keep": os.getenv("BACKUP_KEEP_DAYS", "14")}
+
+
+def backup_limit_mb(s):
+    v = sget(s, "backup_limit_mb", "")
+    return int(v) if v.isdigit() and int(v) > 0 else None
+
+
+def enforce_backup_limit(s=None):
+    """Usuwa najstarsze kopie ponad limit rozmiaru (najnowsza zostaje zawsze). Zwraca nazwy usuniętych."""
+    own = s is None
+    s = Session(engine) if own else s
+    try:
+        lim = backup_limit_mb(s)
+        removed = []
+        if lim:
+            files = [(f["name"], f["bytes"], f["ts"].timestamp()) for f in backups_info()["files"]]
+            for name in backuplib.plan_prune(files, lim * 1024 * 1024):
+                try:
+                    os.remove(os.path.join(BACKUP_DIR, name))
+                    removed.append(name)
+                except OSError:
+                    pass
+            if removed:
+                log(s, "limit kopii", ("usunięto %d: %s" % (len(removed), ", ".join(removed)))[:250])
+                s.commit()
+        return removed
+    finally:
+        if own:
+            s.close()
+
+
+def backups_view(s):
+    bk = backups_info()
+    lim = backup_limit_mb(s)
+    bk["limit_gb"] = round(lim / 1024, 2) if lim else ""
+    bk["min_gb"] = max(0.1, math.ceil(bk.get("newest_b", 0) / 1024 ** 3 * 100) / 100)  # nie mniej niż jedna (najnowsza) kopia
+    if lim and bk.get("available"):
+        lim_b = lim * 1024 * 1024
+        bk["limit_h"] = bytes_h(lim_b)
+        bk["fits"] = lim_b // bk["newest_b"] if bk.get("newest_b") else 0
+        bk["too_big"] = bool(bk.get("newest_b") and bk["newest_b"] > lim_b)
+    if bk.get("available") and bk.get("free_b") is not None:
+        bk["low_disk"] = bk["free_b"] < 1024 ** 3 or bk["free_b"] < 3 * bk.get("newest_b", 0)
+    return bk
 
 
 def settings_view(request, s, msg="", ok=True):
     return templates.TemplateResponse(request, "settings.html", {
         "domain": sget(s, "domain"), "email": sget(s, "email"), "msg": msg, "ok": ok,
-        "interval": interval(s), "intervals": INTERVALS, "routers": ordered_routers(s), "bk": backups_info(),
-        "wl_enabled": whitelist_on(s), "speed_router": sget(s, "speed_router"), "speed_time": SPEED_TIME[:5],
-        "speed_engine": sget(s, "speed_engine", "ookla"), "speed_server": sget(s, "speed_server", ""), "ookla": bool(OOKLA_BIN)})
+        "interval": interval(s), "intervals": INTERVALS, "routers": ordered_routers(s), "bk": backups_view(s),
+        "wl_enabled": whitelist_on(s), "bl_enabled": blacklist_on(s), "speed_router": sget(s, "speed_router"), "speed_time": SPEED_TIME[:5],
+        "speed_engine": sget(s, "speed_engine", "") or default_engine(),
+        "speed_server": server_setting(s, sget(s, "speed_engine", "") or default_engine()),
+        "ookla": bool(OOKLA_BIN), "librespeed": bool(LS_BIN), "ls_best": best_result(s)})
 
 
 @app.post("/settings/whitelist", dependencies=[Depends(admin)])
@@ -3140,6 +3493,15 @@ def settings_whitelist(request: Request, on: str = Form(""), s: Session = Depend
     return settings_view(request, s, (tr("msg.wl_on") if on == "1" else tr("msg.wl_off")) + " " + tr("msg.wl_paste"), True)
 
 
+@app.post("/settings/blacklist", dependencies=[Depends(admin)])
+def settings_blacklist(request: Request, on: str = Form(""), s: Session = Depends(db)):
+    sset(s, "blacklist_on", "1" if on == "1" else "0")
+    log(s, "moduł blacklisty", "włączony" if on == "1" else "wyłączony")
+    s.commit()
+    _BL_ON[1] = 0
+    return settings_view(request, s, (tr("msg.bl_on") if on == "1" else tr("msg.bl_off")) + " " + tr("msg.wl_paste"), True)
+
+
 @app.post("/settings/backup-now", dependencies=[Depends(admin)])
 def backup_now(request: Request, s: Session = Depends(db)):
     try:
@@ -3149,6 +3511,29 @@ def backup_now(request: Request, s: Session = Depends(db)):
     log(s, "kopia bazy", "zlecona ręcznie")
     s.commit()
     return settings_view(request, s, tr("msg.bk_ok"), True)
+
+
+@app.post("/settings/backup-limit", dependencies=[Depends(admin)])
+def settings_backup_limit(request: Request, mode: str = Form("none"), gb: str = Form(""), s: Session = Depends(db)):
+    if mode != "limit":
+        sset(s, "backup_limit_mb", "")
+        log(s, "limit kopii", "bez limitu")
+        s.commit()
+        return settings_view(request, s, tr("msg.bk_limit_none"), True)
+    mb = backuplib.parse_limit_gb(gb)
+    if mb is None:
+        return settings_view(request, s, tr("msg.bk_limit_bad"), False)
+    newest = backups_info().get("newest_b", 0)
+    if mb * 1024 * 1024 < newest:
+        return settings_view(request, s, tr("msg.bk_limit_small", size=bytes_h(newest)), False)
+    sset(s, "backup_limit_mb", str(mb))
+    log(s, "limit kopii", "%d MB" % mb)
+    s.commit()
+    removed = enforce_backup_limit(s)
+    msg = tr("msg.bk_limit_saved", limit=bytes_h(mb * 1024 * 1024))
+    if removed:
+        msg += " " + tr("msg.bk_limit_removed", n=len(removed))
+    return settings_view(request, s, msg, True)
 
 
 @app.get("/backups/{name}", dependencies=[Depends(admin)])

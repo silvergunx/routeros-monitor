@@ -7,11 +7,23 @@ którą routery pobierają same. Całość działa w Dockerze (`docker compose`)
 
 Interfejs jest dostępny po polsku i angielsku, działa w trybie jasnym i ciemnym oraz na telefonie.
 
-<p align="center">
-  <img src="docs/img/routers-dark.png" alt="Router list" width="48%">
-  <img src="docs/img/router-system-dark.png" alt="A router page with charts" width="48%">
-</p>
-<p align="center"><sub>Lista routerów i strona routera (fikcyjne dane demonstracyjne)</sub></p>
+**Spis treści:** [Zrzuty ekranu](#zrzuty-ekranu) · [Co potrafi](#co-potrafi) · [Wymagania](#wymagania) · [Instalacja](#instalacja) · [Aktualizacja](#aktualizacja) · [Konfiguracja](#konfiguracja-env) · [Kopie zapasowe](#kopie-zapasowe) · [Diagnostyka](#diagnostyka) · [Języki](#języki) · [Dokumentacja](#dokumentacja) · [Licencja](#licencja)
+
+## Zrzuty ekranu
+
+<p align="center"><img src="docs/img/routers-dark.png" alt="Lista routerów w ciemnym motywie" width="900"></p>
+
+| | |
+|---|---|
+| ![Strona routera: CPU, RAM, temperatura, ruch WAN i wykresy](docs/img/router-system-light.png)<br>*Strona routera: CPU, RAM, temperatura, ruch WAN i wykresy* | ![Jakość łącza: sondy, przerwy i nocny test prędkości](docs/img/link-quality-dark.png)<br>*Jakość łącza: sondy, przerwy i nocny test prędkości* |
+| ![Klienci Wi-Fi z oceną jakości połączenia](docs/img/wifi-dark.png)<br>*Klienci Wi-Fi z oceną jakości połączenia* | ![Logi routerów wyjaśnione po ludzku, z poradami](docs/img/log-analysis-dark.png)<br>*Logi routerów wyjaśnione po ludzku, z poradami* |
+| ![Tryb ustawiania Wi-Fi na żywo (szukanie miejsca dla AP)](docs/img/live-wifi-dark.png)<br>*Tryb ustawiania Wi-Fi na żywo (szukanie miejsca dla AP)* | ![Whitelista i blacklista z gotową regułą firewalla do wklejenia](docs/img/blacklist-light.png)<br>*Whitelista i blacklista z gotową regułą firewalla do wklejenia* |
+| ![Test prędkości: wybór silnika i automatyczny wybór najlepszego serwera](docs/img/settings-speedtest-expanded-light.png)<br>*Test prędkości: wybór silnika i automatyczny wybór najlepszego serwera* | ![Kopie zapasowe bazy z limitem rozmiaru](docs/img/settings-backups-light.png)<br>*Kopie zapasowe bazy z limitem rozmiaru* |
+
+<p align="center"><img src="docs/img/mobile-routers-light.png" alt="Działa na telefonie, w jasnym i ciemnym motywie" width="260"> &nbsp; <img src="docs/img/mobile-router-dark.png" alt="Działa na telefonie, w jasnym i ciemnym motywie" width="260"></p>
+<p align="center"><em>Działa na telefonie, w jasnym i ciemnym motywie</em></p>
+
+<sub>Zrzuty pokazują fikcyjne dane demonstracyjne (`tools/demo_data.py`); wszystkie nazwy i adresy są zmyślone.</sub>
 
 ## Co potrafi
 
@@ -25,21 +37,25 @@ Interfejs jest dostępny po polsku i angielsku, działa w trybie jasnym i ciemny
 **Jakość łącza**
 - sondy Netwatch: opóźnienie, jitter i utrata pakietów do bramy, a na routerze brzegowym także DNS, HTTP i dostępność internetu w %
 - lista przerw z typem (brak internetu / nie działa DNS / nie działa HTTP)
-- **test prędkości Speedtest by Ookla** (ten sam co speedtest.net) wbudowany w kontener, z wyborem serwera testowego,
-  jitterem, utratą pakietów i linkiem do wyniku; zapasowo test Cloudflare; codziennie w nocy i na żądanie
+- test prędkości wykonywany przez serwer aplikacji, z wyborem silnika i serwera testowego: **LibreSpeed** (otwartoźródłowy, wbudowany w obraz),
+  **Speedtest by Ookla** (ten sam co speedtest.net; dostępny po własnej budowie obrazu) i zapasowo Cloudflare;
+  pobieranie, wysyłanie, ping i jitter; codziennie w nocy i na żądanie
 
 **Logi**
 - odbiór logów z routerów przez syslog (UDP), kolorowanie wg ważności, potwierdzanie, eksport z zakresem dat
 - tłumaczenie typowych komunikatów RouterOS na zrozumiały opis po polsku i zakładka analizy z poradami
 
-**Whitelista**
-- adresy IP, sieci i domeny w bazie aplikacji; routery pobierają listę skryptem do `/ip firewall address-list`
-- import i eksport, włączanie/wyłączanie wpisów; cały moduł można wyłączyć w Ustawieniach
+**Whitelista i blacklista**
+- adresy IP, sieci i domeny w bazie aplikacji; routery pobierają listy skryptami do `/ip firewall address-list`
+  (listy `whitelist` i `blacklist`), dla wszystkich routerów albo jednego
+- blacklista (banowanie): opcjonalny termin ważności dla banów czasowych, ochrona przed zbanowaniem siebie, serwera aplikacji
+  i monitorowanego routera oraz gotowa reguła firewalla do wklejenia (sama aplikacja nigdy nie zmienia firewalla)
+- import i eksport, włączanie/wyłączanie wpisów; każdy moduł można wyłączyć w Ustawieniach
 
 **Pozostałe**
 - tryb ustawiania / analizy Wi-Fi na żywo (odczyt co 2 s) do szukania najlepszego miejsca dla punktu dostępowego
 - użytkownicy z rolami (administrator / podgląd), dziennik zmian
-- automatyczne kopie zapasowe bazy z pobieraniem i usuwaniem w panelu
+- automatyczne kopie zapasowe bazy z pobieraniem i usuwaniem w panelu oraz opcjonalnym limitem rozmiaru przechowywanych kopii
 - HTTPS jednym kliknięciem: podajesz domenę w Ustawieniach, certyfikat Let's Encrypt wystawia się sam (Caddy)
 
 ## Wymagania
@@ -97,6 +113,16 @@ docker compose pull
 docker compose up -d
 ```
 
+Droga A aktualizuje tylko **obraz aplikacji**. Pliki obok `docker-compose.yml` (`docker-compose.yml`, `backup.sh`, `Caddyfile`) nie są częścią obrazu.
+Gdy notatki wydania mówią, że któryś się zmienił, pobierz go ponownie (poniżej `main` dla wersji `stable`; dla beta użyj `develop`):
+```
+cd routeros-monitor
+curl -fsSL https://raw.githubusercontent.com/silvergunx/routeros-monitor/main/backup.sh -o backup.sh
+curl -fsSL https://raw.githubusercontent.com/silvergunx/routeros-monitor/main/docker-compose.yml -o docker-compose.yml
+docker compose up -d
+```
+(Własny `.env` zostaje; nowe zmienne mają wartości domyślne.) W drodze B `git pull` odświeża te pliki za Ciebie.
+
 **Droga B: budowa z kodu**
 ```
 git pull
@@ -124,11 +150,13 @@ Jeśli zmiana dotyczy skryptów na routerach, w opisie wersji będzie informacja
 | `DB_PASSWORD` | – | hasło bazy PostgreSQL (ustawiane tylko przy pierwszym starcie bazy) |
 | `ADMIN_USER` / `ADMIN_PASSWORD` | `admin` / – | pierwsze konto administratora |
 | `SECRET_KEY` | – | klucz sesji, min. 16 znaków (`openssl rand -hex 32`) |
-| `RETENTION_DAYS` | `30` | ile dni trzymać pomiary |
+| `RETENTION_DAYS` | `30` | ile dni trzymać pomiary (CPU, RAM, jakość łącza itd.) |
+| `IFACE_RETENTION_DAYS` | `7` | ile dni trzymać próbki ruchu interfejsów (największa tabela); starsze są usuwane w tle |
 | `SYSLOG_PORT` | `514` | port UDP na serwerze dla logów z routerów |
 | `LOG_RETENTION_DAYS` | `14` | ile dni trzymać logi |
 | `TZ` | `Europe/Warsaw` | strefa czasu |
 | `BACKUP_HOUR` / `BACKUP_KEEP_DAYS` | `3` / `14` | godzina kopii zapasowej i czas jej przechowywania |
+| `BACKUP_INCLUDE_METRICS` | `0` | `1` dołącza do kopii także historię wykresów (pomiary); domyślnie kopie są małe i zawierają logi, dziennik zmian, użytkowników, routery i listy IP, ale bez historii wykresów |
 | `SPEEDTEST_TIME` | `03:30:00` | godzina nocnego testu prędkości |
 | `SPEEDTEST_STREAMS` | `6` | liczba połączeń w zapasowym teście Cloudflare |
 
@@ -144,6 +172,10 @@ Pozostałe ustawienia (interwał odczytu, test prędkości, whitelista, kolejno�
 Kontener `backup` robi kopię codziennie o `BACKUP_HOUR` do katalogu `./backups`. Kopię na żądanie, pobieranie i usuwanie
 znajdziesz w **Ustawienia → Kopie zapasowe bazy**.
 
+Domyślnie kopie zawierają wszystko oprócz historii wykresów (ruch interfejsów, pomiary CPU/RAM i liczba klientów): logi, dziennik zmian,
+użytkownicy, routery, ustawienia i listy IP są w kopii. Po przywróceniu wykresy zaczynają od zera. `BACKUP_INCLUDE_METRICS=1` dołącza historię
+(kopie są wtedy znacznie większe).
+
 Przywracanie (nadpisuje obecne dane):
 ```
 docker compose stop app
@@ -153,6 +185,10 @@ docker compose start app
 Przeniesienie na nowy serwer: zainstaluj aplikację, skopiuj swój `.env` i plik kopii, uruchom i wykonaj przywracanie.
 
 ## Diagnostyka
+
+Rozmiar bazy: `docker compose exec db psql -U monitor -d monitor -c "SELECT relname, pg_size_pretty(pg_total_relation_size(relid)) FROM pg_catalog.pg_statio_user_tables ORDER BY pg_total_relation_size(relid) DESC LIMIT 8;"`.
+Zwykle największa jest tabela interfejsów; zmniejsz `IFACE_RETENTION_DAYS`, aby ją odchudzić. Usunięcie starych wierszy zwalnia miejsce na nowe, ale nie zmniejsza plików
+na dysku; aby oddać miejsce systemowi, uruchom (na chwilę blokuje tabelę i potrzebuje wolnego miejsca na kopię) `docker compose exec db psql -U monitor -d monitor -c "VACUUM FULL iface_metrics;"`.
 
 ```
 docker compose ps
@@ -177,13 +213,28 @@ Bezpieczeństwo: [docs/BEZPIECZENSTWO.md](docs/BEZPIECZENSTWO.md) oraz [SECURITY
 
 Interfejs działa po polsku i angielsku (przełącznik PL / EN w menu i na ekranie logowania, wybór zapamiętuje ciasteczko). Kolejne języki dodaje się samym plikiem JSON, bez zmian w kodzie: [docs/TRANSLATING.md](docs/TRANSLATING.md).
 
+## Dokumentacja
+
+| Dokument | Co zawiera |
+|---|---|
+| [Releases](https://github.com/silvergunx/routeros-monitor/releases) i [CHANGELOG.md](CHANGELOG.md) | co zmieniło się w każdej wersji i co trzeba zrobić na routerach lub serwerze po aktualizacji |
+| [docs/ROUTERY.md](docs/ROUTERY.md) | co instaluje komenda konfiguracyjna na routerze, reguły firewalla dla whitelisty i blacklisty, routery poza siecią lokalną |
+| [docs/BEZPIECZENSTWO.md](docs/BEZPIECZENSTWO.md) i [SECURITY.md](SECURITY.md) | zalecenia bezpieczeństwa i zgłaszanie błędów bezpieczeństwa |
+| [docs/TRANSLATING.md](docs/TRANSLATING.md) | jak dodać język |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | gałęzie (`main` stabilna, `develop` beta), testy, wydawanie wersji |
+| [THIRD_PARTY.md](THIRD_PARTY.md) | licencje dołączonych składników (LibreSpeed CLI) i opcjonalnego programu Ookla |
+
+Pytania i zgłoszenia błędów: [GitHub Issues](https://github.com/silvergunx/routeros-monitor/issues).
+
 ## Licencja
 
 Kod projektu: [MIT](LICENSE).
 
-Przy własnej budowie obrazu (`docker compose up -d --build`) pobierany jest program **Speedtest CLI firmy Ookla**, który nie jest częścią
+Obraz zawiera **LibreSpeed CLI** (LGPL-3.0, bez zmian) do testu prędkości; licencje dołączonych składników są w [THIRD_PARTY.md](THIRD_PARTY.md).
+Działa bez udostępniania wyników, więc do publicznych serwerów LibreSpeed trafia tylko ruch testowy.
+
+Przy własnej budowie obrazu (`docker compose up -d --build`) pobierany jest dodatkowo program **Speedtest CLI firmy Ookla**, który nie jest częścią
 tego repozytorium i ma własną licencję (użytek osobisty, niekomercyjny); aplikacja uruchamia go z akceptacją licencji i polityki prywatności Ookla.
-Gotowe obrazy go **nie zawierają** (w Ustawieniach jest wtedy podpowiedź, jak zbudować obraz z Ooklą) i używają testu Cloudflare.
-Jeśli nie chcesz Ookli, wybierz w Ustawieniach silnik Cloudflare.
+Gotowe obrazy go **nie zawierają** (w Ustawieniach jest wtedy podpowiedź, jak zbudować obraz z Ooklą). Zawsze możesz wybrać silnik LibreSpeed lub Cloudflare.
 
 Projekt nie jest powiązany z MikroTik, Ookla ani Cloudflare. Nazwy należą do ich właścicieli.
