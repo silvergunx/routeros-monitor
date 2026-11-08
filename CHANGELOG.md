@@ -7,9 +7,7 @@ Notes marked **Routers** mean the configuration command has to be pasted again o
 
 ## [Unreleased]
 
-## [1.1.0-beta.1] - 2026-11-08
-
-Test release of 1.1.0 (pre-release, image channel `beta`).
+## [1.1.0] - 2026-11-08
 
 ### Added
 - **LibreSpeed** speed test engine (open source, LGPL-3.0, [librespeed.org](https://librespeed.org)) bundled in the Docker image. It is the default
