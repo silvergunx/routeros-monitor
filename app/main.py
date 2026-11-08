@@ -1,3 +1,4 @@
+import unicodedata
 import os, re, csv, io, json, math, asyncio, socket, hashlib, hmac, secrets, time, ipaddress, datetime as dt
 from urllib.parse import quote, urlparse
 import i18n
@@ -7,7 +8,7 @@ import netguard
 import backups as backuplib
 import httpx
 from fastapi import FastAPI, Request, Form, Depends, HTTPException, Body
-from fastapi.responses import RedirectResponse, PlainTextResponse, Response, FileResponse, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, PlainTextResponse, Response, FileResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.concurrency import run_in_threadpool
@@ -1422,6 +1423,10 @@ templates.env.globals["wl_on"] = wl_on
 _BL_ON = [None, 0.0]
 
 
+BL_RULE = ('/ip firewall raw remove [find comment="app-blacklist"]\n'
+           '/ip firewall raw add chain=prerouting in-interface-list=WAN src-address-list=blacklist action=drop comment="app-blacklist"')
+
+
 def blacklist_on(s):
     """Moduł blacklisty: ustawienie z panelu; domyślnie włączony tylko jeśli blacklista ma już wpisy."""
     v = sget(s, "blacklist_on", "")
@@ -1749,6 +1754,7 @@ def logs_api(request: Request, rid: int, sev: str = "", topic: str = "", q: str 
     if q.strip():
         cond.append(LogEntry.msg.ilike("%" + q.strip()[:100].replace("%", r"\%").replace("_", r"\_") + "%"))
     rows = s.scalars(select(LogEntry).where(*cond).order_by(LogEntry.id.desc()).limit(limit)).all()
+    unread = unread_counts(s, request.state.user, rid)
     day = now() - dt.timedelta(hours=24)
     counts = {k: 0 for k in LOG_CATS}
     for v, c in s.execute(select(LogEntry.sev, func.count()).where(LogEntry.router_id == rid, LogEntry.ts > day)
@@ -1766,7 +1772,7 @@ def logs_api(request: Request, rid: int, sev: str = "", topic: str = "", q: str 
                       for x in rows],
             "counts": counts, "topics": sorted(words),
             "ack": (log_ack_time(request.state.user, rid) or dt.datetime(2000, 1, 1)).isoformat(timespec="seconds"),
-            "unread": unread_errors(s, request.state.user, rid)}
+            "unread": unread[0], "unread_warn": unread[1]}
 
 
 def log_ack_time(u, rid):
@@ -2991,8 +2997,33 @@ def logs_analysis(request: Request, rid: int, hours: int = 24, s: Session = Depe
     unk = sorted(unknown.values(), key=lambda u: -u["count"])[:15]
     for u in unk:
         u["last"] = u["last"].isoformat(timespec="seconds")
-    return {"groups": out, "unknown": unk, "total": len(rows),
+    can_ban = bool(request.state.user.is_admin and blacklist_on(s))
+    banned = []
+    if can_ban:
+        for g in out:
+            if g["id"] == "login_fail_wan":
+                g["ban_key"] = tr("an.015")
+        banned = [w.ip for w in s.scalars(select(Whitelist).where(Whitelist.kind == "black", Whitelist.active == True))]  # noqa: E712
+    return {"groups": out, "unknown": unk, "total": len(rows), "can_ban": can_ban, "banned": banned, "rule": BL_RULE,
             "summary": {k: sum(g["count"] for g in out if g["level"] == k) for k in order}}
+
+
+@app.post("/api/blacklist/ban", dependencies=[Depends(admin)])
+def ban_from_log(request: Request, ip: str = Form(), rid: str = Form(""), s: Session = Depends(db)):
+    """Przycisk 'Banuj' w analizie logów: dodaje adres do blacklisty (bez wygaśnięcia, dla wszystkich routerów)."""
+    try:
+        net = parse_ip(ip)
+    except ValueError:
+        return JSONResponse({"ok": False, "msg": tr("msg.wl_bad_addr")}, 400)
+    why = ban_error(net, request, s)
+    if why:
+        return JSONResponse({"ok": False, "msg": why}, 400)
+    if s.scalar(select(Whitelist.id).where(Whitelist.kind == "black", Whitelist.ip == net, Whitelist.active == True)):  # noqa: E712
+        return {"ok": True, "msg": tr("msg.ban_dup"), "ip": net}
+    s.add(Whitelist(kind="black", ip=net, comment=cmt(tr("msg.ban_comment")), expires=None, router_id=None))
+    log(s, "blacklist+", "%s (%s) zakres=wszystkie, z analizy logów routera %s" % (net, cmt(tr("msg.ban_comment")), rid or "?"))
+    s.commit()
+    return {"ok": True, "msg": tr("msg.ban_ok"), "ip": net}
 
 
 # ---------- RouterOS update check ----------
@@ -3114,7 +3145,7 @@ def wl_page(request: Request, s: Session = Depends(db), err: str = "", ok: str =
     return templates.TemplateResponse(request, "whitelist.html", {
         "items": items, "routers": routers, "names": {r.id: r.name for r in routers},
         "err": err, "ok": ok, "now": now(), "kind": kind, "base": "/blacklist" if kind == "black" else "/whitelist",
-        "wl_enabled": whitelist_on(s), "bl_enabled": blacklist_on(s)})
+        "wl_enabled": whitelist_on(s), "bl_enabled": blacklist_on(s), "bl_rule": BL_RULE})
 
 
 @app.post("/whitelist", dependencies=[Depends(admin)])
@@ -3215,6 +3246,13 @@ def wl_del(request: Request, wid: int, s: Session = Depends(db)):
     return back(kind)
 
 
+def ascii_rsc(text):
+    """Skrypt .rsc trafia do terminala RouterOS, który psuje znaki spoza ASCII (także w komentarzach): ąęł... -> aeł..."""
+    text = (text or "").translate(str.maketrans({"ł": "l", "Ł": "L", "ø": "o", "Ø": "O", "đ": "d", "Đ": "D"}))
+    text = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in text if ord(c) < 128)
+
+
 def list_rsc(t, lst, kind, s):
     """Skrypt .rsc synchronizujący /ip firewall address-list z wpisami danego rodzaju (wl: / bl: w komentarzu)."""
     r = get_router(s, t)
@@ -3228,7 +3266,7 @@ def list_rsc(t, lst, kind, s):
             continue
         keep.append(w.ip)
         lines.append(':do {/ip firewall address-list add list="%s" address=%s comment="%s:%s"} on-error={}'
-                     % (lst, w.ip, pfx, w.comment))
+                     % (lst, w.ip, pfx, ascii_rsc(w.comment)))
     cond = "".join(' and address!="%s"' % ip for ip in keep)
     lines.append('/ip firewall address-list remove [find where list="%s" and dynamic=no and comment~"^%s:"%s]' % (lst, pfx, cond))
     return "\n".join(lines) + "\n"

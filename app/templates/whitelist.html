@@ -8,7 +8,7 @@
 <input name="days" type="number" min="1" placeholder="{{ t('bl.days_ph') if black else t('wl.days_ph') }}" style="width:150px">
 <select name="router"><option value="">{{ t('wl.all_routers') }}</option>{% for r in routers %}<option value="{{r.id}}">{{r.name}}</option>{% endfor %}</select> <button class="p">{{ t('bl.ban') if black else t('common.add') }}</button></form>{% endif %}</div>
 {% if black %}<div class="card"><h3 style="margin-top:0">{{ t('bl.rule_title') }}</h3><p class="mut small">{{ t('bl.rule_help') }}</p>
-<pre>/ip firewall raw add chain=prerouting src-address-list=blacklist action=drop comment="app-blacklist"</pre></div>{% endif %}
+<pre>{{ bl_rule }}</pre></div>{% endif %}
 <div class="card scroll"><table><tr><th>{{ t('wl.address') }}</th><th>{{ t('bl.reason') if black else t('wl.comment') }}</th><th>{{ t('wl.scope') }}</th><th>{{ t('wl.expires') }}</th><th>{{ t('wl.status') }}</th><th></th></tr>
 {% for w in items %}{% set dead = w.expires and w.expires < now %}<tr><td>{{w.ip}}</td><td>{{w.comment}}</td>
 <td>{{names.get(w.router_id, t('wl.all')) if w.router_id else t('wl.all')}}</td>
