@@ -1,5 +1,5 @@
 {% extends "base.html" %}{% block c %}
-<div class="card"><h2>Dziennik zmian</h2>
-<div class="scroll"><table><tr><th>Czas</th><th>Kto</th><th>Akcja</th><th>Szczegóły</th></tr>
-{% for x in rows %}<tr><td><span class="t" data-t="{{x.ts|iso}}Z"></span></td><td>{{x.who or '-'}}</td><td>{{x.action}}</td><td>{{x.detail}}</td></tr>{% else %}<tr><td colspan="4" class="mut">Brak wpisów.</td></tr>{% endfor %}</table></div></div>
+<div class="card"><h2>{{ t('log.title') }}</h2>
+<div class="scroll"><table><tr><th>{{ t('log.time') }}</th><th>{{ t('log.who') }}</th><th>{{ t('log.action') }}</th><th>{{ t('log.details') }}</th></tr>
+{% for x in rows %}<tr><td><span class="t" data-t="{{x.ts|iso}}Z"></span></td><td>{{x.who or '-'}}</td><td>{{x.action}}</td><td>{{x.detail}}</td></tr>{% else %}<tr><td colspan="4" class="mut">{{ t('log.empty') }}</td></tr>{% endfor %}</table></div></div>
 {% endblock %}

@@ -1,4 +1,4 @@
-<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!doctype html><html lang="{{ request.state.lang }}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>RouterOS Monitor</title>
 <script>try{var t=localStorage.getItem('theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');document.documentElement.dataset.theme=t}catch(e){}</script>
 <style>
@@ -8,7 +8,7 @@
 body{font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;background:var(--bg);color:var(--fg)}
 nav{background:var(--nav);padding:0 16px;display:flex;align-items:center;gap:4px;height:48px;flex-wrap:wrap}
 nav a,nav button{color:#e5e7eb;text-decoration:none;padding:6px 12px;border-radius:6px;background:none;border:0;font:inherit;cursor:pointer}
-nav a:hover,nav button:hover{background:#ffffff1a}nav .sp{flex:1}nav b{color:#fff;margin-right:12px}nav .links{display:flex;align-items:center;gap:4px;flex:1}nav .burger{display:none;margin-left:auto;font-size:20px}
+nav a:hover,nav button:hover{background:#ffffff1a}nav .sp{flex:1}nav .lg{display:inline-flex;align-items:center;gap:6px;opacity:.7}nav .lg.on{opacity:1;background:#ffffff1a}nav .lg img{border-radius:2px;box-shadow:0 0 0 1px #0004}nav b{color:#fff;margin-right:12px}nav .links{display:flex;align-items:center;gap:4px;flex:1}nav .burger{display:none;margin-left:auto;font-size:20px}
 main{max-width:1150px;margin:20px auto;padding:0 16px}
 a{color:var(--acc)}h2{margin:0 0 12px;font-size:18px}
 .card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:16px;margin-bottom:16px}
@@ -36,7 +36,7 @@ details.nwd>summary{list-style:none;cursor:pointer;display:flex;align-items:cent
 details.nwd>summary::-webkit-details-marker{display:none}details.nwd>summary h3{margin:0}
 details.nwd>summary .tg{margin-left:auto;color:var(--acc);font-size:13px;white-space:nowrap}
 details.nwd .tg .c{display:none}details.nwd[open] .tg .o{display:none}details.nwd[open] .tg .c{display:inline}
-details.nwd[open]>summary{margin-bottom:8px}
+details.nwd[open]>summary{margin-bottom:8px}details.nwd.empty>summary{cursor:default}details.nwd.empty .tg{display:none}
 .tile .tsub{font-size:12px;color:var(--mut);margin-top:2px}
 .lvbig{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin:14px 0 8px;flex-wrap:wrap}
 .lvq{font-size:34px;font-weight:700;line-height:1.1}.lvq.ok{color:var(--ok)}.lvq.warn{color:var(--warn)}.lvq.bad{color:var(--bad)}
@@ -134,8 +134,8 @@ tr.lv-dbg td{color:var(--mut)}
  table.mob td::before{content:attr(data-l);color:var(--mut);font-size:12px;text-align:left;flex:none}
  table.mob td[colspan]{display:block;text-align:left}table.mob td[colspan]::before{content:none}}
 @media(max-width:420px){.tiles{grid-template-columns:repeat(2,1fr)}}
-</style></head><body data-refresh="{{ (refresh or 30) * 1000 }}">
-{% set me = request.state.user %}{% if me %}<nav id="nav"><b>RouterOS Monitor</b><button class="burger" onclick="document.getElementById('nav').classList.toggle('open')" aria-label="Menu">☰</button><div class="links"><a href="/">Routery</a>{% if wl_on() %}<a href="/whitelist">Whitelist</a>{% endif %}{% if wifi_any() %}<a href="/live">📶 Tryb ustawiania / analizy Wi-Fi</a>{% endif %}{% if me.is_admin %}<a href="/log">Dziennik</a><a href="/users">Użytkownicy</a><a href="/settings">Ustawienia</a>{% endif %}<span class="sp"></span><a href="/account" title="Moje konto">{{me.username}}{% if not me.is_admin %} (podgląd){% endif %}</a><button onclick="toggleTheme()" title="Motyw">◐</button><a href="/logout">Wyloguj</a></div></nav>{% endif %}
+.lg{display:inline-flex;align-items:center;gap:6px;opacity:.65;text-decoration:none}.lg.on{opacity:1;font-weight:600}.lg img{border-radius:2px;box-shadow:0 0 0 1px #0003}</style></head><body data-refresh="{{ (refresh or 30) * 1000 }}">
+{% import "_lang.html" as lang with context %}{% set me = request.state.user %}{% if me %}<nav id="nav"><b>RouterOS Monitor</b><button class="burger" onclick="document.getElementById('nav').classList.toggle('open')" aria-label="Menu">☰</button><div class="links"><a href="/">{{ t('nav.routers') }}</a>{% if wl_on() %}<a href="/whitelist">{{ t('nav.whitelist') }}</a>{% endif %}{% if wifi_any() %}<a href="/live">{{ t('nav.live') }}</a>{% endif %}{% if me.is_admin %}<a href="/log">{{ t('nav.log') }}</a><a href="/users">{{ t('nav.users') }}</a><a href="/settings">{{ t('nav.settings') }}</a>{% endif %}<span class="sp"></span><a href="/account" title="{{ t('nav.account') }}">{{me.username}}{% if not me.is_admin %} {{ t('nav.viewer') }}{% endif %}</a><button onclick="toggleTheme()" title="{{ t('nav.theme') }}">◐</button>{{ lang.switcher() }}<a href="/logout">{{ t('nav.logout') }}</a></div></nav>{% endif %}
 <main>{% block c %}{% endblock %}</main>
 <script>
 function fmtTimes(){document.querySelectorAll('.t').forEach(e=>e.textContent=new Date(e.dataset.t).toLocaleString())}

@@ -1,6 +1,7 @@
-{% extends "base.html" %}{% block c %}
-<div class="card" style="max-width:340px;margin:60px auto"><h2>Logowanie</h2>
-{% if err %}<p class="err">Błędny login lub hasło.</p>{% endif %}
-<form method="post"><p><input name="username" placeholder="Login" required style="width:100%"></p>
-<p><input name="password" type="password" placeholder="Hasło" required style="width:100%"></p>
-<button>Zaloguj</button></form></div>{% endblock %}
+{% extends "base.html" %}{% import "_lang.html" as lang with context %}{% block c %}
+<div class="card" style="max-width:340px;margin:60px auto"><h2>{{ t('login.title') }}</h2>
+{% if err %}<p class="err">{{ t('login.error') }}</p>{% endif %}
+<form method="post"><p><input name="username" placeholder="{{ t('login.username') }}" required style="width:100%"></p>
+<p><input name="password" type="password" placeholder="{{ t('login.password') }}" required style="width:100%"></p>
+<button>{{ t('login.submit') }}</button></form>
+<p class="small" style="display:flex;justify-content:center;gap:16px">{{ lang.switcher(true) }}</p></div>{% endblock %}

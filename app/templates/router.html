@@ -72,8 +72,14 @@
 <script>(function(){const d=document.getElementById('nwd');try{d.open=localStorage.getItem('nwopen')==='1'}catch(e){}
 d.addEventListener('toggle',()=>{try{localStorage.setItem('nwopen',d.open?'1':'0')}catch(e){}})})();</script>
 <div class="card"><canvas id="c4" style="max-height:320px"></canvas></div>
-{% if r.edge %}<div class="card"><h3 style="margin:0 0 8px">Przerwy i problemy z internetem (7 dni)</h3><div id="qout" class="scroll"></div>
-<p class="mut small">Rodzaj problemu: „brak internetu” – żaden z serwerów (1.1.1.1, 8.8.8.8, 9.9.9.9) nie odpowiada; „nie działa DNS” – łącze działa, ale nie działa rozwiązywanie nazw; „nie działa HTTP” – strony się nie otwierają.</p></div>
+{% if r.edge %}<div class="card"><details class="nwd" id="outd"><summary><h3>Przerwy i problemy z internetem (7 dni)</h3>
+<span id="qoutsum" class="small"></span><span class="tg"><span class="o">▸ rozwiń</span><span class="c">▾ zwiń</span></span></summary>
+<div id="qout" class="scroll"></div>
+<p class="mut small">Rodzaj problemu: „brak internetu” – żaden z serwerów (1.1.1.1, 8.8.8.8, 9.9.9.9) nie odpowiada; „nie działa DNS” – łącze działa, ale nie działa rozwiązywanie nazw; „nie działa HTTP” – strony się nie otwierają.</p></details></div>
+<script>(function(){const o=document.getElementById('outd');if(o){try{o.open=localStorage.getItem('outopen')==='1'}catch(e){}
+o.addEventListener('toggle',()=>{if(!o.classList.contains('empty'))try{localStorage.setItem('outopen',o.open?'1':'0')}catch(e){}});
+o.querySelector('summary').addEventListener('click',e=>{if(o.classList.contains('empty'))e.preventDefault()})}})();
+</script>
 {% endif %}{% if r.edge or speed_srv %}<div class="card"><div class="row" style="justify-content:space-between"><h3 style="margin:0">Test prędkości</h3>
 {% if speed_srv and me.is_admin %}<button type="button" class="p" id="spdgo">▶ Uruchom test teraz</button>{% endif %}</div>
 <p id="qspd" style="margin:8px 0"></p>
@@ -274,6 +280,11 @@ if(av){const tl=(l,v)=>{const t=el('div','tile');t.append(el('span',null,l),el('
  av.replaceChildren(tl(lb('Dostępność internetu 24 h',24),d.avail['24h']),tl(lb('7 dni',168),d.avail['7d']),tl(lb('30 dni',720),d.avail['30d']));
  av.title=d.since?'Liczone od pierwszego pomiaru: '+lfmt(d.since)+'. Okresy bez danych (router offline, sondy jeszcze nie gotowe) nie obniżają wyniku.':'';}
 const qo=document.getElementById('qout');
+{const sm=document.getElementById('qoutsum'),od=document.getElementById('outd');
+ if(sm&&od){const n=d.outages.length,tot=d.outages.reduce((a,o)=>a+(o.min||0),0);
+  sm.className='small '+(n?'bad':'ok');
+  sm.textContent=n?'· '+n+' '+(n===1?'przerwa':(n%10>=2&&n%10<=4&&(n%100<12||n%100>14)?'przerwy':'przerw'))+', łącznie '+(tot>=60?(tot/60).toFixed(1)+' h':Math.round(tot)+' min'):'· brak przerw ✓';
+  od.classList.toggle('empty',!n);if(!n)od.open=false}}
 if(qo){if(!d.outages.length)qo.replaceChildren(el('p','mut small','Brak przerw w ostatnich 7 dniach.'));
  else{const tb=el('table','mob');const hr=el('tr');['Od','Do','Czas trwania','Rodzaj'].forEach(x=>hr.append(el('th',null,x)));tb.append(hr);
   d.outages.forEach(o=>{const tr=el('tr');const mk=(l,v,k)=>{const td=el('td',k,v);td.dataset.l=l;return td};

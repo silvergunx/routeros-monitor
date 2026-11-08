@@ -1,5 +1,6 @@
 import os, re, csv, io, json, math, asyncio, socket, hashlib, hmac, secrets, time, ipaddress, datetime as dt
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
+import i18n
 import httpx
 from fastapi import FastAPI, Request, Form, Depends, HTTPException, Body
 from fastapi.responses import RedirectResponse, PlainTextResponse, Response, FileResponse, StreamingResponse
@@ -28,6 +29,34 @@ engine = create_engine(DB_URL, pool_pre_ping=True)
 app = FastAPI()
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=86400 * 7)
 templates = Jinja2Templates(directory="templates")
+templates.env.globals["t"] = i18n.t
+templates.env.globals["th"] = i18n.th
+templates.env.globals["tn"] = i18n.tn
+templates.env.globals["languages"] = i18n.languages
+
+
+@app.middleware("http")
+async def set_lang(request: Request, call_next):
+    request.state.lang = i18n.pick_lang(request)
+    return await call_next(request)
+
+
+@app.get("/flag/{code}.svg")
+def flag(code: str):
+    f = i18n.DIR / f"{code}.svg"
+    if code not in i18n.LOCALES or not f.is_file():
+        raise HTTPException(404)
+    return FileResponse(f, media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.get("/lang/{code}")
+def set_language(code: str, request: Request):
+    back = request.headers.get("referer", "/")
+    path = urlparse(back).path or "/"
+    r = RedirectResponse(path if path.startswith("/") and not path.startswith("//") else "/", 303)
+    if code in i18n.LOCALES:
+        r.set_cookie(i18n.COOKIE, code, max_age=365 * 86400, samesite="lax", httponly=True)
+    return r
 
 
 def fm(v, unit="", d=0):

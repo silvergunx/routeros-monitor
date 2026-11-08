@@ -1,36 +1,36 @@
 {% extends "base.html" %}{% block c %}
 {% set me = request.state.user %}
 <div class="card">
-<div class="row" style="justify-content:space-between"><h2 style="margin:0">📶 Tryb ustawiania / analizy Wi-Fi</h2><span id="lvstat" class="badge">ładowanie…</span></div>
+<div class="row" style="justify-content:space-between"><h2 style="margin:0">{{ t('nav.live') }}</h2><span id="lvstat" class="badge">{{ t('lv.loading') }}</span></div>
 {% if me.is_admin %}
 <div class="row" style="margin-top:12px;gap:8px">
 <select id="lvr">{% for r in routers %}<option value="{{r.id}}" {{'selected' if r.id == rid}}>{{r.name}}</option>{% endfor %}</select>
 <select id="lvmin"><option value="5">5 min</option><option value="15" selected>15 min</option><option value="30">30 min</option></select>
-<button class="p" id="lvstart">▶ Włącz</button><button id="lvstop">■ Wyłącz</button>
+<button class="p" id="lvstart">{{ t('lv.start') }}</button><button id="lvstop">{{ t('lv.stop') }}</button>
 </div>
 {% endif %}
-<p class="mut small" style="margin-bottom:0">W trybie ustawiania routery mierzą Wi-Fi i połączenie z bramą co 2–3 sekundy. Włączenie obejmuje też kontroler CAPsMAN
-(to on widzi klientów wszystkich AP). Po upływie czasu wszystko wraca samo do normalnego trybu. Router zaczyna szybkie pomiary w ciągu ok. 10 sekund.</p>
+<p class="mut small" style="margin-bottom:0">{{ t('lv.help') }}</p>
 </div>
 
 <div class="card">
-<div class="row"><span class="mut">Urządzenie:</span><select id="dev" style="flex:1;min-width:200px"><option value="">— wybierz swoje urządzenie (np. telefon) —</option></select></div>
+<div class="row"><span class="mut">{{ t('lv.device_label') }}</span><select id="dev" style="flex:1;min-width:200px"><option value="">{{ t('lv.pick') }}</option></select></div>
 <div class="lvbig">
-<div><div class="mut small">Jakość połączenia</div><div class="lvq" id="lvq">-</div><div class="mut small" id="lvpct"></div></div>
-<div style="text-align:right"><div class="mut small">Sygnał</div><div class="lvsig"><b id="lvsig">-</b> <span>dBm</span> <span id="lvtrend"></span></div><div class="mut small" id="lvage"></div></div>
+<div><div class="mut small">{{ t('lv.quality') }}</div><div class="lvq" id="lvq">-</div><div class="mut small" id="lvpct"></div></div>
+<div style="text-align:right"><div class="mut small">{{ t('lv.signal') }}</div><div class="lvsig"><b id="lvsig">-</b> <span>dBm</span> <span id="lvtrend"></span></div><div class="mut small" id="lvage"></div></div>
 </div>
 <div class="lvmeta" id="lvmeta"></div>
 <canvas id="lvch" style="max-height:240px"></canvas>
-<div class="row" style="margin-top:10px"><input id="spotname" placeholder="Nazwa miejsca, np. Salon przy oknie" style="flex:1;min-width:180px"><button id="spotsave">📍 Zapisz pomiar miejsca</button></div>
-<p class="mut small" id="spotmsg">Stań w danym miejscu, odczekaj ok. 30 sekund i zapisz pomiar. Zapisywana jest średnia z ostatnich 30 sekund.</p>
+<div class="row" style="margin-top:10px"><input id="spotname" placeholder="{{ t('lv.spot_ph') }}" style="flex:1;min-width:180px"><button id="spotsave">{{ t('lv.spot_save') }}</button></div>
+<p class="mut small" id="spotmsg">{{ t('lv.spot_help') }}</p>
 </div>
 
-<div class="card"><h3 style="margin:0 0 8px">Połączenie z bramą (na żywo)</h3><div id="lvgw" class="scroll"></div></div>
-<div class="card"><h3 style="margin:0 0 8px">Wszyscy klienci Wi-Fi <span class="mut small">(od najsłabszego, kliknij, aby wybrać)</span></h3><div id="lvcl" class="scroll"></div></div>
-<div class="card"><h3 style="margin:0 0 8px">Zapisane pomiary miejsc</h3><div id="lvsp" class="scroll"></div></div>
+<div class="card"><h3 style="margin:0 0 8px">{{ t('lv.gw_title') }}</h3><div id="lvgw" class="scroll"></div></div>
+<div class="card"><h3 style="margin:0 0 8px">{{ t('lv.clients_title') }} <span class="mut small">{{ t('lv.clients_hint') }}</span></h3><div id="lvcl" class="scroll"></div></div>
+<div class="card"><h3 style="margin:0 0 8px">{{ t('lv.spots_title') }}</h3><div id="lvsp" class="scroll"></div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script>const ADMIN={{ 'true' if me.is_admin else 'false' }};</script>
+<script>const T={router:{{ t('lv.router')|tojson }},gateway:{{ t('lv.gateway')|tojson }},latency:{{ t('lv.latency')|tojson }},loss:{{ t('lv.loss')|tojson }},name:{{ t('lv.name')|tojson }},qshort:{{ t('lv.q_short')|tojson }},signal:{{ t('lv.signal')|tojson }},iface:{{ t('lv.iface')|tojson }},place:{{ t('lv.place')|tojson }},dev:{{ t('lv.dev')|tojson }},rate:{{ t('lv.rate')|tojson }},when:{{ t('lv.when')|tojson }},link:{{ t('lv.link')|tojson }},dssig:{{ t('lv.ds_signal')|tojson }},dsrate:{{ t('lv.ds_rate')|tojson }},deflabel:{{ t('lv.def_label')|tojson }},better:{{ t('lv.better')|tojson }},worse:{{ t('lv.worse')|tojson }},stable:{{ t('lv.stable')|tojson }},active:{{ t('lv.active')|tojson }},inactive:{{ t('lv.inactive')|tojson }},pct:{{ t('lv.pct')|tojson }},age:{{ t('lv.age')|tojson }},stale:{{ t('lv.stale')|tojson }},gwempty:{{ t('lv.gw_empty')|tojson }},noclients:{{ t('lv.no_clients')|tojson }},nospots:{{ t('lv.no_spots')|tojson }},pick:{{ t('lv.pick')|tojson }},pickfirst:{{ t('lv.pick_first')|tojson }},saved:{{ t('lv.saved')|tojson }},savefail:{{ t('lv.save_fail')|tojson }},del:{{ t('common.delete')|tojson }}};</script>
 {% raw %}<script>
 const $=id=>document.getElementById(id);
 function el(tag,cls,txt){const e=document.createElement(tag);if(cls)e.className=cls;if(txt!=null)e.textContent=txt;return e}
@@ -43,57 +43,57 @@ function post(url,data){const f=new FormData();for(const k in data)f.append(k,da
 function qcls(q){return q==null?'':q>=2?'ok':q==1?'warn':'bad'}
 function drawChart(h){const L=h.map(x=>tfmt(x.t));
  if(!chart){chart=new Chart($('lvch'),{type:'line',data:{labels:L,datasets:[
-  {label:'Sygnał dBm',data:[],yAxisID:'y',borderColor:'#3b82f6',backgroundColor:'#3b82f6',borderWidth:2,pointRadius:0,tension:.2},
-  {label:'Prędkość Mb/s',data:[],yAxisID:'y1',borderColor:'#10b981',backgroundColor:'#10b981',borderWidth:1.5,pointRadius:0,tension:.2}]},
+  {label:T.dssig,data:[],yAxisID:'y',borderColor:'#3b82f6',backgroundColor:'#3b82f6',borderWidth:2,pointRadius:0,tension:.2},
+  {label:T.dsrate,data:[],yAxisID:'y1',borderColor:'#10b981',backgroundColor:'#10b981',borderWidth:1.5,pointRadius:0,tension:.2}]},
   options:{animation:false,spanGaps:true,interaction:{mode:'index',intersect:false},
   scales:{y:{suggestedMin:-90,suggestedMax:-40},y1:{position:'right',beginAtZero:true,grid:{drawOnChartArea:false}}}}})}
  chart.data.labels=L;chart.data.datasets[0].data=h.map(x=>x.s);chart.data.datasets[1].data=h.map(x=>x.r);chart.update()}
 function trend(h){const now=Date.now(),v=(a,b)=>{const x=h.filter(p=>{const d=now-new Date(p.t+'Z');return d>=a*1000&&d<b*1000&&p.s!=null}).map(p=>p.s);return x.length?x.reduce((s,y)=>s+y,0)/x.length:null};
- const cur=v(0,10),prev=v(10,40);if(cur==null||prev==null)return '';const d=cur-prev;return d>=2?'▲ lepiej':d<=-2?'▼ gorzej':'● stabilnie'}
+ const cur=v(0,10),prev=v(10,40);if(cur==null||prev==null)return '';const d=cur-prev;return d>=2?T.better:d<=-2?T.worse:T.stable}
 function render(d){
  const live=d.routers.filter(r=>r.live);
  const st=$('lvstat');st.className='badge '+(live.length?'ok':'');
- st.textContent=live.length?('aktywny: '+live.map(r=>r.name+' ('+Math.ceil(r.left/60)+' min)').join(', ')):'nieaktywny, dane co ok. minutę';
+ st.textContent=live.length?(T.active+live.map(r=>r.name+' ('+Math.ceil(r.left/60)+' min)').join(', ')):T.inactive;
  const dv=$('dev');const opts=d.clients.slice().sort((a,b)=>a.name.localeCompare(b.name));
  const want=[''].concat(opts.map(c=>c.mac)).join();if([...dv.options].map(o=>o.value).join()!==want){
-  dv.replaceChildren(new Option('— wybierz swoje urządzenie (np. telefon) —',''),...opts.map(c=>new Option(c.name+(c.ip?' ('+c.ip+')':''),c.mac)));}
+  dv.replaceChildren(new Option(T.pick,''),...opts.map(c=>new Option(c.name+(c.ip?' ('+c.ip+')':''),c.mac)));}
  dv.value=sel;
  const c=d.clients.find(x=>x.mac===sel);
  if(c){$('lvq').textContent=c.qlabel;$('lvq').className='lvq '+c.qc;$('lvsig').textContent=c.signal==null?'-':c.signal;$('lvsig').className=c.sc;
-  $('lvpct').textContent=c.pct!=null?(c.pct+'% maksymalnej prędkości łącza'):'';
-  const lvOn=live.length>0,stale=lvOn&&c.age>20;$('lvage').textContent='odczyt '+c.age+' s temu'+(stale?' – router nie przysyła szybkich odczytów Wi-Fi':'');$('lvage').className='small '+(stale?'warn':'mut');
-  const m=[['Router',c.router],['Interfejs / AP',c.iface],['TX / RX',c.tx+' / '+c.rx],['Łącze',[c.band,c.std,c.width?c.width+' MHz':'',c.streams?c.streams+'x'+c.streams:''].filter(Boolean).join(' · ')||'-']];
+  $('lvpct').textContent=c.pct!=null?(T.pct.replace('{n}',c.pct)):'';
+  const lvOn=live.length>0,stale=lvOn&&c.age>20;$('lvage').textContent=T.age.replace('{n}',c.age)+(stale?T.stale:'');$('lvage').className='small '+(stale?'warn':'mut');
+  const m=[[T.router,c.router],[T.iface,c.iface],['TX / RX',c.tx+' / '+c.rx],[T.link,[c.band,c.std,c.width?c.width+' MHz':'',c.streams?c.streams+'x'+c.streams:''].filter(Boolean).join(' · ')||'-']];
   if(c.snr!=null)m.push(['SNR',c.snr+' dB']);
   $('lvmeta').replaceChildren(...m.map(([k,v])=>{const s=el('div');s.append(el('span','mut',k),el('b',null,v||'-'));return s}));
   $('lvtrend').textContent=trend(d.hist);drawChart(d.hist);}
  else{$('lvq').textContent='-';$('lvq').className='lvq';$('lvsig').textContent='-';$('lvpct').textContent='';$('lvage').textContent='';$('lvmeta').replaceChildren();$('lvtrend').textContent='';if(chart){chart.data.labels=[];chart.data.datasets.forEach(x=>x.data=[]);chart.update()}}
  const gw=d.routers.filter(r=>r.live||r.gw_rtt!=null);
- if(!gw.length)$('lvgw').replaceChildren(el('p','mut small','Pojawi się po włączeniu trybu ustawiania.'));
- else{const tb=el('table','mob');const hr=el('tr');['Router','Brama','Opóźnienie','Utrata'].forEach(x=>hr.append(el('th',null,x)));tb.append(hr);
+ if(!gw.length)$('lvgw').replaceChildren(el('p','mut small',T.gwempty));
+ else{const tb=el('table','mob');const hr=el('tr');[T.router,T.gateway,T.latency,T.loss].forEach(x=>hr.append(el('th',null,x)));tb.append(hr);
   gw.forEach(r=>{const tr=el('tr');const lc=r.gw_loss==null?'':r.gw_loss>0?'bad':'ok',rc=r.gw_rtt==null?'':r.gw_rtt>20?'warn':'ok';
-   [['Router',r.name,''],['Brama',r.gw||'-',''],['Opóźnienie',r.gw_rtt==null?'-':r.gw_rtt.toFixed(1)+' ms',rc],['Utrata',r.gw_loss==null?'-':r.gw_loss+'%',lc]].forEach(([l,v,k])=>{const td=el('td',k,v);td.dataset.l=l;tr.append(td)});tb.append(tr)});
+   [[T.router,r.name,''],[T.gateway,r.gw||'-',''],[T.latency,r.gw_rtt==null?'-':r.gw_rtt.toFixed(1)+' ms',rc],[T.loss,r.gw_loss==null?'-':r.gw_loss+'%',lc]].forEach(([l,v,k])=>{const td=el('td',k,v);td.dataset.l=l;tr.append(td)});tb.append(tr)});
   $('lvgw').replaceChildren(tb)}
- if(!d.clients.length)$('lvcl').replaceChildren(el('p','mut small','Brak klientów Wi-Fi.'));
- else{const tb=el('table','mob');const hr=el('tr');['Nazwa','Jakość','Sygnał','TX / RX','Interfejs / AP','Router'].forEach(x=>hr.append(el('th',null,x)));tb.append(hr);
+ if(!d.clients.length)$('lvcl').replaceChildren(el('p','mut small',T.noclients));
+ else{const tb=el('table','mob');const hr=el('tr');[T.name,T.qshort,T.signal,'TX / RX',T.iface,T.router].forEach(x=>hr.append(el('th',null,x)));tb.append(hr);
   d.clients.forEach(c=>{const tr=el('tr','ifrow'+(c.mac===sel?' lvsel':''));
-   const q=el('td');q.dataset.l='Jakość';q.append(el('span','qbadge '+c.qc,c.qlabel));
-   const n=el('td');n.dataset.l='Nazwa';n.append(el('b',null,c.name));
+   const q=el('td');q.dataset.l=T.qshort;q.append(el('span','qbadge '+c.qc,c.qlabel));
+   const n=el('td');n.dataset.l=T.name;n.append(el('b',null,c.name));
    const mk=(l,v,k)=>{const td=el('td',k,v);td.dataset.l=l;return td};
-   tr.append(n,q,mk('Sygnał',c.signal==null?'-':c.signal+' dBm',c.sc),mk('TX / RX',c.tx+' / '+c.rx,'small'),mk('Interfejs / AP',c.iface,'small'),mk('Router',c.router,'small'));
+   tr.append(n,q,mk(T.signal,c.signal==null?'-':c.signal+' dBm',c.sc),mk('TX / RX',c.tx+' / '+c.rx,'small'),mk(T.iface,c.iface,'small'),mk(T.router,c.router,'small'));
    tr.onclick=()=>{sel=c.mac;try{localStorage.setItem('lvdev',sel)}catch(e){}if(chart){chart.destroy();chart=null}load()};tb.append(tr)});
   $('lvcl').replaceChildren(tb)}
- if(!d.spots.length)$('lvsp').replaceChildren(el('p','mut small','Brak zapisanych pomiarów.'));
- else{const tb=el('table','mob');const hr=el('tr');['Miejsce','Urządzenie','Jakość','Sygnał','Prędkość','Interfejs / AP','Kiedy',''].forEach(x=>hr.append(el('th',null,x)));tb.append(hr);
+ if(!d.spots.length)$('lvsp').replaceChildren(el('p','mut small',T.nospots));
+ else{const tb=el('table','mob');const hr=el('tr');[T.place,T.dev,T.qshort,T.signal,T.rate,T.iface,T.when,''].forEach(x=>hr.append(el('th',null,x)));tb.append(hr);
   d.spots.forEach(p=>{const tr=el('tr');const mk=(l,v,k)=>{const td=el('td',k,v);td.dataset.l=l;return td};
-   const q=el('td');q.dataset.l='Jakość';q.append(el('span','qbadge '+qcls(p.q),p.qlabel));
-   const del=el('td');const b=el('button',null,'Usuń');b.onclick=async()=>{await post('/api/live/spot/'+p.id+'/delete',{});load()};del.append(b);
-   tr.append(mk('Miejsce',p.label),mk('Urządzenie',p.device,'small'),q,mk('Sygnał',p.signal==null?'-':p.signal+' dBm'),mk('Prędkość',p.rate==null?'-':p.rate+' Mb/s'),mk('Interfejs / AP',p.iface,'small'),mk('Kiedy',new Date(p.t+'Z').toLocaleString(),'small'),del);tb.append(tr)});
+   const q=el('td');q.dataset.l=T.qshort;q.append(el('span','qbadge '+qcls(p.q),p.qlabel));
+   const del=el('td');const b=el('button',null,T.del);b.onclick=async()=>{await post('/api/live/spot/'+p.id+'/delete',{});load()};del.append(b);
+   tr.append(mk(T.place,p.label),mk(T.dev,p.device,'small'),q,mk(T.signal,p.signal==null?'-':p.signal+' dBm'),mk(T.rate,p.rate==null?'-':p.rate+' Mb/s'),mk(T.iface,p.iface,'small'),mk(T.when,new Date(p.t+'Z').toLocaleString(),'small'),del);tb.append(tr)});
   $('lvsp').replaceChildren(tb)}}
 async function load(){try{const r=await fetch('/api/live/state?mac='+encodeURIComponent(sel),{cache:'no-store'});if(r.redirected){location.reload();return}render(await r.json())}catch(e){}}
 $('dev').onchange=e=>{sel=e.target.value;try{localStorage.setItem('lvdev',sel)}catch(x){}if(chart){chart.destroy();chart=null}load()};
-$('spotsave').onclick=async()=>{const m=$('spotmsg');if(!sel){m.textContent='Najpierw wybierz urządzenie.';return}
- const r=await post('/api/live/spot',{mac:sel,label:$('spotname').value||'miejsce'});
- if(r.ok){m.textContent='Zapisano pomiar.';$('spotname').value='';load()}else{let t='Nie udało się zapisać.';try{t=(await r.json()).detail||t}catch(e){}m.textContent=t}};
+$('spotsave').onclick=async()=>{const m=$('spotmsg');if(!sel){m.textContent=T.pickfirst;return}
+ const r=await post('/api/live/spot',{mac:sel,label:$('spotname').value||T.deflabel});
+ if(r.ok){m.textContent=T.saved;$('spotname').value='';load()}else{let t=T.savefail;try{t=(await r.json()).detail||t}catch(e){}m.textContent=t}};
 if(ADMIN){$('lvstart').onclick=async()=>{await post('/routers/'+$('lvr').value+'/live',{minutes:$('lvmin').value});load()};
  $('lvstop').onclick=async()=>{await post('/routers/'+$('lvr').value+'/live',{minutes:0});load()};}
 load();setInterval(()=>{if(!document.hidden)load()},2000);
