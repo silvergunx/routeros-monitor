@@ -5,6 +5,10 @@ versions follow [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH`,
 
 Notes marked **Routers** mean the configuration command has to be pasted again on the routers.
 
+## [Unreleased]
+
+Work in progress on `develop` (version 1.1.0).
+
 ## [1.0.0] - 2026-11-08
 
 First public version.
