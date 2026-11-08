@@ -134,7 +134,7 @@
   "set.order.help": "This order applies on the home page. New routers are added at the end of the list.",
   "set.bk.title": "Database backups",
   "set.bk.noaccess.html": "The backup directory is not available. Check that docker-compose.yml has the volume <code>./backups:/backups</code> and run <code>docker compose up -d</code>.",
-  "set.bk.auto.html": "Automatically every day at <b>{hour}:00</b>, kept for <b>{keep} days</b> · backups: {count} ({total})",
+  "set.bk.auto.html": "Automatically every day at <b>{hour}:00</b>, kept for <b>{keep} days</b> (older ones are removed) · backups: {count} ({total})",
   "set.bk.last": "· latest:",
   "set.bk.failed.html": "The last backup attempt failed ({err}). Check: <code>docker compose logs backup</code>",
   "set.bk.stale.html": "No recent backup (older than 2 days or none). Check that the <code>backup</code> container is running: <code>docker compose ps</code>",
@@ -660,5 +660,18 @@
   "msg.bl_off": "Blacklist disabled.",
   "set.bl.title": "Blacklist",
   "set.bl.on": "blacklist module enabled",
-  "set.bl.help": "When disabled: the router does not get the blacklist sync script (the list is no longer fetched every 5 minutes). After the change, paste the configuration command again on the routers. Disabling does not delete entries, neither in the panel nor on the routers, and you remove the blocking rule on the router yourself."
+  "set.bl.help": "When disabled: the router does not get the blacklist sync script (the list is no longer fetched every 5 minutes). After the change, paste the configuration command again on the routers. Disabling does not delete entries, neither in the panel nor on the routers, and you remove the blocking rule on the router yourself.",
+  "set.sp.best_more": "Compared servers ({n})",
+  "set.bk.limit_title": "Backup size limit",
+  "set.bk.limit_none": "no limit",
+  "set.bk.limit_on": "limit the total size to",
+  "set.bk.usage": "Backups use: {used} · free disk space: {free}",
+  "set.bk.usage_nofree": "Backups use: {used}",
+  "set.bk.limit_fits": "the {limit} limit holds about {n} backups (the newest is {size}); older ones are removed automatically and the newest is always kept",
+  "set.bk.too_big": "The newest backup ({size}) is larger than the limit, so it is kept; raise the limit to keep more backups.",
+  "set.bk.low_disk": "Low free disk space ({free}). Consider setting a backup size limit.",
+  "msg.bk_limit_saved": "Backup size limit saved: {limit}.",
+  "msg.bk_limit_none": "Backup size limit removed.",
+  "msg.bk_limit_removed": "Removed the {n} oldest backups.",
+  "msg.bk_limit_bad": "Enter a limit from 0.1 GB to 100000 GB."
 }

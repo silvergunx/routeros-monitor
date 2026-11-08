@@ -44,7 +44,7 @@ document.getElementById('ivno').onclick=()=>{s.value=cur;d.close()};})();</scrip
 {{ t('set.sp.help_tail', time=speed_time) }}</small></p></div>
 <script>(function(){const L={load:{{ t('set.sp.loading')|tojson }},list:{{ t('set.sp.list')|tojson }},na:{{ t('set.sp.na')|tojson }},auto:{{ t('set.sp.auto')|tojson }},srv:{{ t('set.sp.server_n', id='{id}')|tojson }},
 bestopt:{{ t('set.sp.best_opt')|tojson }},bestlast:{{ t('set.sp.best_last')|tojson }},bestnone:{{ t('set.sp.best_none')|tojson }},busy:{{ t('set.sp.best_busy')|tojson }},fail:{{ t('set.sp.best_fail')|tojson }},
-cs:{{ t('set.sp.col_server')|tojson }},cp:{{ t('set.sp.col_ping')|tojson }},cd:{{ t('set.sp.col_down')|tojson }}};
+cs:{{ t('set.sp.col_server')|tojson }},cp:{{ t('set.sp.col_ping')|tojson }},cd:{{ t('set.sp.col_down')|tojson }},bestmore:{{ t('set.sp.best_more')|tojson }},exp:{{ t('rp.expand')|tojson }},col:{{ t('rp.collapse')|tojson }}};
 const tf=(x,o)=>x.replace(/\{(\w+)\}/g,(m,k)=>o[k]===undefined?m:o[k]);
 const b=document.getElementById('spdlist'),s=document.getElementById('spdsrv'),e=document.getElementById('spdeng'),e0=e.value,s0=s.value;if(!b)return;
 const bx=document.getElementById('lsbest'),bs=document.getElementById('lsbeststat'),bg=document.getElementById('lsbestgo'),bl=document.getElementById('lsbestlast'),bt=document.getElementById('lsbesttab');
@@ -54,11 +54,14 @@ e.onchange=()=>{s.replaceChildren(...withBest(),new Option(L.auto,''));bx.style.
 b.onclick=async()=>{b.disabled=true;b.textContent=L.load;try{const d=await(await fetch('/api/speedtest/servers?engine='+encodeURIComponent(e.value))).json();
  if(!d.available){alert(L.na)}else{const cur=s.value;s.replaceChildren(...withBest(),new Option(L.auto,''),...d.servers.map(x=>new Option(x.name+' #'+x.id,x.id)));s.value=cur;if(s.value!==cur&&cur)s.append(new Option(L.srv.replace('{id}',cur),cur,true,true))}}catch(x){}
  b.disabled=false;b.textContent=L.list};
-let BEST={{ ls_best|tojson }};
+let BEST={{ ls_best|tojson }},bestOpen=false;
 function renderBest(){if(!BEST||!BEST.best){bl.textContent=L.bestnone;bt.replaceChildren();return}
  bl.textContent=tf(L.bestlast,{name:BEST.best.name,down:BEST.best.down,when:new Date(BEST.at+'Z').toLocaleString()});
  const tb=document.createElement('table'),hr=tb.insertRow();[L.cs,L.cp,L.cd].forEach(x=>{const th=document.createElement('th');th.textContent=x;hr.append(th)});
- BEST.tested.forEach(r=>{const tr=tb.insertRow();[(r.id===BEST.best.id?'\u2713 ':'')+r.name,r.ping+' ms',r.down==null?'-':r.down+' Mb/s'].forEach(v=>{tr.insertCell().textContent=v})});bt.replaceChildren(tb)}
+ BEST.tested.forEach(r=>{const tr=tb.insertRow();[(r.id===BEST.best.id?'\u2713 ':'')+r.name,r.ping+' ms',r.down==null?'-':r.down+' Mb/s'].forEach(v=>{tr.insertCell().textContent=v})});
+ const dt=document.createElement('details'),sm=document.createElement('summary'),lb=document.createElement('span'),tg=document.createElement('span'),o=document.createElement('span'),c2=document.createElement('span');
+ dt.className='nwd';dt.open=bestOpen;dt.addEventListener('toggle',()=>{bestOpen=dt.open});
+ lb.textContent=tf(L.bestmore,{n:BEST.tested.length});tg.className='tg';o.className='o';o.textContent=L.exp;c2.className='c';c2.textContent=L.col;tg.append(o,c2);sm.append(lb,tg);dt.append(sm,tb);bt.replaceChildren(dt)}
 async function pollBest(){try{const d=await(await fetch('/api/speedtest/best',{cache:'no-store'})).json();BEST=d.result||BEST;renderBest();
  if(d.running){bg.disabled=true;bs.textContent=d.phase;setTimeout(pollBest,2000)}else{bg.disabled=false;bs.textContent=d.error?tf(L.fail,{err:d.error}):''}}catch(x){bg.disabled=false}}
 bg.onclick=async()=>{bg.disabled=true;bs.textContent='\u2026';try{const r=await(await fetch('/api/speedtest/best',{method:'POST'})).json();if(r.busy){bs.textContent=L.busy;bg.disabled=false;return}}catch(x){bg.disabled=false;return}setTimeout(pollBest,800)};
@@ -77,6 +80,13 @@ renderBest();if(e.value==='librespeed')pollBest();})();</script>
 {% if bk.error %}<p class="err">{{ th('set.bk.failed.html', err=bk.error) }}</p>
 {% elif bk.stale %}<p class="warn">{{ th('set.bk.stale.html') }}</p>{% endif %}
 <form method="post" action="/settings/backup-now" class="row"><button class="p" {{'disabled' if bk.pending}}>{{ t('set.bk.pending') if bk.pending else t('set.bk.now') }}</button></form>
+<form method="post" action="/settings/backup-limit" class="row" style="margin-top:12px;gap:8px"><b>{{ t('set.bk.limit_title') }}:</b>
+<select name="mode" id="bkmode"><option value="none" {{'selected' if not bk.limit_gb}}>{{ t('set.bk.limit_none') }}</option><option value="limit" {{'selected' if bk.limit_gb}}>{{ t('set.bk.limit_on') }}</option></select>
+<input name="gb" id="bkgb" type="number" min="0.1" step="0.1" value="{{ bk.limit_gb }}" style="width:90px"> <span>GB</span> <button>{{ t('common.save') }}</button></form>
+<script>(function(){const m=document.getElementById('bkmode'),g=document.getElementById('bkgb');const f=()=>{g.disabled=m.value!=='limit';if(!g.disabled&&!g.value)g.value='2'};m.onchange=f;g.disabled=m.value!=='limit'})();</script>
+<p class="small mut">{{ t('set.bk.usage', used=bk.total, free=bk.free) if bk.free else t('set.bk.usage_nofree', used=bk.total) }}{% if bk.limit_h %} · {{ t('set.bk.limit_fits', limit=bk.limit_h, n=bk.fits, size=bk.files[0].size if bk.files else '-') }}{% endif %}</p>
+{% if bk.too_big %}<p class="warn small">{{ t('set.bk.too_big', size=bk.files[0].size) }}</p>{% endif %}
+{% if bk.low_disk %}<p class="warn small">{{ t('set.bk.low_disk', free=bk.free) }}</p>{% endif %}
 <div class="scroll" style="margin-top:10px"><table><tr><th>{{ t('set.bk.file') }}</th><th>{{ t('set.bk.date') }}</th><th>{{ t('set.bk.size') }}</th><th></th></tr>
 {% for f in bk.files %}<tr><td class="small">{{f.name}}</td><td><span class="t" data-t="{{f.ts|iso}}Z"></span></td><td>{{f.size}}</td>
 <td style="text-align:right"><a href="/backups/{{f.name}}"><button type="button">{{ t('set.bk.download') }}</button></a>

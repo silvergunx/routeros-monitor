@@ -135,7 +135,7 @@
   "set.order.help": "Ta kolejność obowiązuje na stronie głównej. Nowe routery trafiają na koniec listy.",
   "set.bk.title": "Kopie zapasowe bazy",
   "set.bk.noaccess.html": "Katalog kopii nie jest dostępny. Sprawdź, czy w docker-compose.yml jest wolumen <code>./backups:/backups</code> i uruchom <code>docker compose up -d</code>.",
-  "set.bk.auto.html": "Automatycznie codziennie o <b>{hour}:00</b>, przechowywane <b>{keep} dni</b> · kopii: {count} ({total})",
+  "set.bk.auto.html": "Automatycznie codziennie o <b>{hour}:00</b>, przechowywane <b>{keep} dni</b> (starsze są usuwane) · kopii: {count} ({total})",
   "set.bk.last": "· ostatnia:",
   "set.bk.failed.html": "Ostatnia próba kopii nie powiodła się ({err}). Sprawdź: <code>docker compose logs backup</code>",
   "set.bk.stale.html": "Brak aktualnej kopii (starszej niż 2 dni lub żadnej). Sprawdź, czy działa kontener <code>backup</code>: <code>docker compose ps</code>",
@@ -661,5 +661,18 @@
   "msg.bl_off": "Blacklista wyłączona.",
   "set.bl.title": "Blacklista",
   "set.bl.on": "moduł blacklisty włączony",
-  "set.bl.help": "Gdy wyłączony: router nie dostaje skryptu synchronizacji blacklisty (brak pobierania listy co 5 minut). Po zmianie wklej ponownie komendę konfiguracyjną na routerach. Wyłączenie nie usuwa wpisów ani z panelu, ani z routerów, a regułę blokującą usuwasz na routerze samodzielnie."
+  "set.bl.help": "Gdy wyłączony: router nie dostaje skryptu synchronizacji blacklisty (brak pobierania listy co 5 minut). Po zmianie wklej ponownie komendę konfiguracyjną na routerach. Wyłączenie nie usuwa wpisów ani z panelu, ani z routerów, a regułę blokującą usuwasz na routerze samodzielnie.",
+  "set.sp.best_more": "Porównane serwery ({n})",
+  "set.bk.limit_title": "Limit rozmiaru kopii",
+  "set.bk.limit_none": "bez limitu",
+  "set.bk.limit_on": "ogranicz łączny rozmiar do",
+  "set.bk.usage": "Kopie zajmują: {used} · wolne miejsce na dysku: {free}",
+  "set.bk.usage_nofree": "Kopie zajmują: {used}",
+  "set.bk.limit_fits": "limit {limit} pomieści ok. {n} kopii (najnowsza ma {size}); starsze są usuwane automatycznie, a najnowsza zostaje zawsze",
+  "set.bk.too_big": "Najnowsza kopia ({size}) jest większa niż limit, więc zostaje; zwiększ limit, aby przechowywać więcej kopii.",
+  "set.bk.low_disk": "Mało wolnego miejsca na dysku ({free}). Rozważ ustawienie limitu rozmiaru kopii.",
+  "msg.bk_limit_saved": "Zapisano limit rozmiaru kopii: {limit}.",
+  "msg.bk_limit_none": "Zdjęto limit rozmiaru kopii.",
+  "msg.bk_limit_removed": "Usunięto {n} najstarszych kopii.",
+  "msg.bk_limit_bad": "Podaj limit od 0,1 GB do 100000 GB."
 }

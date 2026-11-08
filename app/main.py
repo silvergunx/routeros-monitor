@@ -4,6 +4,7 @@ import i18n
 import version as appver
 import speedengines
 import netguard
+import backups as backuplib
 import httpx
 from fastapi import FastAPI, Request, Form, Depends, HTTPException, Body
 from fastapi.responses import RedirectResponse, PlainTextResponse, Response, FileResponse, StreamingResponse
@@ -1623,6 +1624,8 @@ async def log_loop():
                 await run_in_threadpool(record_clients)
             if n % 300 == 10:
                 await run_in_threadpool(update_traffic)
+            if n % 150 == 20:
+                await run_in_threadpool(enforce_backup_limit)
             if n % 15 == 7:
                 rid = await run_in_threadpool(speed_due)
                 if rid:
@@ -3345,7 +3348,7 @@ def backups_info():
             p = os.path.join(BACKUP_DIR, n)
             if BACKUP_RE.match(n) and os.path.isfile(p):
                 st = os.stat(p)
-                files.append({"name": n, "size": bytes_h(st.st_size),
+                files.append({"name": n, "size": bytes_h(st.st_size), "bytes": st.st_size,
                               "ts": dt.datetime.fromtimestamp(st.st_mtime, dt.timezone.utc).replace(tzinfo=None)})
     except OSError:
         return {"available": False, "files": [], "pending": False, "error": None, "stale": False}
@@ -3356,16 +3359,65 @@ def backups_info():
             err = fh.read().strip()
     except OSError:
         pass
+    try:
+        free = shutil.disk_usage(BACKUP_DIR).free
+    except OSError:
+        free = None
+    total_b = sum(f["bytes"] for f in files)
     return {"available": True, "files": files, "pending": os.path.exists(os.path.join(BACKUP_DIR, ".now")),
             "error": err, "stale": not files or (now() - files[0]["ts"]).total_seconds() > 2 * 86400,
-            "total": bytes_h(sum(os.path.getsize(os.path.join(BACKUP_DIR, f["name"])) for f in files)),
+            "total": bytes_h(total_b), "total_b": total_b, "newest_b": files[0]["bytes"] if files else 0,
+            "free_b": free, "free": bytes_h(free) if free is not None else "",
             "hour": os.getenv("BACKUP_HOUR", "3"), "keep": os.getenv("BACKUP_KEEP_DAYS", "14")}
+
+
+def backup_limit_mb(s):
+    v = sget(s, "backup_limit_mb", "")
+    return int(v) if v.isdigit() and int(v) > 0 else None
+
+
+def enforce_backup_limit(s=None):
+    """Usuwa najstarsze kopie ponad limit rozmiaru (najnowsza zostaje zawsze). Zwraca nazwy usuniętych."""
+    own = s is None
+    s = Session(engine) if own else s
+    try:
+        lim = backup_limit_mb(s)
+        removed = []
+        if lim:
+            files = [(f["name"], f["bytes"], f["ts"].timestamp()) for f in backups_info()["files"]]
+            for name in backuplib.plan_prune(files, lim * 1024 * 1024):
+                try:
+                    os.remove(os.path.join(BACKUP_DIR, name))
+                    removed.append(name)
+                except OSError:
+                    pass
+            if removed:
+                log(s, "limit kopii", ("usunięto %d: %s" % (len(removed), ", ".join(removed)))[:250])
+                s.commit()
+        return removed
+    finally:
+        if own:
+            s.close()
+
+
+def backups_view(s):
+    bk = backups_info()
+    lim = backup_limit_mb(s)
+    bk["limit_gb"] = round(lim / 1024, 2) if lim else ""
+    if lim and bk.get("available"):
+        lim_b = lim * 1024 * 1024
+        bk["limit_h"] = bytes_h(lim_b)
+        bk["fits"] = lim_b // bk["newest_b"] if bk.get("newest_b") else 0
+        bk["too_big"] = bool(bk.get("newest_b") and bk["newest_b"] > lim_b)
+    if bk.get("available") and bk.get("free_b") is not None:
+        bk["low_disk"] = bk["free_b"] < 1024 ** 3 or bk["free_b"] < 3 * bk.get("newest_b", 0)
+    return bk
 
 
 def settings_view(request, s, msg="", ok=True):
     return templates.TemplateResponse(request, "settings.html", {
         "domain": sget(s, "domain"), "email": sget(s, "email"), "msg": msg, "ok": ok,
-        "interval": interval(s), "intervals": INTERVALS, "routers": ordered_routers(s), "bk": backups_info(),
+        "interval": interval(s), "intervals": INTERVALS, "routers": ordered_routers(s), "bk": backups_view(s),
         "wl_enabled": whitelist_on(s), "bl_enabled": blacklist_on(s), "speed_router": sget(s, "speed_router"), "speed_time": SPEED_TIME[:5],
         "speed_engine": sget(s, "speed_engine", "") or default_engine(),
         "speed_server": server_setting(s, sget(s, "speed_engine", "") or default_engine()),
@@ -3399,6 +3451,26 @@ def backup_now(request: Request, s: Session = Depends(db)):
     log(s, "kopia bazy", "zlecona ręcznie")
     s.commit()
     return settings_view(request, s, tr("msg.bk_ok"), True)
+
+
+@app.post("/settings/backup-limit", dependencies=[Depends(admin)])
+def settings_backup_limit(request: Request, mode: str = Form("none"), gb: str = Form(""), s: Session = Depends(db)):
+    if mode != "limit":
+        sset(s, "backup_limit_mb", "")
+        log(s, "limit kopii", "bez limitu")
+        s.commit()
+        return settings_view(request, s, tr("msg.bk_limit_none"), True)
+    mb = backuplib.parse_limit_gb(gb)
+    if mb is None:
+        return settings_view(request, s, tr("msg.bk_limit_bad"), False)
+    sset(s, "backup_limit_mb", str(mb))
+    log(s, "limit kopii", "%d MB" % mb)
+    s.commit()
+    removed = enforce_backup_limit(s)
+    msg = tr("msg.bk_limit_saved", limit=bytes_h(mb * 1024 * 1024))
+    if removed:
+        msg += " " + tr("msg.bk_limit_removed", n=len(removed))
+    return settings_view(request, s, msg, True)
 
 
 @app.get("/backups/{name}", dependencies=[Depends(admin)])

@@ -37,7 +37,7 @@ Interfejs jest dostępny po polsku i angielsku, działa w trybie jasnym i ciemny
 **Pozostałe**
 - tryb ustawiania / analizy Wi-Fi na żywo (odczyt co 2 s) do szukania najlepszego miejsca dla punktu dostępowego
 - użytkownicy z rolami (administrator / podgląd), dziennik zmian
-- automatyczne kopie zapasowe bazy z pobieraniem i usuwaniem w panelu
+- automatyczne kopie zapasowe bazy z pobieraniem i usuwaniem w panelu oraz opcjonalnym limitem rozmiaru przechowywanych kopii
 - HTTPS jednym kliknięciem: podajesz domenę w Ustawieniach, certyfikat Let's Encrypt wystawia się sam (Caddy)
 
 ## Wymagania

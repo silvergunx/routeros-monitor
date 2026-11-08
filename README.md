@@ -37,7 +37,7 @@ The interface is available in Polish and English, works in light and dark mode a
 **Other**
 - live Wi-Fi setup / analysis mode (readings every 2 s) for finding the best place for an access point
 - users with roles (administrator / view only), change log
-- automatic database backups with download and delete in the panel
+- automatic database backups with download and delete in the panel, and an optional size limit for the stored backups
 - HTTPS in one click: enter a domain in Settings and a Let's Encrypt certificate is issued automatically (Caddy)
 
 ## Requirements

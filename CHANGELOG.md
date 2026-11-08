@@ -17,6 +17,10 @@ Work in progress on `develop` (version 1.1.0).
   and repeats the check every 7 days (button "Find the best server now" in Settings). It uses 8 parallel connections. On fast links its download result can be well below Ookla's (it depends on the community server), so Ookla stays the
   recommended engine when you build the image yourself.
 - `THIRD_PARTY.md` with the licences of bundled components.
+- **Backup size limit** (Settings → Database backups): optionally cap the total size of the stored backups (for small SD cards or disks). The oldest
+  backups are removed first and the newest one is always kept; checked every 5 minutes and when the limit is saved. Also shows the free disk space and
+  warns when it is low. The default is no limit.
+- The list of compared LibreSpeed servers is collapsed by default; only the chosen server is shown.
 - **Blacklist** (ban list) next to the whitelist: the same entries (IP, network or domain, reason, optional expiry, all routers or one,
   import/export, enable/disable), a separate router script `app-blacklist` (**Routers**: paste the configuration command again) and a
   ready-to-paste firewall rule. The application refuses to ban your own address, the application server, a monitored router,
