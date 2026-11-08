@@ -1,0 +1,3196 @@
+import os, re, csv, io, json, math, asyncio, socket, hashlib, hmac, secrets, time, ipaddress, datetime as dt
+from urllib.parse import quote
+import httpx
+from fastapi import FastAPI, Request, Form, Depends, HTTPException, Body
+from fastapi.responses import RedirectResponse, PlainTextResponse, Response, FileResponse, StreamingResponse
+from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
+from starlette.concurrency import run_in_threadpool
+from sqlalchemy.engine import URL
+from sqlalchemy import extract, create_engine, Date, Text, UniqueConstraint, String, Float, DateTime, Integer, Boolean, BigInteger, ForeignKey, Index, select, delete, func, or_, text
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
+
+ADMIN_USER = os.getenv("ADMIN_USER", "admin")
+ADMIN_PASSWORD = os.environ["ADMIN_PASSWORD"]
+SECRET_KEY = os.environ["SECRET_KEY"]
+_EXAMPLES = {"zmien_to_haslo", "wygeneruj_dlugi_losowy_ciag", ""}
+if ADMIN_PASSWORD in _EXAMPLES or SECRET_KEY in _EXAMPLES or len(SECRET_KEY) < 16:
+    raise SystemExit("BLAD KONFIGURACJI: ustaw w pliku .env wlasne ADMIN_PASSWORD i SECRET_KEY "
+                     "(SECRET_KEY min. 16 znakow, np. openssl rand -hex 32), potem: docker compose up -d")
+RETENTION = int(os.getenv("RETENTION_DAYS", "30"))
+CADDY = os.getenv("CADDY_ADMIN", "http://caddy:2019")
+if os.getenv("DB_PASSWORD"):
+    DB_URL = URL.create("postgresql+psycopg2", username="monitor", password=os.environ["DB_PASSWORD"],
+                        host=os.getenv("DB_HOST", "db"), database="monitor")
+else:
+    DB_URL = os.environ["DATABASE_URL"]
+engine = create_engine(DB_URL, pool_pre_ping=True)
+app = FastAPI()
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=86400 * 7)
+templates = Jinja2Templates(directory="templates")
+
+
+def fm(v, unit="", d=0):
+    return "-" if v is None else "%.*f%s" % (d, v, unit)
+
+
+templates.env.globals["fm"] = fm
+templates.env.filters["iso"] = lambda d: d.strftime("%Y-%m-%dT%H:%M:%S") if d else ""
+
+
+def now():
+    return dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class Router(Base):
+    __tablename__ = "routers"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(80))
+    token: Mapped[str] = mapped_column(String(64), unique=True)
+    ident: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    ver: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    uptime: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    wan: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    last_seen: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    pos: Mapped[int | None] = mapped_column(Integer, nullable=True)  # kolejność na liście
+    log_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)  # adres, z którego router wysyła syslog
+    log_ip_fixed: Mapped[bool] = mapped_column(Boolean, default=False)
+    ping_target: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    edge: Mapped[bool] = mapped_column(Boolean, default=False)  # router brzegowy: mierzy internet i prędkość
+    nw_state: Mapped[str | None] = mapped_column(Text, nullable=True)  # ostatnie wyniki sond Netwatch (JSON)
+    live_until: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)  # tryb ustawiania sieci
+
+    @property
+    def live(self):
+        return bool(self.live_until and self.live_until > now())
+    iface_types: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON {nazwa: typ RouterOS}
+
+    @property
+    def online(self):
+        return bool(self.last_seen) and (now() - self.last_seen).total_seconds() < 180
+
+
+class Metric(Base):
+    __tablename__ = "metrics"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    router_id: Mapped[int] = mapped_column(ForeignKey("routers.id"))
+    ts: Mapped[dt.datetime] = mapped_column(DateTime)
+    cpu: Mapped[float | None] = mapped_column(Float, nullable=True)
+    mem: Mapped[float | None] = mapped_column(Float, nullable=True)
+    temp: Mapped[float | None] = mapped_column(Float, nullable=True)
+    conns: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rx: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    tx: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    rx_bps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tx_bps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    dhcp: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ping_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    loss: Mapped[float | None] = mapped_column(Float, nullable=True)
+    inet_up: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    inet_rtt: Mapped[float | None] = mapped_column(Float, nullable=True)
+    inet_jit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    inet_loss: Mapped[float | None] = mapped_column(Float, nullable=True)
+    gw_rtt: Mapped[float | None] = mapped_column(Float, nullable=True)
+    gw_jit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    gw_loss: Mapped[float | None] = mapped_column(Float, nullable=True)
+    dns_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    http_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    dns_up: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    http_up: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    __table_args__ = (Index("ix_m_r_ts", "router_id", "ts"),)
+
+    @property
+    def rx_mbps(self):
+        return None if self.rx_bps is None else self.rx_bps / 1e6
+
+    @property
+    def tx_mbps(self):
+        return None if self.tx_bps is None else self.tx_bps / 1e6
+
+
+class IfaceMetric(Base):
+    __tablename__ = "iface_metrics"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    router_id: Mapped[int] = mapped_column(ForeignKey("routers.id"))
+    ts: Mapped[dt.datetime] = mapped_column(DateTime)
+    name: Mapped[str] = mapped_column(String(40))
+    rx: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    tx: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    rx_bps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tx_bps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    __table_args__ = (Index("ix_if_r_n_ts", "router_id", "name", "ts"), Index("ix_if_r_ts", "router_id", "ts"))
+
+    @property
+    def rx_mbps(self):
+        return None if self.rx_bps is None else self.rx_bps / 1e6
+
+    @property
+    def tx_mbps(self):
+        return None if self.tx_bps is None else self.tx_bps / 1e6
+
+
+class AuditLog(Base):
+    __tablename__ = "audit"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ts: Mapped[dt.datetime] = mapped_column(DateTime)
+    action: Mapped[str] = mapped_column(String(40))
+    detail: Mapped[str] = mapped_column(String(250), default="")
+    who: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+
+class Inv(Base):
+    """Dane „inwentarzowe” z routera: dzierżawy DHCP, klienci Wi-Fi, peery WireGuard, sesje PPP."""
+    __tablename__ = "inventory"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    router_id: Mapped[int] = mapped_column(ForeignKey("routers.id"))
+    kind: Mapped[str] = mapped_column(String(10))
+    key: Mapped[str] = mapped_column(String(100))
+    data: Mapped[str] = mapped_column(Text, default="{}")
+    seq: Mapped[str] = mapped_column(String(20), default="")
+    updated: Mapped[dt.datetime] = mapped_column(DateTime)
+    __table_args__ = (UniqueConstraint("router_id", "kind", "key", name="uq_inv"),)
+
+
+class LogEntry(Base):
+    __tablename__ = "logs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    router_id: Mapped[int] = mapped_column(ForeignKey("routers.id"))
+    ts: Mapped[dt.datetime] = mapped_column(DateTime)
+    sev: Mapped[int] = mapped_column(Integer, default=6)  # 0-2 krytyczny, 3 błąd, 4 ostrzeżenie, 5-6 info, 7 debug
+    topics: Mapped[str] = mapped_column(String(100), default="")
+    msg: Mapped[str] = mapped_column(Text, default="")
+    __table_args__ = (Index("ix_logs_r_ts", "router_id", "ts"), Index("ix_logs_r_sev_ts", "router_id", "sev", "ts"))
+
+
+class LiveSpot(Base):
+    """Zapisany pomiar miejsca w trybie ustawiania (np. 'Salon': średni sygnał i jakość)."""
+    __tablename__ = "live_spots"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ts: Mapped[dt.datetime] = mapped_column(DateTime)
+    mac: Mapped[str] = mapped_column(String(20))
+    label: Mapped[str] = mapped_column(String(60))
+    device: Mapped[str] = mapped_column(String(80), default="")
+    iface: Mapped[str] = mapped_column(String(40), default="")
+    signal: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    quality: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class SpeedTest(Base):
+    __tablename__ = "speed_tests"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    router_id: Mapped[int] = mapped_column(ForeignKey("routers.id"))
+    ts: Mapped[dt.datetime] = mapped_column(DateTime)
+    ok: Mapped[bool] = mapped_column(Boolean, default=False)
+    down_mbps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    secs: Mapped[float | None] = mapped_column(Float, nullable=True)
+    up_mbps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ping_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source: Mapped[str | None] = mapped_column(String(10), nullable=True)  # server / router / ookla
+    jitter_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    loss: Mapped[float | None] = mapped_column(Float, nullable=True)
+    server: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    url: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    error: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    __table_args__ = (Index("ix_spd_r_ts", "router_id", "ts"),)
+
+
+class TrafficDay(Base):
+    """Dzienny transfer interfejsu WAN (przechowywany dłużej niż surowe metryki)."""
+    __tablename__ = "traffic_days"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    router_id: Mapped[int] = mapped_column(ForeignKey("routers.id"))
+    day: Mapped[dt.date] = mapped_column(Date)
+    iface: Mapped[str] = mapped_column(String(40), default="")
+    rx: Mapped[int] = mapped_column(BigInteger, default=0)
+    tx: Mapped[int] = mapped_column(BigInteger, default=0)
+    __table_args__ = (UniqueConstraint("router_id", "day", name="uq_traffic_day"),)
+
+
+class ClientStat(Base):
+    """Liczba klientów w czasie (zapisywana co minutę z danych inwentarza)."""
+    __tablename__ = "client_stats"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    router_id: Mapped[int] = mapped_column(ForeignKey("routers.id"))
+    ts: Mapped[dt.datetime] = mapped_column(DateTime)
+    dev_on: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    dev_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    wifi: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    vpn_on: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    __table_args__ = (Index("ix_cs_r_ts", "router_id", "ts"),)
+
+
+ROLES = {"admin": "administrator", "viewer": "tylko podgląd"}
+
+
+class User(Base):
+    __tablename__ = "users"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String(40), unique=True)
+    pw: Mapped[str] = mapped_column(String(200))
+    role: Mapped[str] = mapped_column(String(10), default="viewer")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    ver: Mapped[int] = mapped_column(Integer, default=1)  # zmiana hasła/roli wylogowuje stare sesje
+    prefs: Mapped[str | None] = mapped_column(Text, nullable=True)  # ustawienia widoku (JSON)
+    created: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    last_login: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+
+    @property
+    def is_admin(self):
+        return self.role == "admin"
+
+
+class Whitelist(Base):
+    __tablename__ = "whitelist"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ip: Mapped[str] = mapped_column(String(255))
+    comment: Mapped[str] = mapped_column(String(60), default="")
+    expires: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    router_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class Setting(Base):
+    __tablename__ = "settings"
+    key: Mapped[str] = mapped_column(String(50), primary_key=True)
+    value: Mapped[str] = mapped_column(String(255), default="")
+
+
+MIGRATIONS = [
+    "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS dhcp INTEGER",
+    "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS ping_ms DOUBLE PRECISION",
+    "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS loss DOUBLE PRECISION",
+    "ALTER TABLE whitelist ADD COLUMN IF NOT EXISTS router_id INTEGER",
+    "ALTER TABLE routers ADD COLUMN IF NOT EXISTS wan VARCHAR(40)",
+    "ALTER TABLE whitelist ALTER COLUMN ip TYPE VARCHAR(255)",
+    "ALTER TABLE audit ADD COLUMN IF NOT EXISTS who VARCHAR(40)",
+    "ALTER TABLE routers ADD COLUMN IF NOT EXISTS pos INTEGER",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS prefs TEXT",
+    "ALTER TABLE routers ADD COLUMN IF NOT EXISTS log_ip VARCHAR(45)",
+    "ALTER TABLE routers ADD COLUMN IF NOT EXISTS log_ip_fixed BOOLEAN DEFAULT FALSE",
+    "ALTER TABLE routers ADD COLUMN IF NOT EXISTS ping_target VARCHAR(64)",
+    "ALTER TABLE routers ADD COLUMN IF NOT EXISTS edge BOOLEAN DEFAULT FALSE",
+    "ALTER TABLE routers ADD COLUMN IF NOT EXISTS nw_state TEXT",
+    "ALTER TABLE routers ADD COLUMN IF NOT EXISTS live_until TIMESTAMP",
+    "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS dns_up BOOLEAN",
+    "ALTER TABLE speed_tests ADD COLUMN IF NOT EXISTS up_mbps DOUBLE PRECISION",
+    "ALTER TABLE speed_tests ADD COLUMN IF NOT EXISTS ping_ms DOUBLE PRECISION",
+    "ALTER TABLE speed_tests ADD COLUMN IF NOT EXISTS source VARCHAR(10)",
+    "ALTER TABLE speed_tests ADD COLUMN IF NOT EXISTS jitter_ms DOUBLE PRECISION",
+    "ALTER TABLE speed_tests ADD COLUMN IF NOT EXISTS loss DOUBLE PRECISION",
+    "ALTER TABLE speed_tests ADD COLUMN IF NOT EXISTS server VARCHAR(120)",
+    "ALTER TABLE speed_tests ADD COLUMN IF NOT EXISTS url VARCHAR(200)",
+    "ALTER TABLE speed_tests ADD COLUMN IF NOT EXISTS error VARCHAR(200)",
+    "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS http_up BOOLEAN",
+    "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS inet_up BOOLEAN",
+    "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS inet_rtt DOUBLE PRECISION",
+    "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS inet_jit DOUBLE PRECISION",
+    "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS inet_loss DOUBLE PRECISION",
+    "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS gw_rtt DOUBLE PRECISION",
+    "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS gw_jit DOUBLE PRECISION",
+    "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS gw_loss DOUBLE PRECISION",
+    "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS dns_ms DOUBLE PRECISION",
+    "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS http_ms DOUBLE PRECISION",
+    "ALTER TABLE routers ADD COLUMN IF NOT EXISTS iface_types TEXT",
+    "UPDATE metrics SET mem = NULL WHERE mem < 0 OR mem > 100",
+    "UPDATE metrics SET cpu = NULL WHERE cpu < 0 OR cpu > 100",
+]
+
+
+@app.on_event("startup")
+def start():
+    err = None
+    for _ in range(30):
+        try:
+            Base.metadata.create_all(engine)
+            with engine.begin() as c:
+                for stmt in MIGRATIONS:
+                    c.execute(text(stmt))
+            with Session(engine) as s:
+                if not s.scalar(select(func.count(User.id))):
+                    s.add(User(username=ADMIN_USER[:40], pw=hash_pw(ADMIN_PASSWORD), role="admin", created=now()))
+                    s.add(AuditLog(ts=now(), action="użytkownik+", detail="%s (admin, z pliku .env)" % ADMIN_USER,
+                                   who="system"))
+                    s.commit()
+            return
+        except Exception as e:
+            err = e
+            time.sleep(1)
+    raise RuntimeError("Brak polaczenia z baza danych: %s" % err)
+
+
+def db():
+    with Session(engine) as s:
+        yield s
+
+
+class NeedLogin(Exception):
+    pass
+
+
+def hash_pw(p, it=200_000):
+    salt = secrets.token_bytes(16)
+    return "pbkdf2$%d$%s$%s" % (it, salt.hex(), hashlib.pbkdf2_hmac("sha256", p.encode(), salt, it).hex())
+
+
+def check_pw(p, stored):
+    try:
+        _, it, salt, h = stored.split("$")
+        calc = hashlib.pbkdf2_hmac("sha256", p.encode(), bytes.fromhex(salt), int(it)).hex()
+        return hmac.compare_digest(calc, h)
+    except Exception:
+        return False
+
+
+def user(request: Request, s: Session = Depends(db)):
+    uid = request.session.get("uid")
+    u = s.get(User, uid) if isinstance(uid, int) else None
+    if not u or not u.active or request.session.get("v") != u.ver:
+        request.session.clear()
+        raise NeedLogin()
+    request.state.user = u
+    s.info["who"] = u.username
+    return u
+
+
+def admin(u: User = Depends(user)):
+    if not u.is_admin:
+        raise HTTPException(403, "Brak uprawnień: ta akcja wymaga roli administratora.")
+    return u
+
+
+@app.exception_handler(NeedLogin)
+async def _need_login(request, exc):
+    return RedirectResponse("/login", 303)
+
+
+def num(v):
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
+def sget(s, k, d=""):
+    o = s.get(Setting, k)
+    return o.value if o else d
+
+
+def sset(s, k, v):
+    o = s.get(Setting, k)
+    if o:
+        o.value = v
+    else:
+        s.add(Setting(key=k, value=v))
+
+
+def log(s, action, detail=""):
+    s.add(AuditLog(ts=now(), action=action[:40], detail=detail[:250], who=s.info.get("who", "system")))
+
+
+# ---------- login ----------
+@app.get("/login")
+def login_page(request: Request):
+    return templates.TemplateResponse(request, "login.html", {"err": False})
+
+
+@app.post("/login")
+def login(request: Request, username: str = Form(), password: str = Form(), s: Session = Depends(db)):
+    u = s.scalar(select(User).where(User.username == username.strip()))
+    if u and u.active and check_pw(password, u.pw):
+        request.session.clear()
+        request.session["uid"], request.session["v"] = u.id, u.ver
+        u.last_login = now()
+        s.info["who"] = u.username
+        log(s, "logowanie", u.username)
+        s.commit()
+        return RedirectResponse("/", 303)
+    if not u:
+        check_pw(password, hash_pw("x", 200_000))  # podobny czas odpowiedzi dla nieistniejącego loginu
+    time.sleep(1.5)
+    return templates.TemplateResponse(request, "login.html", {"err": True}, status_code=401)
+
+
+@app.get("/logout")
+def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse("/login", 303)
+
+
+# ---------- routers ----------
+def wan_info(s, r):
+    """(interface names, chosen WAN name, latest IfaceMetric of WAN)"""
+    last = s.scalar(select(func.max(IfaceMetric.ts)).where(IfaceMetric.router_id == r.id))
+    if not last:
+        return [], r.wan or "", None
+    by = {x.name: x for x in s.scalars(select(IfaceMetric).where(IfaceMetric.router_id == r.id,
+                                                                 IfaceMetric.ts == last))}
+    if r.wan in by:
+        wan = r.wan
+    elif "ether1" in by:
+        wan = "ether1"
+    else:
+        wan = max(by.values(), key=lambda x: (x.rx or 0) + (x.tx or 0)).name
+    return sorted(by), wan, by[wan]
+
+
+@app.get("/", dependencies=[Depends(user)])
+def index(request: Request, s: Session = Depends(db)):
+    routers = ordered_routers(s)
+    latest = {r.id: s.scalar(select(Metric).where(Metric.router_id == r.id).order_by(Metric.ts.desc()).limit(1))
+              for r in routers}
+    return templates.TemplateResponse(request, "routers.html", {"routers": routers, "latest": latest,
+                                                              "refresh": max(interval(s), 5),
+                                                              "wans": {r.id: wan_info(s, r)[2] for r in routers},
+                                                              "invs": {r.id: inventory_view(s, r) for r in routers},
+                                                              "upds": {r.id: update_available(r) for r in routers},
+                                                              "sis": {r.id: sys_info(s, r) for r in routers},
+                                                              "lcs": {r.id: unread_counts(s, request.state.user, r.id)
+                                                                      for r in routers}})
+
+
+@app.post("/routers", dependencies=[Depends(admin)])
+def add_router(name: str = Form(), edge: str = Form(""), s: Session = Depends(db)):
+    if not name.strip():
+        return RedirectResponse("/", 303)
+    r = Router(name=name.strip()[:80], token=secrets.token_urlsafe(24), edge=edge == "1")
+    s.add(r)
+    log(s, "router+", "%s%s" % (name.strip()[:80], " (brzegowy)" if r.edge else ""))
+    s.commit()
+    return RedirectResponse("/routers/%d#cfg" % r.id, 303)
+
+
+def q(text):
+    """Encode text for a RouterOS double-quoted string (hex-escape special chars)."""
+    out = []
+    for c in text:
+        if c in '\\"$[]':
+            out.append("\\%02X" % ord(c))
+        elif c == "\n":
+            out.append("\\n")
+        else:
+            out.append(c)
+    return "".join(out)
+
+
+MON = r'''
+:if ([:len [/system script job find where script="app-monitor"]] <= 1) do={
+  :local cpu [/system resource get cpu-load]
+  :local tm [/system resource get total-memory]
+  :local fm [/system resource get free-memory]
+  :local up [/system resource get uptime]
+  :local ver [/system resource get version]
+  :local id [/system identity get name]
+  :global appTemp "null"
+  :set appTemp "null"
+  :do {
+    :local f [:parse ":global appTemp; :foreach h in=\5B/system health find where name~\"temperature\"\5D do={:if (\$appTemp = \"null\") do={:set appTemp \5B/system health get \$h value\5D}}"]
+    $f
+  } on-error={}
+  :if ($appTemp = "null") do={:do {:local f [:parse ":global appTemp; :set appTemp \5B/system health get temperature\5D"]; $f} on-error={}}
+  :if ($appTemp = "null") do={:do {:local f [:parse ":global appTemp; :set appTemp \5B/system health get cpu-temperature\5D"]; $f} on-error={}}
+  :local temp $appTemp
+  :if ([:len $temp] = 0) do={:set temp "null"}
+  :local conns "null"
+  :do {:set conns [/ip firewall connection tracking get total-entries]} on-error={}
+  :local dhcp "null"
+  :do {:set dhcp [:len [/ip dhcp-server lease find where status=bound]]} on-error={}
+  :local ifs ""
+  :foreach i in=[/interface find where running] do={
+    :do {
+      :local n [/interface get $i name]
+      :local irx [/interface get $i rx-byte]
+      :local itx [/interface get $i tx-byte]
+      :local ity ""
+      :do {:set ity [/interface get $i type]} on-error={}
+      :if ([:len $ifs] > 0) do={:set ifs ($ifs . ",")}
+      :set ifs ($ifs . "{\"n\":\"$n\",\"rx\":$irx,\"tx\":$itx,\"y\":\"$ity\"}")
+    } on-error={}
+  }
+  :local nw ""
+  :do {
+    :foreach n in=[/tool netwatch find where comment~"^app-nw:"] do={
+      :do {
+        :local a [/tool netwatch get $n]
+        :local o ""
+        :foreach k,v in=$a do={
+          :if ($k ~ "^(comment|host|status|type|since)\$" || $k ~ "(rtt|loss|time|code)") do={
+            :set o ($o . ",\"" . $k . "\":\"" . [:tostr $v] . "\"")
+          }
+        }
+        :if ([:len $o] > 0) do={
+          :if ([:len $nw] > 0) do={:set nw ($nw . ",")}
+          :set nw ($nw . "{" . [:pick $o 1 [:len $o]] . "}")
+        }
+      } on-error={}
+    }
+  } on-error={}
+  :local j "{\"id\":\"$id\",\"ver\":\"$ver\",\"up\":\"$up\",\"cpu\":$cpu,\"tm\":$tm,\"fm\":$fm,\"temp\":$temp,\"conns\":$conns,\"dhcp\":$dhcp,\"nw\":\5B$nw\5D,\"ifs\":\5B$ifs\5D}"
+  :local resp ""
+  :do {:set resp ([/tool fetch url="@URL@/api/metrics?t=@TOKEN@" http-method=post http-data=$j http-header-field="Content-Type: application/json" output=user as-value]->"data")} on-error={
+    :delay 3s
+    :do {:set resp ([/tool fetch url="@URL@/api/metrics?t=@TOKEN@" http-method=post http-data=$j http-header-field="Content-Type: application/json" output=user as-value]->"data")} on-error={:log warning "app-monitor: brak polaczenia z serwerem aplikacji"}
+  }
+  :if ($resp ~ "\"live\":1") do={
+    :if ([:len [/system script job find where script="app-live"]] = 0) do={:execute script="/system script run app-live"}
+  }
+}
+'''
+
+INV_DHCP = '\n:local url "@URL@/api/inventory?t=@TOKEN@"\n:local seq [:tostr [:rndnum from=100000 to=999999999]]\n:local esc do={\n  :local o ""\n  :if ([:len $s] > 0) do={\n    :for k from=0 to=([:len $s] - 1) do={\n      :local ch [:pick $s $k]\n      :if ($ch = "\\"" || $ch = "\\\\") do={:set o ($o . "\\\\" . $ch)} else={\n        :if ($ch = "\\n" || $ch = "\\r" || $ch = "\\t") do={:set o ($o . " ")} else={:set o ($o . $ch)}\n      }\n    }\n  }\n  :return $o\n}\n:local send do={\n  :do {/tool fetch url=$u http-method=post http-data=$d http-header-field="Content-Type: application/json" output=none} on-error={\n    :delay 5s\n    /tool fetch url=$u http-method=post http-data=$d http-header-field="Content-Type: application/json" output=none\n  }\n}\n\n:local buf ""\n:foreach i in=[/ip dhcp-server lease find] do={\n  :do {\n    :local m [/ip dhcp-server lease get $i mac-address]\n    :local a [/ip dhcp-server lease get $i address]\n    :local hr [/ip dhcp-server lease get $i host-name]\n    :local h [$esc s=$hr]\n    :local cr [/ip dhcp-server lease get $i comment]\n    :local c [$esc s=$cr]\n    :local st [/ip dhcp-server lease get $i status]\n    :local ls [/ip dhcp-server lease get $i last-seen]\n    :local dy [/ip dhcp-server lease get $i dynamic]\n    :local arp ""\n    :local ai [/ip arp find where mac-address=$m]\n    :if ([:len $ai] > 0) do={:set arp [/ip arp get ($ai->0) status]}\n    :local bh 0\n    :do {:set bh [:len [/interface bridge host find where mac-address=$m]]} on-error={}\n    :if ([:len $buf] > 0) do={:set buf ($buf . ",")}\n    :set buf ($buf . "{\\"key\\":\\"$m\\",\\"ip\\":\\"$a\\",\\"host\\":\\"$h\\",\\"comment\\":\\"$c\\",\\"status\\":\\"$st\\",\\"last\\":\\"$ls\\",\\"dyn\\":\\"$dy\\",\\"arp\\":\\"$arp\\",\\"bh\\":\\"$bh\\"}")\n  } on-error={}\n  :if ([:len $buf] > 3000) do={\n    $send u=$url d=("{\\"k\\":\\"dhcp\\",\\"seq\\":\\"$seq\\",\\"done\\":false,\\"items\\":\\5B" . $buf . "\\5D}")\n    :set buf ""\n  }\n}\n$send u=$url d=("{\\"k\\":\\"dhcp\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B" . $buf . "\\5D}")'
+INV_WIFI = '\n:local url "@URL@/api/inventory?t=@TOKEN@"\n:local seq [:tostr [:rndnum from=100000 to=999999999]]\n:local esc do={\n  :local o ""\n  :if ([:len $s] > 0) do={\n    :for k from=0 to=([:len $s] - 1) do={\n      :local ch [:pick $s $k]\n      :if ($ch = "\\"" || $ch = "\\\\") do={:set o ($o . "\\\\" . $ch)} else={\n        :if ($ch = "\\n" || $ch = "\\r" || $ch = "\\t") do={:set o ($o . " ")} else={:set o ($o . $ch)}\n      }\n    }\n  }\n  :return $o\n}\n:local send do={\n  :do {/tool fetch url=$u http-method=post http-data=$d http-header-field="Content-Type: application/json" output=none} on-error={\n    :delay 5s\n    /tool fetch url=$u http-method=post http-data=$d http-header-field="Content-Type: application/json" output=none\n  }\n}\n\n:local buf ""\n:foreach i in=[/interface wifi registration-table find] do={\n  :do {\n    :local a [/interface wifi registration-table get $i]\n    :local o ""\n    :foreach k,v in=$a do={\n      :if ($k ~ "^(interface|ssid|signal|band|uptime|last-ip|tx-ccq|signal-to-noise)\\$" || $k ~ "(rate|snr|noise|mcs|width|stream|strength)") do={\n        :local vs [$esc s=[:tostr $v]]\n        :set o ($o . ",\\"" . $k . "\\":\\"" . $vs . "\\"")\n      }\n    }\n    :local mac [/interface wifi registration-table get $i mac-address]\n    :if ([:len $buf] > 0) do={:set buf ($buf . ",")}\n    :set buf ($buf . "{\\"key\\":\\"" . $mac . "\\"" . $o . "}")\n  } on-error={}\n  :if ([:len $buf] > 3000) do={\n    $send u=$url d=("{\\"k\\":\\"wifi\\",\\"seq\\":\\"$seq\\",\\"done\\":false,\\"items\\":\\5B" . $buf . "\\5D}")\n    :set buf ""\n  }\n}\n$send u=$url d=("{\\"k\\":\\"wifi\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B" . $buf . "\\5D}")'
+INV_WIRELESS = '\n:local url "@URL@/api/inventory?t=@TOKEN@"\n:local seq [:tostr [:rndnum from=100000 to=999999999]]\n:local esc do={\n  :local o ""\n  :if ([:len $s] > 0) do={\n    :for k from=0 to=([:len $s] - 1) do={\n      :local ch [:pick $s $k]\n      :if ($ch = "\\"" || $ch = "\\\\") do={:set o ($o . "\\\\" . $ch)} else={\n        :if ($ch = "\\n" || $ch = "\\r" || $ch = "\\t") do={:set o ($o . " ")} else={:set o ($o . $ch)}\n      }\n    }\n  }\n  :return $o\n}\n:local send do={\n  :do {/tool fetch url=$u http-method=post http-data=$d http-header-field="Content-Type: application/json" output=none} on-error={\n    :delay 5s\n    /tool fetch url=$u http-method=post http-data=$d http-header-field="Content-Type: application/json" output=none\n  }\n}\n\n:local buf ""\n:foreach i in=[/interface wireless registration-table find] do={\n  :do {\n    :local a [/interface wireless registration-table get $i]\n    :local o ""\n    :foreach k,v in=$a do={\n      :if ($k ~ "^(interface|ssid|signal|band|uptime|last-ip|tx-ccq|signal-to-noise)\\$" || $k ~ "(rate|snr|noise|mcs|width|stream|strength)") do={\n        :local vs [$esc s=[:tostr $v]]\n        :set o ($o . ",\\"" . $k . "\\":\\"" . $vs . "\\"")\n      }\n    }\n    :local mac [/interface wireless registration-table get $i mac-address]\n    :if ([:len $buf] > 0) do={:set buf ($buf . ",")}\n    :set buf ($buf . "{\\"key\\":\\"" . $mac . "\\"" . $o . "}")\n  } on-error={}\n  :if ([:len $buf] > 3000) do={\n    $send u=$url d=("{\\"k\\":\\"wireless\\",\\"seq\\":\\"$seq\\",\\"done\\":false,\\"items\\":\\5B" . $buf . "\\5D}")\n    :set buf ""\n  }\n}\n$send u=$url d=("{\\"k\\":\\"wireless\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B" . $buf . "\\5D}")'
+INV_VPN = '\n:local url "@URL@/api/inventory?t=@TOKEN@"\n:local seq [:tostr [:rndnum from=100000 to=999999999]]\n:local esc do={\n  :local o ""\n  :if ([:len $s] > 0) do={\n    :for k from=0 to=([:len $s] - 1) do={\n      :local ch [:pick $s $k]\n      :if ($ch = "\\"" || $ch = "\\\\") do={:set o ($o . "\\\\" . $ch)} else={\n        :if ($ch = "\\n" || $ch = "\\r" || $ch = "\\t") do={:set o ($o . " ")} else={:set o ($o . $ch)}\n      }\n    }\n  }\n  :return $o\n}\n:local send do={\n  :do {/tool fetch url=$u http-method=post http-data=$d http-header-field="Content-Type: application/json" output=none} on-error={\n    :delay 5s\n    /tool fetch url=$u http-method=post http-data=$d http-header-field="Content-Type: application/json" output=none\n  }\n}\n\n:local buf ""\n:foreach i in=[/interface wireguard peers find] do={\n  :do {\n    :local pk [/interface wireguard peers get $i public-key]\n    :local ifn [/interface wireguard peers get $i interface]\n    :local nm ""\n    :do {:set nm [/interface wireguard peers get $i name]} on-error={}\n    :local nme [$esc s=$nm]\n    :local cm ""\n    :do {:set cm [/interface wireguard peers get $i comment]} on-error={}\n    :local cme [$esc s=$cm]\n    :local ep ""\n    :do {:set ep [/interface wireguard peers get $i current-endpoint-address]} on-error={}\n    :local hs ""\n    :do {:set hs [/interface wireguard peers get $i last-handshake]} on-error={}\n    :local rx ""\n    :local tx ""\n    :do {:set rx [/interface wireguard peers get $i rx]; :set tx [/interface wireguard peers get $i tx]} on-error={}\n    :local dis [/interface wireguard peers get $i disabled]\n    :if ([:len $buf] > 0) do={:set buf ($buf . ",")}\n    :set buf ($buf . "{\\"key\\":\\"$pk\\",\\"iface\\":\\"$ifn\\",\\"name\\":\\"$nme\\",\\"comment\\":\\"$cme\\",\\"endpoint\\":\\"$ep\\",\\"hs\\":\\"$hs\\",\\"rx\\":\\"$rx\\",\\"tx\\":\\"$tx\\",\\"disabled\\":\\"$dis\\"}")\n  } on-error={}\n  :if ([:len $buf] > 3000) do={\n    $send u=$url d=("{\\"k\\":\\"wg\\",\\"seq\\":\\"$seq\\",\\"done\\":false,\\"items\\":\\5B" . $buf . "\\5D}")\n    :set buf ""\n  }\n}\n$send u=$url d=("{\\"k\\":\\"wg\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B" . $buf . "\\5D}")\n:set buf ""\n:set seq [:tostr [:rndnum from=100000 to=999999999]]\n:foreach i in=[/ppp active find] do={\n  :do {\n    :local nmr [/ppp active get $i name]\n    :local nm [$esc s=$nmr]\n    :local sv [/ppp active get $i service]\n    :local ad [/ppp active get $i address]\n    :local up [/ppp active get $i uptime]\n    :local cir ""\n    :do {:set cir [/ppp active get $i caller-id]} on-error={}\n    :local ci [$esc s=$cir]\n    :if ([:len $buf] > 0) do={:set buf ($buf . ",")}\n    :local ky ($nm . "/" . $sv)\n    :set buf ($buf . "{\\"key\\":\\"$ky\\",\\"name\\":\\"$nm\\",\\"service\\":\\"$sv\\",\\"address\\":\\"$ad\\",\\"uptime\\":\\"$up\\",\\"caller\\":\\"$ci\\"}")\n  } on-error={}\n  :if ([:len $buf] > 3000) do={\n    $send u=$url d=("{\\"k\\":\\"ppp\\",\\"seq\\":\\"$seq\\",\\"done\\":false,\\"items\\":\\5B" . $buf . "\\5D}")\n    :set buf ""\n  }\n}\n$send u=$url d=("{\\"k\\":\\"ppp\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B" . $buf . "\\5D}")'
+INV_SYS = '\n:local url "@URL@/api/inventory?t=@TOKEN@"\n:local seq [:tostr [:rndnum from=100000 to=999999999]]\n:local send do={\n  :do {/tool fetch url=$u http-method=post http-data=$d http-header-field="Content-Type: application/json" output=none} on-error={\n    :delay 5s\n    /tool fetch url=$u http-method=post http-data=$d http-header-field="Content-Type: application/json" output=none\n  }\n}\n:global appCaps ""\n:set appCaps ""\n:do {:local f [:parse ":global appCaps; :if (\\5B:tostr \\5B/interface wifi capsman get enabled\\5D\\5D ~ \\"^(true|yes)\\") do={:set appCaps (\\$appCaps . \\"manager,\\")}"]; $f} on-error={}\n:do {:local f [:parse ":global appCaps; :if (\\5B:tostr \\5B/interface wifi cap get enabled\\5D\\5D ~ \\"^(true|yes)\\") do={:set appCaps (\\$appCaps . \\"cap,\\")}"]; $f} on-error={}\n:do {:local f [:parse ":global appCaps; :if (\\5B:tostr \\5B/caps-man manager get enabled\\5D\\5D ~ \\"^(true|yes)\\") do={:set appCaps (\\$appCaps . \\"manager,\\")}"]; $f} on-error={}\n:do {:local f [:parse ":global appCaps; :if (\\5B:tostr \\5B/interface wireless cap get enabled\\5D\\5D ~ \\"^(true|yes)\\") do={:set appCaps (\\$appCaps . \\"cap,\\")}"]; $f} on-error={}\n:global appCapsN ""\n:set appCapsN ""\n:do {:local f [:parse ":global appCapsN; :set appCapsN \\5B:len \\5B/interface wifi capsman remote-cap find\\5D\\5D"]; $f} on-error={}\n:if ([:len [:tostr $appCapsN]] = 0) do={:do {:local f [:parse ":global appCapsN; :set appCapsN \\5B:len \\5B/caps-man remote-cap find\\5D\\5D"]; $f} on-error={}}\n:local model ""\n:local fwc ""\n:local fwu ""\n:do {:set model [/system routerboard get model]} on-error={}\n:do {:set fwc [/system routerboard get current-firmware]} on-error={}\n:do {:set fwu [/system routerboard get upgrade-firmware]} on-error={}\n:local wq [:len [/system package find where name~"^wifi-qcom" and disabled=no]]\n:local tm [/system resource get total-memory]\n:global appHasWifi\n:global appHasWl\n:set appHasWifi 0\n:set appHasWl 0\n:do {:local f [:parse ":global appHasWifi; :set appHasWifi [:len [/interface wifi find]]"]; $f} on-error={}\n:do {:local f [:parse ":global appHasWl; :set appHasWl [:len [/interface wireless find]]"]; $f} on-error={}\n:local dhs [:len [/ip dhcp-server find]]\n:local wgs 0\n:do {:set wgs [:len [/interface wireguard find]]} on-error={}\n:local mdl ""\n:for k from=0 to=([:len $model] - 1) do={:local ch [:pick $model $k]; :if ($ch != "\\"" && $ch != "\\\\") do={:set mdl ($mdl . $ch)}}\n$send u=$url d=("{\\"k\\":\\"sys\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B{\\"key\\":\\"sys\\",\\"caps\\":\\"$appCaps\\",\\"capsn\\":\\"$appCapsN\\",\\"model\\":\\"$mdl\\",\\"fwc\\":\\"$fwc\\",\\"fwu\\":\\"$fwu\\",\\"wq\\":\\"$wq\\",\\"tm\\":\\"$tm\\",\\"wifi\\":\\"$appHasWifi\\",\\"wl\\":\\"$appHasWl\\",\\"dhs\\":\\"$dhs\\",\\"wgs\\":\\"$wgs\\"}\\5D}")\n'
+INV_MAIN = '\n:if ([:len [/system script find where name="app-inv-dhcp"]] > 0) do={:do {/system script run app-inv-dhcp} on-error={}}\n:global appHasWifi\n:global appHasWl\n:set appHasWifi 0\n:set appHasWl 0\n:do {:local f [:parse ":global appHasWifi; :set appHasWifi [:len [/interface wifi find]]"]; $f} on-error={}\n:do {:local f [:parse ":global appHasWl; :set appHasWl [:len [/interface wireless find]]"]; $f} on-error={}\n:if ($appHasWifi > 0) do={:do {/system script run app-inv-wifi} on-error={}}\n:if ($appHasWl > 0) do={:do {/system script run app-inv-wireless} on-error={}}\n:do {/system script run app-inv-vpn} on-error={}\n:do {/system script run app-inv-sys} on-error={}\n'
+
+LIVE = r'''
+:local gw ""
+:do {:set gw [/tool netwatch get [find where comment="app-nw:gw"] host]} on-error={}
+:global appHasWifi
+:global appHasWl
+:set appHasWifi 0
+:set appHasWl 0
+:do {:local f [:parse ":global appHasWifi; :set appHasWifi [:len [/interface wifi find]]"]; $f} on-error={}
+:do {:local f [:parse ":global appHasWl; :set appHasWl [:len [/interface wireless find]]"]; $f} on-error={}
+
+:local n 0
+:local go 1
+:while ($go = 1 && $n < 1000) do={
+  :set n ($n + 1)
+  :if ($appHasWifi > 0) do={:do {/system script run app-inv-wifi} on-error={}}
+  :if ($appHasWl > 0) do={:do {/system script run app-inv-wireless} on-error={}}
+  :local rtt ""
+  :local recv 0
+  :if ([:len $gw] > 0) do={
+    :do {
+      :local t1 [:timestamp]
+      :local ok1 [/ping $gw count=1]
+      :if ($ok1 > 0) do={:set rtt [:tostr ([:timestamp] - $t1)]}
+      :set recv [/ping $gw count=4 interval=100ms]
+    } on-error={}
+  }
+  :local d ("{\"rtt\":\"" . $rtt . "\",\"recv\":" . $recv . ",\"gw\":\"" . $gw . "\"}")
+  :local resp ""
+  :do {:set resp ([/tool fetch url="@URL@/api/live?t=@TOKEN@" http-method=post http-data=$d http-header-field="Content-Type: application/json" output=user as-value]->"data")} on-error={}
+  :if (!($resp ~ "\"live\":1")) do={:set go 0}
+  :delay 2s
+}
+'''
+
+SPEED = r'''
+:global appSpdDone
+:global appSpdFail
+:set appSpdDone 0
+:set appSpdFail 0
+:local t1 [:timestamp]
+:for k from=1 to=@SPEEDN@ do={
+  :execute script=(":global appSpdDone; :global appSpdFail; :do {/tool fetch url=\"@SPEEDURL@\" check-certificate=no output=none} on-error={:set appSpdFail (\$appSpdFail + 1)}; :set appSpdDone (\$appSpdDone + 1)")
+}
+:local w 0
+:while ($appSpdDone < @SPEEDN@ && $w < 240) do={:delay 500ms; :set w ($w + 1)}
+:local sec [:tostr ([:timestamp] - $t1)]
+:local ok "false"
+:if ($appSpdDone = @SPEEDN@ && $appSpdFail = 0) do={:set ok "true"}
+:local j "{\"ok\":$ok,\"sec\":\"$sec\",\"bytes\":@SPEEDBYTES@}"
+:do {/tool fetch url="@URL@/api/speedtest?t=@TOKEN@" http-method=post http-data=$j http-header-field="Content-Type: application/json" output=none} on-error={
+  :delay 5s
+  /tool fetch url="@URL@/api/speedtest?t=@TOKEN@" http-method=post http-data=$j http-header-field="Content-Type: application/json" output=none
+}
+'''
+
+WL = r'''
+:do {/tool fetch url="@URL@/api/whitelist.rsc?t=@TOKEN@&list=@LIST@" dst-path=app-whitelist.rsc} on-error={
+  :delay 5s
+  /tool fetch url="@URL@/api/whitelist.rsc?t=@TOKEN@&list=@LIST@" dst-path=app-whitelist.rsc
+}
+:delay 2s
+/import file-name=app-whitelist.rsc
+'''
+
+
+def clean(v, default):
+    return re.sub(r"[^\w\-.]", "", v)[:30] or default
+
+
+def get_router(s, t):
+    r = s.scalar(select(Router).where(Router.token == t))
+    if not r:
+        raise HTTPException(403, "bad token")
+    return r
+
+
+SYSLOG_PORT = int(os.getenv("SYSLOG_PORT", "514"))  # port na serwerze (hoście), na który routery wysyłają logi
+
+
+def syslog_target(request):
+    host = os.getenv("SYSLOG_HOST") or request.url.hostname or ""
+    try:
+        ipaddress.ip_address(host)
+        return host
+    except ValueError:
+        try:
+            return socket.gethostbyname(host)
+        except OSError:
+            return None
+
+
+def syslog_lines(request):
+    ip = syslog_target(request)
+    lines = [":do {/system logging remove [find action=appsyslog]} on-error={}",
+             ":do {/system logging action remove [find name=appsyslog]} on-error={}"]
+    if not ip:
+        return lines
+    # bez bsd-syslog / remote-log-format: nazwy tych opcji różnią się między wersjami RouterOS,
+    # a domyślny format ("tematy treść") parser rozumie
+    lines.append("/system logging action add name=appsyslog target=remote remote=%s remote-port=%d"
+                 % (ip, SYSLOG_PORT))
+    lines += ["/system logging add topics=%s action=appsyslog" % x for x in ("critical", "error", "warning")]
+    lines.append("/system logging add topics=info,!fetch action=appsyslog")  # bez 'Download ... FINISHED' co 5 minut
+    return lines
+
+
+SPEED_STREAMS_ROUTER = 4
+SPEED_URL = os.getenv("SPEEDTEST_URL", "https://speed.cloudflare.com/__down?bytes=25000000")
+SPEED_BYTES = int(os.getenv("SPEEDTEST_BYTES", "25000000")) * SPEED_STREAMS_ROUTER  # łącznie ze wszystkich pobrań
+SPEED_TIME = os.getenv("SPEEDTEST_TIME", "03:30:00")
+INET_TARGETS = ("1.1.1.1", "8.8.8.8", "9.9.9.9")
+
+
+def _guarded(cmd):
+    """Polecenie RouterOS uruchamiane przez :parse - nieobsługiwany parametr w danej wersji nie przerwie importu."""
+    return ':do {:local f [:parse "%s"]; $f} on-error={}' % cmd.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$")
+
+
+def netwatch_lines(r):
+    out = [':do {/tool netwatch remove [find where comment~"^app-nw:"]} on-error={}',
+           # brama domyślna (pierwsza aktywna trasa 0.0.0.0/0), bez części %interfejs
+           ':global appGw ""',
+           _guarded(':global appGw; :set appGw [:tostr [/ip route get ([/ip route find where dst-address=0.0.0.0/0 and active]->0) gateway]]'),
+           ':do {:if ([:typeof [:find $appGw "%"]] = "num") do={:set appGw [:pick $appGw 0 [:find $appGw "%"]]}} on-error={}',
+           ':if ($appGw ~ "^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+") do={' + _guarded(
+               ":global appGw; /tool netwatch add type=icmp host=$appGw interval=30s packet-count=10 packet-interval=50ms "
+               "comment=app-nw:gw") + '}']
+    if r.edge:
+        for ip in INET_TARGETS:
+            out.append(_guarded("/tool netwatch add type=icmp host=%s interval=60s packet-count=20 packet-interval=100ms "
+                                "comment=app-nw:inet:%s" % (ip, ip)))
+        out.append(_guarded("/tool netwatch add type=dns host=www.google.com interval=60s comment=app-nw:dns"))
+        out.append(_guarded("/tool netwatch add type=http-get host=www.msftconnecttest.com interval=60s comment=app-nw:http"))
+    return out
+
+
+@app.get("/api/setup.rsc", response_class=PlainTextResponse)
+def setup_rsc(request: Request, t: str, iface: str = "ether1", list: str = "whitelist",
+               ping: str = "1.1.1.1", every: int = 60, s: Session = Depends(db)):
+    r = get_router(s, t)
+    wl = 1 if whitelist_on(s) else 0
+    base = str(request.base_url).rstrip("/")
+    rep = {"@URL@": base, "@TOKEN@": t, "@IFACE@": clean(iface, "ether1"), "@LIST@": clean(list, "whitelist"),
+           "@SPEEDURL@": SPEED_URL, "@SPEEDBYTES@": str(SPEED_BYTES), "@SPEEDN@": str(SPEED_STREAMS_ROUTER)}
+
+    def fill(x):
+        for k, v in rep.items():
+            x = x.replace(k, v)
+        return x.strip()
+
+    return "\n".join([
+        '/system script remove [find name~"^app-"]',
+        '/system script add name=app-monitor source="%s"' % q(fill(MON)),
+    ] + ['/system script add name=app-whitelist source="%s"' % q(fill(WL))] * wl + [
+        ':global appHasWifi 0',
+        ':global appHasWl 0',
+        ':do {:local f [:parse ":global appHasWifi; :set appHasWifi [:len [/interface wifi find]]"]; $f} on-error={}',
+        ':do {:local f [:parse ":global appHasWl; :set appHasWl [:len [/interface wireless find]]"]; $f} on-error={}',
+        ':if ([:len [/ip dhcp-server find]] > 0) do={/system script add name=app-inv-dhcp source="%s"}' % q(fill(INV_DHCP)),
+        ':if ($appHasWifi > 0) do={/system script add name=app-inv-wifi source="%s"}' % q(fill(INV_WIFI)),
+        ':if ($appHasWl > 0) do={/system script add name=app-inv-wireless source="%s"}' % q(fill(INV_WIRELESS)),
+        '/system script add name=app-inv-vpn source="%s"' % q(fill(INV_VPN)),
+        '/system script add name=app-inv-sys source="%s"' % q(fill(INV_SYS)),
+        '/system script add name=app-inventory source="%s"' % q(fill(INV_MAIN)),
+        '/system script add name=app-speed source="%s"' % q(fill(SPEED)),
+        '/system script add name=app-live source="%s"' % q(fill(LIVE)),
+        '/system scheduler remove [find name~"^app-"]',
+        "/system scheduler add name=app-mon interval=%ds on-event=app-monitor" % (every if every in INTERVALS else 60),
+    ] + ["/system scheduler add name=app-wl interval=5m on-event=app-whitelist"] * wl + [
+        "/system scheduler add name=app-inv interval=1m on-event=app-inventory",
+    ] + netwatch_lines(r) + [
+        "/system scheduler add name=app-spd start-time=%s interval=1d on-event=app-speed" % SPEED_TIME
+    ] * bool(r.edge and sget(s, "speed_router") != str(r.id)) + [
+        "/system script run app-monitor",
+    ] + ["/system script run app-whitelist"] * wl + [
+        "/system script run app-inventory",
+    ] + syslog_lines(request) + [
+        ':put ("RouterOS Monitor: zainstalowano. Wi-Fi (pakiet wifi): " . [:tostr ($appHasWifi > 0)] . ", Wi-Fi (wireless): " '
+        '. [:tostr ($appHasWl > 0)] . ", serwer DHCP: " . [:tostr ([:len [/ip dhcp-server find]] > 0)])',
+    ]) + "\n"
+
+
+@app.get("/routers/{rid}", dependencies=[Depends(user)])
+def router_page(rid: int, request: Request, s: Session = Depends(db)):
+    r = s.get(Router, rid)
+    if not r:
+        raise HTTPException(404)
+    base = str(request.base_url).rstrip("/")
+    every = interval(s)
+    cmd = ('/tool fetch url="%s/api/setup.rsc?t=%s&every=%d" dst-path=app-setup.rsc; '
+           ':delay 1s; /import app-setup.rsc') % (base, r.token, every)
+    m = s.scalar(select(Metric).where(Metric.router_id == r.id).order_by(Metric.ts.desc()).limit(1))
+    names, wan, w = wan_info(s, r)
+    return templates.TemplateResponse(request, "router.html", {"r": r, "cmd": cmd, "m": m, "names": names,
+                                                              "inv": inventory_view(s, r), "upd": update_available(r),
+                                                              "si": sys_info(s, r),
+                                                              "hours": router_hours(request.state.user, r.id),
+                                                              "nw": json.loads(r.nw_state) if r.nw_state else [],
+                                                              "speed_srv": sget(s, "speed_router") == str(r.id),
+                                                              "log_err": unread_errors(s, request.state.user, r.id),
+                                                              "log_last": s.scalar(select(func.max(LogEntry.ts)).where(
+                                                                  LogEntry.router_id == r.id)),
+                                                              "log_rejected": sorted(_log_rejected.items(),
+                                                                                     key=lambda x: x[1][1], reverse=True)[:10],
+                                                              "syslog_port": SYSLOG_PORT,
+                                                              "ranges": RANGES,
+                                                              "refresh": max(every, 5),
+                                                              "wan": wan, "w": w})
+
+
+def ordered_routers(s):
+    """Kolejność ustawiona ręcznie; nowe routery (bez pozycji) na końcu, w kolejności dodania."""
+    return s.scalars(select(Router).order_by(func.coalesce(Router.pos, 1000000 + Router.id), Router.id)).all()
+
+
+RANGES = (1, 6, 24, 168, 720)
+
+
+def get_prefs(u):
+    try:
+        p = json.loads(u.prefs or "{}")
+        return p if isinstance(p, dict) else {}
+    except ValueError:
+        return {}
+
+
+def router_hours(u, rid):
+    h = get_prefs(u).get("range", {}).get(str(rid))
+    return h if h in RANGES else 24
+
+
+@app.post("/routers/{rid}/view")
+def set_view(rid: int, hours: int = Form(24), wan: str | None = Form(None), me: User = Depends(user),
+             s: Session = Depends(db)):
+    r = s.get(Router, rid)
+    if not r:
+        raise HTTPException(404)
+    if hours in RANGES:
+        p = get_prefs(me)
+        p.setdefault("range", {})[str(rid)] = hours
+        me.prefs = json.dumps(p)
+    if wan is not None and me.is_admin and (wan.strip()[:40] or None) != r.wan:
+        r.wan = wan.strip()[:40] or None
+        log(s, "WAN", "%s: %s" % (r.name, r.wan or "auto"))
+    s.commit()
+    return RedirectResponse("/routers/%d#charts" % rid, 303)
+
+
+@app.post("/routers/{rid}/move", dependencies=[Depends(admin)])
+def move_router(rid: int, dir: str = Form(), s: Session = Depends(db)):
+    rs = list(ordered_routers(s))
+    i = next((k for k, x in enumerate(rs) if x.id == rid), None)
+    if i is not None:
+        j = i - 1 if dir == "up" else i + 1
+        if 0 <= j < len(rs):
+            rs[i], rs[j] = rs[j], rs[i]
+            log(s, "kolejność", "%s %s" % (rs[j].name, "w górę" if dir == "up" else "w dół"))
+        for k, x in enumerate(rs):
+            x.pos = k
+        s.commit()
+    return RedirectResponse("/settings#order", 303)
+
+
+@app.post("/routers/{rid}/wan", dependencies=[Depends(admin)])
+def set_wan(rid: int, wan: str = Form(""), s: Session = Depends(db)):
+    r = s.get(Router, rid)
+    if r:
+        r.wan = wan.strip()[:40] or None
+        log(s, "WAN", "%s: %s" % (r.name, r.wan or "auto"))
+        s.commit()
+    return RedirectResponse("/routers/%d" % rid, 303)
+
+
+@app.post("/routers/{rid}/clear", dependencies=[Depends(admin)])
+def clear_router(rid: int, s: Session = Depends(db)):
+    s.execute(delete(Metric).where(Metric.router_id == rid))
+    s.execute(delete(IfaceMetric).where(IfaceMetric.router_id == rid))
+    s.execute(delete(Inv).where(Inv.router_id == rid))
+    s.execute(delete(LogEntry).where(LogEntry.router_id == rid))
+    s.execute(delete(TrafficDay).where(TrafficDay.router_id == rid))
+    s.execute(delete(ClientStat).where(ClientStat.router_id == rid))
+    s.execute(delete(SpeedTest).where(SpeedTest.router_id == rid))
+    log(s, "wyczyszczono dane", str(rid))
+    s.commit()
+    return RedirectResponse("/routers/%d" % rid, 303)
+
+
+@app.post("/routers/{rid}/delete", dependencies=[Depends(admin)])
+def del_router(rid: int, s: Session = Depends(db)):
+    s.execute(delete(Metric).where(Metric.router_id == rid))
+    s.execute(delete(IfaceMetric).where(IfaceMetric.router_id == rid))
+    s.execute(delete(Whitelist).where(Whitelist.router_id == rid))
+    s.execute(delete(Inv).where(Inv.router_id == rid))
+    s.execute(delete(LogEntry).where(LogEntry.router_id == rid))
+    s.execute(delete(TrafficDay).where(TrafficDay.router_id == rid))
+    s.execute(delete(ClientStat).where(ClientStat.router_id == rid))
+    s.execute(delete(SpeedTest).where(SpeedTest.router_id == rid))
+    r = s.get(Router, rid)
+    log(s, "router-", r.name if r else str(rid))
+    s.execute(delete(Router).where(Router.id == rid))
+    s.commit()
+    return RedirectResponse("/", 303)
+
+
+INTERVALS = (1, 5, 10, 15, 30, 60)
+FAST_INTERVALS = (1, 5)  # wymagają potwierdzenia w panelu
+
+
+def interval(s):
+    v = sget(s, "interval", "60")
+    return int(v) if v.isdigit() and int(v) in INTERVALS else 60
+
+
+def fl(v, f=lambda x: x):
+    return None if v is None else f(float(v))
+
+
+def buckets(hours):
+    return max(1, hours * 3600 // 600)  # max ~600 punktów na wykres, wartości uśrednione
+
+
+def mb(v):
+    return None if v is None else round(v / 1e6, 3)
+
+
+@app.get("/api/routers/{rid}/series", dependencies=[Depends(user)])
+def series(rid: int, hours: int = 24, s: Session = Depends(db)):
+    hours = max(1, min(hours, 720))
+    b = func.floor(extract("epoch", Metric.ts) / buckets(hours))
+    cols = [Metric.cpu, Metric.mem, Metric.temp, Metric.conns, Metric.dhcp, Metric.ping_ms, Metric.loss,
+            Metric.rx_bps, Metric.tx_bps]
+    rows = s.execute(select(func.min(Metric.ts), *[func.avg(c) for c in cols])
+                     .where(Metric.router_id == rid, Metric.ts > now() - dt.timedelta(hours=hours))
+                     .group_by(b).order_by(b)).all()
+    rnd = lambda x: round(x, 1)
+    return {"t": [x[0].isoformat(timespec="seconds") for x in rows],
+            "cpu": [pct(fl(x[1], rnd)) for x in rows], "mem": [pct(fl(x[2], rnd)) for x in rows],
+            "temp": [fl(x[3], rnd) for x in rows], "conns": [fl(x[4], round) for x in rows],
+            "dhcp": [fl(x[5], round) for x in rows], "ping": [fl(x[6], rnd) for x in rows],
+            "loss": [pct(fl(x[7], rnd)) for x in rows], "rx": [mb(fl(x[8])) for x in rows],
+            "tx": [mb(fl(x[9])) for x in rows]}
+
+
+@app.get("/api/routers/{rid}/ifaces", dependencies=[Depends(user)])
+def ifaces(rid: int, hours: int = 24, name: str = "", s: Session = Depends(db)):
+    hours = max(1, min(hours, 720))
+    last = s.scalar(select(func.max(IfaceMetric.ts)).where(IfaceMetric.router_id == rid))
+    names = sorted(s.scalars(select(IfaceMetric.name).where(IfaceMetric.router_id == rid, IfaceMetric.ts == last)).all()) if last else []
+    if name not in names:
+        name = names[0] if names else ""
+    b = func.floor(extract("epoch", IfaceMetric.ts) / buckets(hours))
+    rows = s.execute(select(func.min(IfaceMetric.ts), func.avg(IfaceMetric.rx_bps), func.avg(IfaceMetric.tx_bps))
+                     .where(IfaceMetric.router_id == rid, IfaceMetric.name == name,
+                            IfaceMetric.ts > now() - dt.timedelta(hours=hours))
+                     .group_by(b).order_by(b)).all() if name else []
+    return {"names": names, "name": name, "t": [x[0].isoformat(timespec="seconds") for x in rows],
+            "rx": [mb(fl(x[1])) for x in rows], "tx": [mb(fl(x[2])) for x in rows]}
+
+
+def pct(v):
+    return v if v is not None and 0 <= v <= 100 else None
+
+
+def parse_rtt(v):
+    v = str(v or "").strip()
+    m = re.fullmatch(r"(\d+):(\d\d):(\d\d)(?:\.(\d+))?", v)
+    if m:
+        h, mi, sec, fr = m.groups()
+        return ((int(h) * 60 + int(mi)) * 60 + int(sec)) * 1000 + (float("0." + fr) * 1000 if fr else 0)
+    toks = re.findall(r"(\d+)(ms|us|ns|w|d|h|m|s)", v)
+    if not toks or "".join(a + b for a, b in toks) != v:
+        return None
+    mult = {"w": 6.048e8, "d": 8.64e7, "h": 3.6e6, "m": 6e4, "s": 1e3, "ms": 1, "us": 1e-3, "ns": 1e-6}
+    return sum(int(a) * mult[b] for a, b in toks)
+
+
+def rate(cur, old, sec):
+    if None in (cur[0], cur[1], old[0], old[1]) or sec <= 0 or cur[0] < old[0] or cur[1] < old[1]:
+        return None, None
+    return (cur[0] - old[0]) * 8 / sec, (cur[1] - old[1]) * 8 / sec
+
+
+@app.post("/api/metrics")
+async def metrics(request: Request, t: str):
+    raw = (await request.body()).decode("utf-8", "replace")
+    return await run_in_threadpool(store_metrics, t, raw, request.client.host if request.client else None)
+
+
+def store_metrics(t, raw, ip=None):
+    with Session(engine) as s:
+        return _store_metrics(s, t, raw, ip)
+
+
+def _median(v):
+    v = sorted(x for x in v if x is not None)
+    if not v:
+        return None
+    k = len(v) // 2
+    return v[k] if len(v) % 2 else (v[k - 1] + v[k]) / 2
+
+
+def _loss(v):
+    return pct(num(str(v or "").replace("%", "").strip()))
+
+
+def _probe_time(p):
+    for k, v in p.items():
+        if k.endswith("time") and k != "since":
+            ms = parse_rtt(v)
+            if ms is not None:
+                return ms
+    return None
+
+
+def nw_metrics(r, d):
+    """Wyniki sond Netwatch -> kolumny metryk. Starsze skrypty (własny ping) nadal obsługiwane."""
+    probes = [p for p in (d.get("nw") or []) if isinstance(p, dict)] if isinstance(d.get("nw"), list) else []
+    if not probes:
+        r.nw_state = None
+        return {"ping_ms": parse_rtt(d.get("rtt")), "loss": pct(num(d.get("loss")))}
+    out, state = {}, []
+    inet = [p for p in probes if str(p.get("comment", "")).startswith("app-nw:inet")]
+    up = lambda p: str(p.get("status", "")).lower() == "up"
+    if inet:
+        ups = [p for p in inet if up(p)]
+        known = [p for p in inet if str(p.get("status", "")).lower() in ("up", "down")]
+        # stan "unknown" (np. tuż po utworzeniu sond, zanim wykonają pierwszy test) nie jest przerwą - brak danych
+        out["inet_up"] = bool(ups) if known else None
+        out["inet_rtt"] = _median([parse_rtt(p.get("rtt-avg")) for p in ups])
+        out["inet_jit"] = _median([parse_rtt(p.get("rtt-jitter")) for p in ups])
+        # utrata z działających celów; jeden niedostępny serwer nie fałszuje wyniku, wszystkie niedostępne = 100%
+        out["inet_loss"] = _median([_loss(p.get("loss-percent")) for p in ups]) if ups else 100.0
+    gw = next((p for p in probes if p.get("comment") == "app-nw:gw"), None)
+    if gw:
+        out["gw_rtt"] = parse_rtt(gw.get("rtt-avg")) if up(gw) else None
+        out["gw_jit"] = parse_rtt(gw.get("rtt-jitter")) if up(gw) else None
+        out["gw_loss"] = _loss(gw.get("loss-percent")) if gw.get("loss-percent") not in (None, "") else (0.0 if up(gw) else 100.0)
+    for key in ("dns", "http"):
+        p = next((x for x in probes if x.get("comment") == "app-nw:" + key), None)
+        if p:
+            st = str(p.get("status", "")).lower()
+            out[key + "_up"] = True if st == "up" else False if st == "down" else None
+            if st == "up":
+                out[key + "_ms"] = _probe_time(p)
+    if inet:
+        out["ping_ms"], out["loss"] = out.get("inet_rtt"), out.get("inet_loss")
+    elif gw:
+        out["ping_ms"], out["loss"] = out.get("gw_rtt"), out.get("gw_loss")
+    names = {"app-nw:gw": "Brama", "app-nw:dns": "Test DNS (rozwiązywanie nazw)", "app-nw:http": "Test HTTP (otwieranie strony)"}
+    for p in probes:
+        c = str(p.get("comment", ""))
+        state.append({"name": names.get(c, "DNS " + c.split(":")[-1] if c.startswith("app-nw:inet") else c[7:]),
+                      "host": str(p.get("host", ""))[:60], "status": str(p.get("status", ""))[:10],
+                      "rtt": parse_rtt(p.get("rtt-avg")), "jit": parse_rtt(p.get("rtt-jitter")),
+                      "loss": _loss(p.get("loss-percent")), "time": _probe_time(p), "since": str(p.get("since", ""))[:30]})
+    r.nw_state = json.dumps(state)
+    return out
+
+
+def _store_metrics(s, t, raw, ip=None):
+    r = get_router(s, t)
+    if ip and not r.log_ip_fixed and r.log_ip != ip:
+        r.log_ip = ip
+    try:
+        d = json.loads(raw)
+        assert isinstance(d, dict)
+    except Exception:
+        try:  # RouterOS sometimes sends an empty value, e.g. "temp":, -> treat as null
+            d = json.loads(re.sub(r":(?=\s*[,}\]])", ":null", raw))
+            assert isinstance(d, dict)
+        except Exception:
+            print("BAD METRICS BODY from %s: %r" % (r.name, raw[:1500]), flush=True)
+            raise HTTPException(400, "bad json")
+    n = now()
+    prev = s.scalar(select(Metric).where(Metric.router_id == r.id).order_by(Metric.ts.desc()).limit(1))
+    sec = (n - prev.ts).total_seconds() if prev else 0
+    old = {}
+    if prev:
+        old = {x.name: x for x in s.scalars(select(IfaceMetric).where(IfaceMetric.router_id == r.id,
+                                                                     IfaceMetric.ts == prev.ts))}
+    cur, types = {}, {}
+    ifs = d.get("ifs")
+    for it in (ifs if isinstance(ifs, list) else [])[:64]:
+        if not isinstance(it, dict):
+            continue
+        name, irx, itx = str(it.get("n", ""))[:40], num(it.get("rx")), num(it.get("tx"))
+        if not name or irx is None or itx is None:
+            continue
+        p = old.get(name)
+        ib, ob = rate((irx, itx), (p.rx, p.tx), sec) if p else (None, None)
+        s.add(IfaceMetric(router_id=r.id, ts=n, name=name, rx=int(irx), tx=int(itx), rx_bps=ib, tx_bps=ob))
+        cur[name] = (irx, itx, ib, ob)
+        if it.get("y"):
+            types[name] = str(it.get("y"))[:20]
+    if types:
+        tj = json.dumps(types, sort_keys=True)
+        if r.iface_types != tj:
+            r.iface_types = tj
+    wan = r.wan if r.wan in cur else ("ether1" if "ether1" in cur else None)
+    if not wan and cur:  # same auto rule as wan_info(): interface with the most traffic
+        wan = max(cur, key=lambda k: cur[k][0] + cur[k][1])
+    w = cur.get(wan, (None, None, None, None))
+    tm, fr = num(d.get("tm")), num(d.get("fm"))
+    mem = (tm - fr) * 100 / tm if tm and fr is not None and tm > 0 else num(d.get("mem"))
+    cpu, temp = num(d.get("cpu")), num(d.get("temp"))
+    conns, dhcp = num(d.get("conns")), num(d.get("dhcp"))
+    s.add(Metric(router_id=r.id, ts=n, cpu=pct(cpu), mem=pct(mem), temp=temp if temp is not None and -50 <= temp <= 150 else None,
+                 conns=None if conns is None else int(conns), rx=None if w[0] is None else int(w[0]),
+                 tx=None if w[1] is None else int(w[1]), rx_bps=w[2], tx_bps=w[3],
+                 dhcp=None if dhcp is None else int(dhcp), **nw_metrics(r, d)))
+    r.ident, r.ver, r.uptime = str(d.get("id", ""))[:80], str(d.get("ver", ""))[:40], str(d.get("up", ""))[:40]
+    r.last_seen = n
+    cutoff = n - dt.timedelta(days=RETENTION)
+    s.execute(delete(Metric).where(Metric.router_id == r.id, Metric.ts < cutoff))
+    s.execute(delete(IfaceMetric).where(IfaceMetric.router_id == r.id, IfaceMetric.ts < cutoff))
+    s.commit()
+    return {"ok": True, "live": 1 if r.live else 0}
+
+
+# ---------- inventory (DHCP / Wi-Fi / VPN) ----------
+INV_KINDS = {"dhcp", "wifi", "wireless", "wg", "ppp", "sys"}
+
+
+def parse_body(raw, rname):
+    try:
+        d = json.loads(raw)
+        assert isinstance(d, dict)
+        return d
+    except Exception:
+        try:
+            d = json.loads(re.sub(r":(?=\s*[,}\]])", ":null", raw))
+            assert isinstance(d, dict)
+            return d
+        except Exception:
+            print("BAD BODY from %s: %r" % (rname, raw[:1500]), flush=True)
+            raise HTTPException(400, "bad json")
+
+
+@app.post("/api/inventory")
+async def inventory(request: Request, t: str):
+    raw = (await request.body()).decode("utf-8", "replace")
+    return await run_in_threadpool(store_inventory, t, raw)
+
+
+def store_inventory(t, raw):
+    with Session(engine) as s:
+        r = get_router(s, t)
+        d = parse_body(raw, r.name)
+        kind, seq = str(d.get("k", "")), str(d.get("seq", ""))[:20]
+        if kind not in INV_KINDS or not seq:
+            raise HTTPException(400, "bad kind")
+        n = now()
+        items = d.get("items")
+        items = items if isinstance(items, list) else []
+        existing = {x.key: x for x in s.scalars(select(Inv).where(Inv.router_id == r.id, Inv.kind == kind))}
+        for it in items[:400]:
+            if not isinstance(it, dict):
+                continue
+            key = str(it.get("key") or "").strip()[:100]
+            if not key:
+                continue
+            data = json.dumps({str(k)[:20]: ("" if v is None else str(v))[:200] for k, v in it.items()})
+            row = existing.get(key)
+            if row:
+                row.data, row.seq, row.updated = data, seq, n
+            else:
+                row = Inv(router_id=r.id, kind=kind, key=key, data=data, seq=seq, updated=n)
+                s.add(row)
+                existing[key] = row
+        if d.get("done") in (True, "true"):
+            for key, row in existing.items():
+                if row.seq != seq:
+                    s.delete(row)
+        if kind in ("wifi", "wireless"):
+            for it in items[:400]:
+                if isinstance(it, dict) and it.get("key"):
+                    q = wifi_quality({k: str(v) for k, v in it.items()})
+                    h = LIVE_HIST.setdefault(str(it["key"]).upper(), [])
+                    h.append((n, q["signal"], q["rate"], q["q"], str(it.get("interface", ""))[:40]))
+                    if len(h) > 900:
+                        del h[:len(h) - 900]
+        s.commit()
+        return {"ok": True}
+
+
+def dbm(v):
+    m = re.search(r"-\d+", v or "")
+    return int(m.group(0)) if m else None
+
+
+def sig_class(v):
+    return "" if v is None else ("ok" if v >= -67 else "warn" if v >= -75 else "bad")
+
+
+PHY_PER_STREAM = {  # Mb/s na strumień przy danej szerokości kanału (najwyższe MCS, krótki odstęp)
+    "ax": {20: 143.4, 40: 286.8, 80: 600.4, 160: 1201.0},
+    "ac": {20: 86.7, 40: 200.0, 80: 433.3, 160: 866.7},
+    "n": {20: 72.2, 40: 150.0},
+}
+QLABEL = {3: "bardzo dobra", 2: "dobra", 1: "średnia", 0: "słaba"}
+
+
+def _mbps(v):
+    v = (v or "").strip()
+    if re.fullmatch(r"\d+(\.\d+)?", v):
+        return float(v) / 1e6
+    m = re.match(r"([\d.]+)\s*([kMG])bps", v)
+    return float(m.group(1)) * {"k": 0.001, "M": 1, "G": 1000}[m.group(2)] if m else None
+
+
+def wifi_quality(d):
+    """Ocena jakości połączenia klienta: głównie wynegocjowana prędkość (vs. maksimum kanału), potem SNR/CCQ, sygnał."""
+    sig = dbm(d.get("signal") or d.get("signal-strength") or "")
+    txs, rxs = d.get("tx-rate") or d.get("tx") or "", d.get("rx-rate") or d.get("rx") or ""
+    tx, rx = _mbps(txs), _mbps(rxs)
+    info = " ".join(str(x) for x in (txs, rxs, d.get("band", ""), d.get("tx-rate-set", "")))
+    width = next((int(x) for x in re.findall(r"(\d+)\s*MHz", info)), None)
+    streams = next((int(x) for x in re.findall(r"/(\d)S\b", info)), None)
+    low = info.lower()
+    std = "ax" if ("ax" in low or "he" in low) else "ac" if ("ac" in low or "vht" in low) else "n" if ("2ghz" in low or "ht" in low or "-n" in low) else None
+    is24 = "2ghz" in low or "2.4" in low or (d.get("band", "") == "" and width == 20 and std == "n")
+    rates = [x for x in (tx, rx) if x]
+    rate = max(rates) if rates else None  # lepszy kierunek pokazuje możliwości łącza (wysyłanie klienta bywa niższe)
+    pct = None
+    if rate and width and streams and (std or "ax") in PHY_PER_STREAM and width in PHY_PER_STREAM[std or "ax"]:
+        pct = min(100, round(rate * 100 / (PHY_PER_STREAM[std or "ax"][width] * streams)))
+    if pct is not None:
+        rc = 3 if pct >= 50 else 2 if pct >= 30 else 1 if pct >= 15 else 0
+    elif rate:
+        lim = (150, 72, 30) if is24 else (400, 200, 80)
+        rc = 3 if rate >= lim[0] else 2 if rate >= lim[1] else 1 if rate >= lim[2] else 0
+    else:
+        rc = None
+    snr, ccq = num(d.get("signal-to-noise")), num(str(d.get("tx-ccq", "")).replace("%", ""))
+    sc = None if sig is None else (3 if sig >= -60 else 2 if sig >= -67 else 1 if sig >= -75 else 0)
+    if rc is not None:
+        q = rc if sc is None else max(rc, sc - 1)  # bezczynne urządzenie ma chwilowo niską prędkość mimo dobrego sygnału
+    elif snr is not None:
+        q = 3 if snr >= 30 else 2 if snr >= 25 else 1 if snr >= 15 else 0
+    elif ccq is not None:
+        q = 3 if ccq >= 90 else 2 if ccq >= 75 else 1 if ccq >= 50 else 0
+    else:
+        q = sc
+    if q is not None:
+        if sig is not None and sig < -80:
+            q = min(q, 1)
+        if snr is not None and snr < 10:
+            q = 0
+    return {"q": q, "qlabel": QLABEL.get(q, "-"), "qc": "" if q is None else "ok" if q >= 2 else "warn" if q == 1 else "bad",
+            "signal": sig, "sc": sig_class(sig), "rate": round(rate) if rate else None, "pct": pct, "snr": snr, "ccq": ccq,
+            "width": width, "streams": streams, "std": {"ax": "Wi-Fi 6", "ac": "Wi-Fi 5", "n": "Wi-Fi 4"}.get(std, ""),
+            "band": "2,4 GHz" if is24 else ("5 GHz" if (rate or width) else ""),
+            "tx": fmt_rate(txs), "rx": fmt_rate(rxs)}
+
+
+def bytes_h(v):
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return "-"
+    for u in ("B", "KB", "MB", "GB", "TB"):
+        if v < 1024 or u == "TB":
+            return "%.0f %s" % (v, u) if u == "B" else "%.1f %s" % (v, u)
+        v /= 1024
+
+
+def fmt_rate(v):
+    """Szybkość łącza Wi-Fi w czytelnej postaci: liczba bitów/s albo tekst RouterOS (np. '866.6Mbps-80MHz/2S/SGI')."""
+    v = (v or "").strip()
+    if not v:
+        return "-"
+    if re.fullmatch(r"\d+(\.\d+)?", v):
+        f = float(v)
+        return "%.0f Mb/s" % (f / 1e6) if f >= 1e6 else "%.0f kb/s" % (f / 1e3)
+    m = re.match(r"([\d.]+)\s*([kMG])bps", v)
+    if m:
+        f = float(m.group(1)) * {"k": 0.001, "M": 1, "G": 1000}[m.group(2)]
+        return "%.0f Mb/s" % f
+    return v.split("-")[0][:20]
+
+
+def sys_info(s, r):
+    """Model, firmware, rola CAPsMAN, pakiet wifi-qcom (progi RAM) i całkowita pamięć - z inwentarza 'sys'."""
+    row = s.scalar(select(Inv).where(Inv.router_id == r.id, Inv.kind == "sys"))
+    try:
+        d = json.loads(row.data) if row else {}
+    except ValueError:
+        d = {}
+    caps = {x for x in (d.get("caps") or "").split(",") if x}
+    n = num(d.get("capsn"))
+    role = None
+    if "manager" in caps:
+        role = "CAPsMAN serwer" + (" · %d AP" % n if n else "")
+    if "cap" in caps:
+        role = (role + " + CAP") if role else "CAP · AP"
+    wq = (num(d.get("wq")) or 0) > 0
+    fwc, fwu = d.get("fwc") or "", d.get("fwu") or ""
+    tm = num(d.get("tm"))
+    wifi_n, wl_n = int(num(d.get("wifi")) or 0), int(num(d.get("wl")) or 0)
+    feats = []
+    if wifi_n:
+        feats.append("Wi-Fi (pakiet wifi, %d interf.)" % wifi_n)
+    if wl_n:
+        feats.append("Wi-Fi (pakiet wireless, %d interf.)" % wl_n)
+    if role:
+        feats.append(role)
+    if num(d.get("dhs")):
+        feats.append("serwer DHCP")
+    if num(d.get("wgs")):
+        feats.append("WireGuard")
+    return {"model": d.get("model") or "", "role": role, "fw": fwc, "fw_upd": fwu if fwu and fwc and fwu != fwc else "",
+            "qcom": wq, "ram_w": 90 if wq else 75, "ram_b": 94 if wq else 90, "mem_total": tm,
+            "has_wifi": bool(wifi_n or wl_n or role), "feats": feats, "known": bool(d)}
+
+
+def ram_mb(m, si):
+    if not m or m.mem is None or not si["mem_total"]:
+        return ""
+    tot = si["mem_total"] / 1048576
+    return "%.0f/%.0f MB" % (tot * m.mem / 100, tot)
+
+
+templates.env.globals["ram_mb"] = ram_mb
+_WIFI_ANY = [None, 0.0]
+
+
+def wifi_any():
+    if time.time() - _WIFI_ANY[1] < 60:
+        return _WIFI_ANY[0]
+    try:
+        with Session(engine) as s:
+            val = any(sys_info(s, r)["has_wifi"] for r in s.scalars(select(Router)).all()) or bool(
+                s.scalar(select(func.count(Inv.id)).where(Inv.kind.in_(("wifi", "wireless")))))
+    except Exception:
+        val = True
+    _WIFI_ANY[:] = [val, time.time()]
+    return val
+
+
+templates.env.globals["wifi_any"] = wifi_any
+_WL_ON = [None, 0.0]
+
+
+def whitelist_on(s):
+    """Moduł whitelisty: ustawienie z panelu; domyślnie włączony tylko jeśli whitelista ma już wpisy."""
+    v = sget(s, "whitelist_on", "")
+    if v in ("0", "1"):
+        return v == "1"
+    return bool(s.scalar(select(func.count(Whitelist.id))))
+
+
+def wl_on():
+    if time.time() - _WL_ON[1] < 30:
+        return _WL_ON[0]
+    try:
+        with Session(engine) as s:
+            val = whitelist_on(s)
+    except Exception:
+        val = True
+    _WL_ON[:] = [val, time.time()]
+    return val
+
+
+templates.env.globals["wl_on"] = wl_on
+
+
+def inventory_view(s, r):
+    # adresy monitorowanych routerów/AP, które są online - jeśli występują w DHCP tego routera, to na pewno są aktywne
+    online_ips = {x.log_ip for x in s.scalars(select(Router)).all() if x.log_ip and x.online}
+    rows = s.scalars(select(Inv).where(Inv.router_id == r.id)).all()
+    by = {k: [] for k in INV_KINDS}
+    upd = None
+    for x in rows:
+        if x.kind in ("wifi", "wireless") and (now() - x.updated).total_seconds() > 300:
+            continue  # klient nie zgłaszany od 5 min - nie pokazuj "zamrożonego" odczytu
+        try:
+            d = json.loads(x.data)
+        except ValueError:
+            continue
+        by[x.kind].append(d)
+        upd = x.updated if upd is None or x.updated > upd else upd
+    leases = {d.get("key", "").upper(): d for d in by["dhcp"]}
+    wifi = []
+    for d in by["wifi"] + by["wireless"]:
+        mac = d.get("key", "").upper()
+        l = leases.get(mac, {})
+        wq = wifi_quality(d)
+        wifi.append({"mac": mac, "name": l.get("comment") or l.get("host") or "-",
+                     "ip": l.get("ip") or d.get("last-ip") or d.get("lastip") or "-",
+                     "iface": d.get("interface") or d.get("iface", ""), "uptime": d.get("uptime") or "-", **wq})
+    wifi.sort(key=lambda w: (-(w["q"] if w["q"] is not None else -1), -(w["signal"] if w["signal"] is not None else -999)))
+    wmacs = {w["mac"]: w for w in wifi}
+    devices = []
+    for mac, d in leases.items():
+        arp, st = d.get("arp", ""), d.get("status", "")
+        seen_l2 = (num(d.get("bh")) or 0) > 0  # MAC w tablicy hostów bridge = ruch w ostatnich minutach
+        if mac in wmacs or seen_l2 or d.get("ip") in online_ips or (
+                st == "bound" and arp in ("reachable", "delay", "probe", "permanent")):
+            state = "online"
+        elif st == "bound" and arp == "stale":
+            state = "idle"
+        else:
+            state = "offline"
+        w = wmacs.get(mac)
+        devices.append({"state": state, "name": d.get("comment") or d.get("host") or "-",
+                        "host": d.get("host") if d.get("comment") else "", "ip": d.get("ip") or "-", "mac": mac,
+                        "static": d.get("dyn") == "false", "last": d.get("last") or "-",
+                        "signal": w["signal"] if w else None, "sc": w["sc"] if w else ""})
+    order = {"online": 0, "idle": 1, "offline": 2}
+    devices.sort(key=lambda x: (order[x["state"]], x["name"].lower()))
+    vpn = []
+    for d in by["wg"]:
+        ms = parse_rtt(d.get("hs"))
+        dis = d.get("disabled") == "true"
+        vpn.append({"type": "WireGuard", "name": d.get("name") or d.get("comment") or d.get("key", "")[:10] + "…",
+                    "iface": d.get("iface", ""), "remote": d.get("endpoint") or "-",
+                    "state": "disabled" if dis else ("online" if ms is not None and ms <= 180_000 else "offline"),
+                    "info": ("handshake " + d["hs"] + " temu") if d.get("hs") else "brak handshake",
+                    "rx": bytes_h(d.get("rx")), "tx": bytes_h(d.get("tx"))})
+    for d in by["ppp"]:
+        vpn.append({"type": (d.get("service") or "ppp").upper(), "name": d.get("name", "-"), "iface": "",
+                    "remote": d.get("caller") or "-", "state": "online", "info": "uptime " + (d.get("uptime") or "-"),
+                    "rx": d.get("address") or "-", "tx": ""})
+    vpn.sort(key=lambda v: ({"online": 0, "offline": 1, "disabled": 2}[v["state"]], v["name"].lower()))
+    return {"devices": devices, "wifi": wifi, "vpn": vpn, "updated": upd,
+            "dev_on": sum(1 for x in devices if x["state"] == "online"),
+            "vpn_on": sum(1 for x in vpn if x["state"] == "online"),
+            "stale": bool(upd and (now() - upd).total_seconds() > 600)}
+
+
+# ---------- syslog (logi z routerów) ----------
+SYSLOG_LISTEN = 5514  # port wewnątrz kontenera (docker-compose mapuje SYSLOG_PORT -> 5514/udp)
+LOG_DAYS = int(os.getenv("LOG_RETENTION_DAYS", "14"))
+SEV_WORDS = {"critical": 2, "error": 3, "warning": 4, "info": 6, "debug": 7}
+TOPIC_WORDS = set(SEV_WORDS) | {
+    "system", "account", "firewall", "dhcp", "wireless", "wifi", "interface", "script", "ppp", "pppoe", "l2tp",
+    "pptp", "sstp", "ovpn", "wireguard", "dns", "route", "bgp", "ospf", "ipsec", "caps", "certificate", "e-mail",
+    "ntp", "web-proxy", "hotspot", "radius", "snmp", "ssh", "telnet", "ftp", "update", "health", "bridge", "lte",
+    "gps", "upnp", "event", "manager", "packet", "raw", "read", "write", "state", "watchdog", "fetch", "backup",
+    "container", "ipv6", "vrrp", "rip", "mpls", "ups", "timer", "async", "smb", "tftp", "disk", "dot1x", "stp",
+    "netwatch", "rsvp", "l2tp-ipsec", "store", "calc", "sertcp", "socks", "isdn", "pim", "igmp-proxy", "mme"}
+TS_RE = re.compile(r"^(?:[A-Z][a-z]{2}\s+\d{1,2}\s+\d\d:\d\d:\d\d|\d{4}-\d\d-\d\d[T ]\S+)\s+")
+_log_buf = []
+_log_ipmap = {}
+_log_rejected = {}
+_log_task = None
+
+
+def is_topics(tok):
+    parts = tok.rstrip(":").split(",")
+    return all(re.fullmatch(r"[a-z0-9-]+", p) for p in parts) and any(p in TOPIC_WORDS for p in parts)
+
+
+def parse_syslog(data):
+    """Zwraca (waga 0-7, tematy 'system,info', treść). Obsługuje format BSD i domyślny RouterOS."""
+    s = data.decode("utf-8", "replace").strip()
+    pri = None
+    m = re.match(r"^<(\d{1,3})>", s)
+    if m:
+        pri, s = int(m.group(1)), s[m.end():]
+    s = TS_RE.sub("", s, count=1)
+    topics, msg = "", s
+    toks = s.split(" ", 2)
+    if toks and is_topics(toks[0]):
+        topics, msg = toks[0].rstrip(":"), s[len(toks[0]):].strip()
+    elif len(toks) > 1 and is_topics(toks[1]):  # pierwszy token to nazwa hosta (identity)
+        topics, msg = toks[1].rstrip(":"), (toks[2] if len(toks) > 2 else "").strip()
+    sev = None
+    for w in topics.split(","):
+        if w in SEV_WORDS:
+            sev = SEV_WORDS[w] if sev is None else min(sev, SEV_WORDS[w])
+    if sev is None:
+        sev = (pri & 7) if pri is not None else 6
+    return sev, topics, msg
+
+
+class SyslogProto(asyncio.DatagramProtocol):
+    def datagram_received(self, data, addr):
+        ip = addr[0]
+        rid = _log_ipmap.get(ip)
+        if rid is None:
+            c = _log_rejected.setdefault(ip, [0, None])
+            c[0], c[1] = c[0] + 1, now()
+            if len(_log_rejected) > 30:
+                _log_rejected.pop(next(iter(_log_rejected)))
+            return
+        if len(_log_buf) < 20000:
+            _log_buf.append((rid, now(), data[:2000]))
+
+
+def refresh_ipmap():
+    global _log_ipmap
+    with Session(engine) as s:
+        _log_ipmap = {r.log_ip: r.id for r in s.scalars(select(Router).where(Router.log_ip.is_not(None)))}
+
+
+def flush_logs(batch):
+    rows, seen = [], {}
+    for rid, ts, data in batch:
+        sev, topics, msg = parse_syslog(data)
+        if not msg:
+            continue
+        k = (rid, topics, msg)
+        if k in seen and (ts - seen[k]).total_seconds() < 2:  # ten sam wpis z kilku reguł logowania
+            continue
+        seen[k] = ts
+        rows.append(LogEntry(router_id=rid, ts=ts, sev=sev, topics=topics[:100], msg=msg[:1000]))
+    if rows:
+        with Session(engine) as s:
+            s.add_all(rows)
+            s.commit()
+
+
+def purge_logs():
+    with Session(engine) as s:
+        s.execute(delete(LogEntry).where(LogEntry.ts < now() - dt.timedelta(days=LOG_DAYS)))
+        s.execute(delete(ClientStat).where(ClientStat.ts < now() - dt.timedelta(days=RETENTION)))
+        s.execute(delete(Inv).where(Inv.kind.in_(("wifi", "wireless")), Inv.updated < now() - dt.timedelta(hours=1)))
+        s.execute(delete(TrafficDay).where(TrafficDay.day < (now() - dt.timedelta(days=800)).date()))
+        s.commit()
+
+
+def record_clients():
+    """Co minutę: zapisz liczbę urządzeń online, klientów Wi-Fi i VPN online dla routerów z aktualnym inwentarzem."""
+    with Session(engine) as s:
+        for r in s.scalars(select(Router)).all():
+            v = inventory_view(s, r)
+            if not v["updated"] or v["stale"]:
+                continue
+            s.add(ClientStat(router_id=r.id, ts=now(), dev_on=v["dev_on"], dev_total=len(v["devices"]),
+                             wifi=len(v["wifi"]), vpn_on=v["vpn_on"]))
+        s.commit()
+
+
+LOCAL_TZ = os.getenv("TZ", "Europe/Warsaw")
+
+
+def update_traffic():
+    """Co 10 minut: przelicz dzienny transfer WAN (z liczników bajtów) dla ostatnich dni i zapisz w traffic_days."""
+    with Session(engine) as s:
+        for r in s.scalars(select(Router)).all():
+            _, wan, _ = wan_info(s, r)
+            if not wan:
+                continue
+            have = s.scalar(select(func.count(TrafficDay.id)).where(TrafficDay.router_id == r.id))
+            since = now() - dt.timedelta(days=RETENTION if not have else 3)
+            rows = s.execute(text("""
+                SELECT d, SUM(drx), SUM(dtx) FROM (
+                  SELECT CAST((ts AT TIME ZONE 'UTC') AT TIME ZONE :tz AS DATE) AS d,
+                         rx - LAG(rx) OVER (ORDER BY ts) AS drx, tx - LAG(tx) OVER (ORDER BY ts) AS dtx
+                  FROM iface_metrics WHERE router_id = :rid AND name = :n AND ts > :since) q
+                WHERE drx >= 0 AND dtx >= 0 GROUP BY d ORDER BY d"""),
+                {"tz": LOCAL_TZ, "rid": r.id, "n": wan, "since": since}).all()
+            first = True
+            for d, rx, tx in rows:
+                if first and have:  # pierwszy dzień okna może być niepełny - nie nadpisuj go
+                    first = False
+                    continue
+                first = False
+                row = s.scalar(select(TrafficDay).where(TrafficDay.router_id == r.id, TrafficDay.day == d))
+                if row:
+                    row.rx, row.tx, row.iface = int(rx or 0), int(tx or 0), wan
+                else:
+                    s.add(TrafficDay(router_id=r.id, day=d, iface=wan, rx=int(rx or 0), tx=int(tx or 0)))
+        s.commit()
+
+
+async def log_loop():
+    n = 0
+    while True:
+        try:
+            if n % 15 == 0:
+                await run_in_threadpool(refresh_ipmap)
+            if _log_buf:
+                batch = _log_buf[:]
+                del _log_buf[:len(batch)]
+                await run_in_threadpool(flush_logs, batch)
+            if n % 1800 == 0:
+                await run_in_threadpool(purge_logs)
+            if n % 30 == 5:
+                await run_in_threadpool(record_clients)
+            if n % 300 == 10:
+                await run_in_threadpool(update_traffic)
+            if n % 15 == 7:
+                rid = await run_in_threadpool(speed_due)
+                if rid:
+                    asyncio.create_task(server_speedtest(rid))
+        except Exception as e:
+            print("log loop error: %s" % e, flush=True)
+        n += 1
+        await asyncio.sleep(2)
+
+
+async def push_caddy_config():
+    for _ in range(40):
+        try:
+            with Session(engine) as s:
+                cfg = caddyfile(sget(s, "domain"), sget(s, "email"))
+            async with httpx.AsyncClient(timeout=10) as c:
+                r = await c.post(CADDY + "/load", content=cfg.encode(), headers={"Content-Type": "text/caddyfile"})
+            if r.status_code == 200:
+                return
+        except Exception:
+            pass
+        await asyncio.sleep(5)
+    print("caddy: nie udało się wysłać konfiguracji", flush=True)
+
+
+@app.on_event("startup")
+async def start_caddy_cfg():
+    asyncio.create_task(push_caddy_config())
+
+
+@app.on_event("startup")
+async def start_syslog():
+    global _log_task
+    try:
+        await asyncio.get_running_loop().create_datagram_endpoint(SyslogProto, local_addr=("0.0.0.0", SYSLOG_LISTEN))
+    except OSError as e:
+        print("syslog: nie można nasłuchiwać na UDP %d: %s" % (SYSLOG_LISTEN, e), flush=True)
+    _log_task = asyncio.create_task(log_loop())
+
+
+LOG_CATS = {"error": (0, 1, 2, 3), "warning": (4,), "info": (5, 6), "debug": (7,)}
+
+
+def sev_cls(v):
+    return "crit" if v <= 2 else "err" if v == 3 else "warn" if v == 4 else "dbg" if v == 7 else "info"
+
+
+SEV_LABEL = {"crit": "krytyczny", "err": "błąd", "warn": "ostrzeżenie", "info": "info", "dbg": "debug"}
+
+
+@app.get("/api/routers/{rid}/logs", dependencies=[Depends(user)])
+def logs_api(request: Request, rid: int, sev: str = "", topic: str = "", q: str = "", limit: int = 300,
+             s: Session = Depends(db)):
+    limit = max(10, min(limit, 1000))
+    cond = [LogEntry.router_id == rid]
+    if sev in LOG_CATS:
+        cond.append(LogEntry.sev.in_(LOG_CATS[sev]))
+    topic = topic.strip().lower()
+    if topic:
+        cond.append(or_(LogEntry.topics == topic, LogEntry.topics.like(topic + ",%"),
+                        LogEntry.topics.like("%," + topic), LogEntry.topics.like("%," + topic + ",%")))
+    if q.strip():
+        cond.append(LogEntry.msg.ilike("%" + q.strip()[:100].replace("%", r"\%").replace("_", r"\_") + "%"))
+    rows = s.scalars(select(LogEntry).where(*cond).order_by(LogEntry.id.desc()).limit(limit)).all()
+    day = now() - dt.timedelta(hours=24)
+    counts = {k: 0 for k in LOG_CATS}
+    for v, c in s.execute(select(LogEntry.sev, func.count()).where(LogEntry.router_id == rid, LogEntry.ts > day)
+                          .group_by(LogEntry.sev)).all():
+        for k, vals in LOG_CATS.items():
+            if v in vals:
+                counts[k] += c
+    words = set()
+    for (tp,) in s.execute(select(LogEntry.topics).where(LogEntry.router_id == rid,
+                                                         LogEntry.ts > now() - dt.timedelta(days=7))
+                           .distinct().limit(1000)).all():
+        words.update(w for w in (tp or "").split(",") if w and w not in SEV_WORDS)
+    return {"items": [{"t": x.ts.isoformat(timespec="seconds"), "cls": sev_cls(x.sev), "label": SEV_LABEL[sev_cls(x.sev)],
+                       "topics": [w for w in x.topics.split(",") if w and w not in SEV_WORDS], "msg": x.msg}
+                      for x in rows],
+            "counts": counts, "topics": sorted(words),
+            "ack": (log_ack_time(request.state.user, rid) or dt.datetime(2000, 1, 1)).isoformat(timespec="seconds"),
+            "unread": unread_errors(s, request.state.user, rid)}
+
+
+def log_ack_time(u, rid):
+    try:
+        return dt.datetime.fromisoformat(get_prefs(u).get("logack", {}).get(str(rid), ""))
+    except (ValueError, TypeError):
+        return None
+
+
+def unread_errors(s, u, rid):
+    """Błędy (krytyczne + error) z ostatnich 24 h, które pojawiły się po ostatnim 'Zatwierdź' tego użytkownika."""
+    since = now() - dt.timedelta(hours=24)
+    ack = log_ack_time(u, rid)
+    if ack and ack > since:
+        since = ack
+    return s.scalar(select(func.count(LogEntry.id)).where(LogEntry.router_id == rid, LogEntry.sev <= 3, LogEntry.ts > since))
+
+
+def unread_counts(s, u, rid):
+    """(błędy, ostrzeżenia) z ostatnich 24 h od ostatniego 'Zatwierdź' - do wskaźnika na stronie głównej."""
+    since = now() - dt.timedelta(hours=24)
+    ack = log_ack_time(u, rid)
+    if ack and ack > since:
+        since = ack
+    err = warn = 0
+    for v, c in s.execute(select(LogEntry.sev, func.count()).where(LogEntry.router_id == rid, LogEntry.sev <= 4,
+                                                                   LogEntry.ts > since).group_by(LogEntry.sev)).all():
+        if v <= 3:
+            err += c
+        else:
+            warn += c
+    return err, warn
+
+
+@app.post("/routers/{rid}/logack")
+def log_ack(rid: int, me: User = Depends(user), s: Session = Depends(db)):
+    p = get_prefs(me)
+    p.setdefault("logack", {})[str(rid)] = now().isoformat(timespec="seconds")
+    me.prefs = json.dumps(p)
+    s.commit()
+    return {"ok": True, "ack": p["logack"][str(rid)]}
+
+
+def parse_utc(v):
+    """ISO z przeglądarki (np. 2026-10-01T08:00:00.000Z) -> naiwny datetime UTC."""
+    try:
+        d = dt.datetime.fromisoformat((v or "").strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return d.astimezone(dt.timezone.utc).replace(tzinfo=None) if d.tzinfo else d
+
+
+@app.get("/api/routers/{rid}/logs/export")
+def logs_export(rid: int, start: str, end: str, fmt: str = "csv", sev: str = "", topic: str = "", q: str = "",
+                me: User = Depends(user), s: Session = Depends(db)):
+    from zoneinfo import ZoneInfo
+    r = s.get(Router, rid)
+    a, b = parse_utc(start), parse_utc(end)
+    if not r or not a or not b or b <= a:
+        raise HTTPException(400, "Niepoprawny zakres dat.")
+    cond = [LogEntry.router_id == rid, LogEntry.ts >= a, LogEntry.ts <= b]
+    if sev in LOG_CATS:
+        cond.append(LogEntry.sev.in_(LOG_CATS[sev]))
+    topic = topic.strip().lower()
+    if topic:
+        cond.append(or_(LogEntry.topics == topic, LogEntry.topics.like(topic + ",%"),
+                        LogEntry.topics.like("%," + topic), LogEntry.topics.like("%," + topic + ",%")))
+    if q.strip():
+        cond.append(LogEntry.msg.ilike("%" + q.strip()[:100].replace("%", r"\%").replace("_", r"\_") + "%"))
+    try:
+        tz = ZoneInfo(LOCAL_TZ)
+    except Exception:
+        tz = dt.timezone.utc
+    loc = lambda d: d.replace(tzinfo=dt.timezone.utc).astimezone(tz).strftime("%Y-%m-%d %H:%M:%S")
+    log(s, "eksport logów", "%s: %s - %s" % (r.name, loc(a), loc(b)))
+    s.commit()
+    name = re.sub(r"[^\w.-]", "_", r.name)
+    fname = "logi-%s-%s-%s.%s" % (name, loc(a)[:16].replace(" ", "_").replace(":", ""), loc(b)[:16].replace(" ", "_").replace(":", ""),
+                                  "csv" if fmt == "csv" else "txt")
+
+    def gen():
+        with Session(engine) as s2:
+            if fmt == "csv":
+                yield "\ufeffczas;waga;tematy;wiadomosc\r\n"
+            rows = s2.execute(select(LogEntry.ts, LogEntry.sev, LogEntry.topics, LogEntry.msg).where(*cond)
+                              .order_by(LogEntry.ts).limit(500000).execution_options(yield_per=2000))
+            for ts, sv, tp, msg in rows:
+                lab = SEV_LABEL[sev_cls(sv)]
+                if fmt == "csv":
+                    buf = io.StringIO()
+                    csv.writer(buf, delimiter=";").writerow([loc(ts), lab, tp, msg])
+                    yield buf.getvalue().replace("\n", "\r\n") if not buf.getvalue().endswith("\r\n") else buf.getvalue()
+                else:
+                    yield "%s %-11s %-30s %s\n" % (loc(ts), lab, tp, msg)
+
+    return StreamingResponse(gen(), media_type="text/csv; charset=utf-8" if fmt == "csv" else "text/plain; charset=utf-8",
+                             headers={"Content-Disposition": 'attachment; filename="%s"' % fname})
+
+
+LIVE_HIST = {}   # MAC -> [(ts, sygnał, prędkość Mb/s, jakość, interfejs)] - ostatnie ~30-45 min, w pamięci
+LIVE_GW = {}     # router_id -> (ts, rtt ms, utrata %, brama)
+
+
+@app.post("/routers/{rid}/live", dependencies=[Depends(admin)])
+def set_live(rid: int, minutes: int = Form(15), s: Session = Depends(db)):
+    """Włącza/wyłącza tryb ustawiania. Włączenie obejmuje też kontrolery CAPsMAN (to one widzą klientów Wi-Fi AP)."""
+    r = s.get(Router, rid)
+    if not r:
+        raise HTTPException(404)
+    minutes = minutes if minutes in (0, 5, 15, 30) else 15
+    until = now() + dt.timedelta(minutes=minutes) if minutes else None
+    targets = {r.id: r}
+    if until:
+        for x in s.scalars(select(Router)).all():
+            if "CAPsMAN serwer" in (sys_info(s, x)["role"] or ""):
+                targets[x.id] = x
+    else:
+        targets = {x.id: x for x in s.scalars(select(Router)).all() if x.live}
+        targets[r.id] = r
+    for x in targets.values():
+        x.live_until = until
+    log(s, "tryb ustawiania", "%s: %s" % (", ".join(x.name for x in targets.values()), "%d min" % minutes if minutes else "wyłączony"))
+    s.commit()
+    return {"ok": True}
+
+
+@app.post("/api/live")
+async def live_in(request: Request, t: str):
+    raw = (await request.body()).decode("utf-8", "replace")
+
+    def store():
+        with Session(engine) as s:
+            r = get_router(s, t)
+            d = parse_body(raw, r.name)
+            recv = num(d.get("recv"))
+            LIVE_GW[r.id] = (now(), parse_rtt(d.get("rtt")), None if recv is None else round((4 - recv) * 25),
+                             str(d.get("gw", ""))[:45])
+            return {"ok": True, "live": 1 if r.live else 0}
+    return await run_in_threadpool(store)
+
+
+@app.get("/live", dependencies=[Depends(user)])
+def live_page(request: Request, rid: int = 0, s: Session = Depends(db)):
+    routers = ordered_routers(s)
+    return templates.TemplateResponse(request, "live.html", {"routers": routers, "rid": rid or (routers[0].id if routers else 0)})
+
+
+@app.get("/api/live/state", dependencies=[Depends(user)])
+def live_state(mac: str = "", s: Session = Depends(db)):
+    routers = ordered_routers(s)
+    n = now()
+    rts = []
+    for r in routers:
+        g = LIVE_GW.get(r.id)
+        fresh = g and (n - g[0]).total_seconds() < 30
+        rts.append({"id": r.id, "name": r.name, "live": r.live, "left": int((r.live_until - n).total_seconds()) if r.live else 0,
+                    "gw": g[3] if g else "", "gw_rtt": g[1] if fresh else None, "gw_loss": g[2] if fresh else None})
+    names = {r.id: r.name for r in routers}
+    clients = {}
+    for row in s.scalars(select(Inv).where(Inv.kind.in_(("wifi", "wireless")),
+                                           Inv.updated > n - dt.timedelta(minutes=5))).all():
+        try:
+            d = json.loads(row.data)
+        except ValueError:
+            continue
+        k = row.key.upper()
+        if k in clients and clients[k]["_u"] >= row.updated:
+            continue
+        clients[k] = {"_u": row.updated, "mac": k, "router": names.get(row.router_id, ""),
+                      "iface": d.get("interface") or d.get("iface", ""), **wifi_quality(d),
+                      "age": int((n - row.updated).total_seconds())}
+    leases = {}
+    for row in s.scalars(select(Inv).where(Inv.kind == "dhcp")).all():
+        try:
+            d = json.loads(row.data)
+        except ValueError:
+            continue
+        leases[row.key.upper()] = d
+    out = []
+    for c in clients.values():
+        l = leases.get(c["mac"], {})
+        c["name"] = l.get("comment") or l.get("host") or c["mac"]
+        c["ip"] = l.get("ip", "")
+        c.pop("_u")
+        out.append(c)
+    out.sort(key=lambda c: ((c["q"] if c["q"] is not None else -1), c["signal"] if c["signal"] is not None else -999))
+    hist = []
+    mac = mac.upper()
+    if mac in LIVE_HIST:
+        hist = [{"t": h[0].isoformat(timespec="seconds"), "s": h[1], "r": h[2], "q": h[3], "i": h[4]}
+                for h in LIVE_HIST[mac] if (n - h[0]).total_seconds() < 1800]
+    spots = [{"id": x.id, "t": x.ts.isoformat(timespec="seconds"), "label": x.label, "device": x.device, "iface": x.iface,
+              "signal": x.signal, "rate": x.rate, "q": x.quality, "qlabel": QLABEL.get(x.quality, "-")}
+             for x in s.scalars(select(LiveSpot).order_by(LiveSpot.id.desc()).limit(30)).all()]
+    return {"routers": rts, "clients": out, "hist": hist, "spots": spots}
+
+
+@app.post("/api/live/spot", dependencies=[Depends(user)])
+def live_spot(mac: str = Form(), label: str = Form(), s: Session = Depends(db)):
+    mac = mac.upper()
+    h = [x for x in LIVE_HIST.get(mac, []) if (now() - x[0]).total_seconds() <= 30]
+    if not h:
+        raise HTTPException(400, "Brak pomiarów z ostatnich 30 s dla tego urządzenia.")
+    avg = lambda vals: (sum(vals) / len(vals)) if vals else None
+    sigs, rts, qs = [x[1] for x in h if x[1] is not None], [x[2] for x in h if x[2]], [x[3] for x in h if x[3] is not None]
+    lease = s.scalar(select(Inv).where(Inv.kind == "dhcp", func.upper(Inv.key) == mac))
+    dev = mac
+    if lease:
+        try:
+            ld = json.loads(lease.data)
+            dev = ld.get("comment") or ld.get("host") or mac
+        except ValueError:
+            pass
+    s.add(LiveSpot(ts=now(), mac=mac, label=re.sub(r"[^\w .,\-/]", "", label)[:60] or "miejsce", device=dev[:80],
+                   iface=h[-1][4], signal=round(avg(sigs), 1) if sigs else None, rate=round(avg(rts)) if rts else None,
+                   quality=round(avg(qs)) if qs else None))
+    s.commit()
+    return {"ok": True}
+
+
+@app.post("/api/live/spot/{sid}/delete", dependencies=[Depends(user)])
+def live_spot_del(sid: int, s: Session = Depends(db)):
+    s.execute(delete(LiveSpot).where(LiveSpot.id == sid))
+    s.commit()
+    return {"ok": True}
+
+
+@app.post("/routers/{rid}/edge", dependencies=[Depends(admin)])
+def set_edge(rid: int, edge: str = Form(""), s: Session = Depends(db)):
+    r = s.get(Router, rid)
+    if r:
+        r.edge = edge == "1"
+        log(s, "router brzegowy", "%s: %s" % (r.name, "tak" if r.edge else "nie"))
+        s.commit()
+    return RedirectResponse("/routers/%d#cfg" % rid, 303)
+
+
+@app.post("/api/speedtest")
+async def speedtest_in(request: Request, t: str):
+    raw = (await request.body()).decode("utf-8", "replace")
+
+    def store():
+        with Session(engine) as s:
+            r = get_router(s, t)
+            d = parse_body(raw, r.name)
+            secs = (parse_rtt(d.get("sec")) or 0) / 1000
+            nbytes = num(d.get("bytes")) or 0
+            ok = d.get("ok") in (True, "true") and secs > 0 and nbytes > 0
+            s.add(SpeedTest(router_id=r.id, ts=now(), ok=ok, secs=secs or None, source="router",
+                            down_mbps=round(nbytes * 8 / secs / 1e6, 1) if ok else None))
+            s.commit()
+            return {"ok": True}
+    return await run_in_threadpool(store)
+
+
+# ---------- test prędkości z serwera aplikacji (wiele równoległych połączeń, pobieranie + wysyłanie + ping) ----------
+SPD_STREAMS = int(os.getenv("SPEEDTEST_STREAMS", "6"))
+SPD_DOWN = os.getenv("SPEEDTEST_DOWN_URL", "https://speed.cloudflare.com/__down")
+SPD_UP = os.getenv("SPEEDTEST_UP_URL", "https://speed.cloudflare.com/__up")
+SPD_STATE = {"running": False, "phase": "", "rid": None}
+
+
+async def _measure(worker, seconds, warm=1.5):
+    """Uruchamia SPD_STREAMS równoległych połączeń; liczy przepływ po rozgrzewce (pomija start TCP)."""
+    cnt = [0]
+    t0 = time.monotonic()
+    end = t0 + seconds
+    async with httpx.AsyncClient(timeout=httpx.Timeout(seconds + 10), http2=False,
+                                 limits=httpx.Limits(max_connections=SPD_STREAMS + 2)) as c:
+        tasks = [asyncio.create_task(worker(c, end, cnt)) for _ in range(SPD_STREAMS)]
+        await asyncio.sleep(warm)
+        b0, w0 = cnt[0], time.monotonic()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        b1, w1 = cnt[0], min(time.monotonic(), end)
+    return (b1 - b0) * 8 / max(w1 - w0, 0.1) / 1e6 if b1 > b0 else None
+
+
+async def _dl(c, end, cnt):
+    while time.monotonic() < end:
+        async with c.stream("GET", SPD_DOWN, params={"bytes": 100_000_000}) as r:
+            async for ch in r.aiter_bytes(65536):
+                cnt[0] += len(ch)
+                if time.monotonic() >= end:
+                    return
+
+
+async def _ul(c, end, cnt):
+    block = os.urandom(256 * 1024)
+
+    async def body():
+        sent = 0
+        while time.monotonic() < end and sent < 50_000_000:
+            cnt[0] += len(block)
+            sent += len(block)
+            yield block
+    while time.monotonic() < end:
+        await c.post(SPD_UP, content=body(), headers={"Content-Type": "application/octet-stream"})
+
+
+async def _ping():
+    vals = []
+    async with httpx.AsyncClient(timeout=10) as c:
+        await c.get(SPD_DOWN, params={"bytes": 0})
+        for _ in range(8):
+            t = time.monotonic()
+            await c.get(SPD_DOWN, params={"bytes": 0})
+            vals.append((time.monotonic() - t) * 1000)
+    vals.sort()
+    return round(vals[len(vals) // 2], 1) if vals else None
+
+
+import shutil
+
+OOKLA_BIN = shutil.which("speedtest")
+OOKLA_ARGS = ["--accept-license", "--accept-gdpr"]
+
+
+async def _run(args, timeout):
+    p = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    try:
+        out, err = await asyncio.wait_for(p.communicate(), timeout)
+    except asyncio.TimeoutError:
+        p.kill()
+        raise RuntimeError("przekroczony czas testu")
+    return p.returncode, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
+
+
+async def ookla_test(server_id=""):
+    """Oficjalny test speedtest.net (Ookla Speedtest CLI): pobieranie, wysyłanie, ping, jitter, utrata, serwer, link."""
+    args = [OOKLA_BIN, *OOKLA_ARGS, "-f", "json", "-p", "no"]
+    if server_id.isdigit():
+        args += ["-s", server_id]
+    code, out, err = await _run(args, 180)
+    line = next((l for l in out.splitlines()[::-1] if l.strip().startswith("{") and '"type":"result"' in l.replace(" ", "")), "")
+    if not line:
+        msg = (err or out).strip().splitlines()
+        raise RuntimeError((msg[-1] if msg else "brak wyniku (kod %s)" % code)[:180])
+    d = json.loads(line)
+    srv = d.get("server") or {}
+    bw = lambda k: (d.get(k) or {}).get("bandwidth")
+    return {"down": bw("download") * 8 / 1e6 if bw("download") else None, "up": bw("upload") * 8 / 1e6 if bw("upload") else None,
+            "ping": (d.get("ping") or {}).get("latency"), "jitter": (d.get("ping") or {}).get("jitter"),
+            "loss": d.get("packetLoss"), "url": (d.get("result") or {}).get("url"),
+            "server": ", ".join(x for x in (srv.get("name"), srv.get("location")) if x)[:120] or None}
+
+
+@app.get("/api/speedtest/servers", dependencies=[Depends(admin)])
+async def ookla_servers():
+    if not OOKLA_BIN:
+        return {"available": False, "servers": []}
+    try:
+        code, out, err = await _run([OOKLA_BIN, *OOKLA_ARGS, "-L", "-f", "json"], 40)
+        d = json.loads(out.strip().splitlines()[-1])
+        return {"available": True, "servers": [{"id": x.get("id"), "name": "%s, %s (%s)" % (x.get("name"), x.get("location"), x.get("country"))}
+                                               for x in d.get("servers", [])]}
+    except Exception as e:
+        return {"available": True, "servers": [], "error": str(e)[:200]}
+
+
+async def server_speedtest(rid):
+    if SPD_STATE["running"]:
+        return
+    SPD_STATE.update(running=True, rid=rid)
+    res = {"ok": False, "down": None, "up": None, "ping": None, "jitter": None, "loss": None, "server": None, "url": None}
+    src, error = "server", None
+    t0 = time.monotonic()
+
+    def cfg():
+        with Session(engine) as s:
+            return sget(s, "speed_engine", "ookla"), sget(s, "speed_server", "")
+    eng, sid = await run_in_threadpool(cfg)
+    try:
+        if eng != "cloudflare" and OOKLA_BIN:
+            src = "ookla"
+            SPD_STATE["phase"] = "Speedtest by Ookla (ok. 30 s)"
+            try:
+                res.update(await ookla_test(sid))
+            except Exception as e:
+                error = "Ookla: %s" % e
+                print("speedtest ookla: %s" % e, flush=True)
+        if eng == "cloudflare" or not OOKLA_BIN or not res["down"]:
+            if src == "ookla":
+                src = "server"
+            SPD_STATE["phase"] = "ping"
+            res["ping"] = await _ping()
+            SPD_STATE["phase"] = "pobieranie"
+            res["down"] = await _measure(_dl, 10)
+            SPD_STATE["phase"] = "wysyłanie"
+            res["up"] = await _measure(_ul, 8)
+            res["server"] = "Cloudflare"
+        res["ok"] = bool(res["down"])
+    except Exception as e:
+        error = (error + "; " if error else "") + str(e)
+        print("speedtest: %s" % e, flush=True)
+    finally:
+        r1 = lambda v: round(v, 1) if v is not None else None
+
+        def store():
+            with Session(engine) as s:
+                s.add(SpeedTest(router_id=rid, ts=now(), ok=res["ok"], source=src, secs=round(time.monotonic() - t0, 1),
+                                down_mbps=r1(res["down"]), up_mbps=r1(res["up"]), ping_ms=r1(res["ping"]),
+                                jitter_ms=r1(res["jitter"]), loss=r1(res["loss"]), server=res["server"],
+                                url=res["url"], error=(error or "")[:200] or None))
+                s.commit()
+        await run_in_threadpool(store)
+        SPD_STATE.update(running=False, phase="", rid=None)
+
+
+def speed_due():
+    """Czy pora na nocny test z serwera (SPEEDTEST_TIME wg strefy TZ, raz na dobę)."""
+    from zoneinfo import ZoneInfo
+    try:
+        loc = dt.datetime.now(ZoneInfo(LOCAL_TZ))
+    except Exception:
+        loc = dt.datetime.now()
+    hh, mm = (int(x) for x in SPEED_TIME.split(":")[:2])
+    if (loc.hour, loc.minute) != (hh, mm):
+        return None
+    with Session(engine) as s:
+        rid = sget(s, "speed_router")
+        if not rid.isdigit() or sget(s, "speed_last") == loc.date().isoformat():
+            return None
+        sset(s, "speed_last", loc.date().isoformat())
+        s.commit()
+        return int(rid)
+
+
+@app.post("/routers/{rid}/speedtest", dependencies=[Depends(admin)])
+async def speedtest_now(rid: int):
+    def check():
+        with Session(engine) as s:
+            return sget(s, "speed_router") == str(rid)
+    if not await run_in_threadpool(check):
+        raise HTTPException(400, "Test z serwera jest dostępny tylko dla routera wskazanego w Ustawieniach.")
+    if not SPD_STATE["running"]:
+        asyncio.create_task(server_speedtest(rid))
+    return {"ok": True}
+
+
+@app.post("/settings/speed", dependencies=[Depends(admin)])
+def settings_speed(request: Request, rid: str = Form(""), engine_: str = Form("ookla", alias="engine"),
+                   server: str = Form(""), s: Session = Depends(db)):
+    sset(s, "speed_router", rid if rid.isdigit() else "")
+    sset(s, "speed_engine", "cloudflare" if engine_ == "cloudflare" else "ookla")
+    sset(s, "speed_server", server if server.isdigit() else "")
+    r = s.get(Router, int(rid)) if rid.isdigit() else None
+    log(s, "test prędkości", "z serwera za routerem: %s" % (r.name if r else "wyłączony"))
+    s.commit()
+    return settings_view(request, s, "Zapisano. %s" % (
+        "Wklej ponownie komendę konfiguracyjną na tym routerze (zostanie wyłączony słabszy test na routerze)." if r else ""), True)
+
+
+@app.get("/api/routers/{rid}/quality", dependencies=[Depends(user)])
+def quality_api(rid: int, hours: int = 24, s: Session = Depends(db)):
+    """Jakość łącza: szeregi czasowe sond, dostępność internetu, przerwy, testy prędkości."""
+    hours = max(1, min(hours, 720))
+    b = func.floor(extract("epoch", Metric.ts) / buckets(hours))
+    cols = [Metric.inet_rtt, Metric.inet_jit, Metric.inet_loss, Metric.gw_rtt, Metric.gw_jit, Metric.gw_loss,
+            Metric.dns_ms, Metric.http_ms]
+    rows = s.execute(select(func.min(Metric.ts), *[func.avg(c) for c in cols])
+                     .where(Metric.router_id == rid, Metric.ts > now() - dt.timedelta(hours=hours))
+                     .group_by(b).order_by(b)).all()
+    rnd = lambda x: round(x, 1)
+    keys = ["inet_rtt", "inet_jit", "inet_loss", "gw_rtt", "gw_jit", "gw_loss", "dns", "http"]
+    out = {"t": [x[0].isoformat(timespec="seconds") for x in rows]}
+    for i, k in enumerate(keys):
+        out[k] = [fl(x[i + 1], rnd) for x in rows]
+    avail = {}
+    for label, h in (("24h", 24), ("7d", 168), ("30d", 720)):
+        tot, upc = s.execute(select(func.count(Metric.id), func.count(Metric.id).filter(Metric.inet_up == True))  # noqa: E712
+                             .where(Metric.router_id == rid, Metric.inet_up.is_not(None),
+                                    Metric.ts > now() - dt.timedelta(hours=h))).one()
+        avail[label] = round(upc * 100 / tot, 2) if tot else None
+    first = s.scalar(select(func.min(Metric.ts)).where(Metric.router_id == rid, Metric.inet_up.is_not(None)))
+    # przerwy i problemy: brak internetu (żaden cel ICMP nie odpowiada) albo działa ping, ale nie DNS / HTTP
+    outages, start, kind = [], None, None
+    for ts, iu, du, hu in s.execute(select(Metric.ts, Metric.inet_up, Metric.dns_up, Metric.http_up).where(
+            Metric.router_id == rid, Metric.inet_up.is_not(None), Metric.ts > now() - dt.timedelta(days=7))
+            .order_by(Metric.ts)).all():
+        k = "brak internetu" if iu is False else "działa ping, nie działa DNS" if du is False else \
+            "działa ping i DNS, nie działa HTTP" if hu is False else None
+        if k != kind:
+            if kind is not None:
+                outages.append((start, ts, kind))
+            start, kind = (ts, k) if k else (None, None)
+    if kind is not None:
+        outages.append((start, None, kind))
+    outages = [{"from": a.isoformat(timespec="seconds"), "to": z.isoformat(timespec="seconds") if z else None,
+                "min": round(((z or now()) - a).total_seconds() / 60, 1), "type": k} for a, z, k in outages][-20:][::-1]
+    sp = s.scalars(select(SpeedTest).where(SpeedTest.router_id == rid).order_by(SpeedTest.ts.desc()).limit(60)).all()[::-1]
+    return {**out, "avail": avail, "outages": outages,
+            "since": first.isoformat(timespec="seconds") if first else None,
+            "speed": [{"t": x.ts.isoformat(timespec="seconds"), "ok": x.ok, "down": x.down_mbps, "up": x.up_mbps,
+                       "ping": x.ping_ms, "jitter": x.jitter_ms, "loss": x.loss, "server": x.server, "url": x.url,
+                       "err": x.error, "src": x.source or "router"} for x in sp],
+            "speed_running": SPD_STATE["running"] and SPD_STATE["rid"] == rid, "speed_phase": SPD_STATE["phase"]}
+
+
+@app.post("/routers/{rid}/logip", dependencies=[Depends(admin)])
+def set_logip(rid: int, ip: str = Form(""), s: Session = Depends(db)):
+    r = s.get(Router, rid)
+    if r:
+        ip = ip.strip()
+        if ip:
+            try:
+                ipaddress.ip_address(ip)
+            except ValueError:
+                return RedirectResponse("/routers/%d#cfg" % rid, 303)
+            r.log_ip, r.log_ip_fixed = ip, True
+        else:
+            r.log_ip_fixed = False
+        log(s, "adres logów", "%s: %s" % (r.name, ip or "auto"))
+        s.commit()
+        refresh_ipmap()
+    return RedirectResponse("/routers/%d#cfg" % rid, 303)
+
+
+# ---------- interfejsy, transfer, klienci (API dla wykresów) ----------
+IF_GROUPS = [("Ethernet", ("ether", "sfp", "combo", "qsfp")), ("VLAN", ("vlan",)), ("Bridge", ("bridge",)),
+             ("Wi-Fi", ("wlan", "wifi", "cap", "wifiwave2")), ("PPPoE", ("pppoe",)),
+             ("VPN i tunele", ("wg", "l2tp", "ovpn", "sstp", "pptp", "gre", "eoip", "ipip", "6to4", "vxlan", "ipsec")),
+             ("LTE", ("lte",)), ("Bonding", ("bond",))]
+
+
+def if_group(name, typ):
+    key = (typ or "").lower() or name.lower()
+    for g, prefixes in IF_GROUPS:
+        if any(key.startswith(p) for p in prefixes):
+            return g
+    if not typ:  # stary skrypt bez typu: zgadnij po nazwie
+        for g, prefixes in IF_GROUPS:
+            if any(p in name.lower() for p in prefixes):
+                return g
+    return "Inne"
+
+
+@app.get("/api/routers/{rid}/ifaces/overview", dependencies=[Depends(user)])
+def ifaces_overview(rid: int, s: Session = Depends(db)):
+    r = s.get(Router, rid)
+    if not r:
+        raise HTTPException(404)
+    names, wan, _ = wan_info(s, r)
+    last = s.scalar(select(func.max(IfaceMetric.ts)).where(IfaceMetric.router_id == rid))
+    curr = {x.name: x for x in s.scalars(select(IfaceMetric).where(IfaceMetric.router_id == rid,
+                                                                   IfaceMetric.ts == last))} if last else {}
+    b = func.floor(extract("epoch", IfaceMetric.ts) / 120)
+    spark = {}
+    for name, _, rx, tx in s.execute(select(IfaceMetric.name, b, func.avg(IfaceMetric.rx_bps), func.avg(IfaceMetric.tx_bps))
+                                     .where(IfaceMetric.router_id == rid, IfaceMetric.ts > now() - dt.timedelta(hours=1))
+                                     .group_by(IfaceMetric.name, b).order_by(IfaceMetric.name, b)).all():
+        sp = spark.setdefault(name, {"rx": [], "tx": []})
+        sp["rx"].append(mb(fl(rx)))
+        sp["tx"].append(mb(fl(tx)))
+    try:
+        types = json.loads(r.iface_types or "{}")
+    except ValueError:
+        types = {}
+    groups = {}
+    for name in names:
+        x = curr.get(name)
+        groups.setdefault(if_group(name, types.get(name)), []).append({
+            "name": name, "type": types.get(name, ""), "wan": name == wan,
+            "rx": mb(x.rx_bps) if x else None, "tx": mb(x.tx_bps) if x else None,
+            "spark": spark.get(name, {"rx": [], "tx": []})})
+    order = [g for g, _ in IF_GROUPS] + ["Inne"]
+    out = []
+    for g in order:
+        if g in groups:
+            items = sorted(groups[g], key=lambda i: -((i["rx"] or 0) + (i["tx"] or 0)))
+            out.append({"group": g, "items": items, "rx": round(sum(i["rx"] or 0 for i in items), 3),
+                        "tx": round(sum(i["tx"] or 0 for i in items), 3)})
+    return {"groups": out}
+
+
+@app.get("/api/routers/{rid}/traffic", dependencies=[Depends(user)])
+def traffic_api(rid: int, days: int = 30, s: Session = Depends(db)):
+    days = max(7, min(days, 400))
+    rows = s.scalars(select(TrafficDay).where(TrafficDay.router_id == rid).order_by(TrafficDay.day)).all()
+    gb = lambda v: round((v or 0) / 1e9, 2)
+    daily = [{"day": x.day.isoformat(), "rx": gb(x.rx), "tx": gb(x.tx)} for x in rows][-days:]
+    months = {}
+    for x in rows:
+        k = x.day.strftime("%Y-%m")
+        m = months.setdefault(k, [0, 0])
+        m[0] += x.rx
+        m[1] += x.tx
+    mlist = [{"month": k, "rx": gb(v[0]), "tx": gb(v[1])} for k, v in sorted(months.items())][-12:]
+    return {"daily": daily, "months": mlist, "iface": rows[-1].iface if rows else ""}
+
+
+@app.get("/api/routers/{rid}/clients", dependencies=[Depends(user)])
+def clients_api(rid: int, hours: int = 24, s: Session = Depends(db)):
+    hours = max(1, min(hours, 720))
+    b = func.floor(extract("epoch", ClientStat.ts) / buckets(hours))
+    rows = s.execute(select(func.min(ClientStat.ts), func.avg(ClientStat.dev_on), func.avg(ClientStat.dev_total),
+                            func.avg(ClientStat.wifi), func.avg(ClientStat.vpn_on))
+                     .where(ClientStat.router_id == rid, ClientStat.ts > now() - dt.timedelta(hours=hours))
+                     .group_by(b).order_by(b)).all()
+    return {"t": [x[0].isoformat(timespec="seconds") for x in rows],
+            "dev_on": [fl(x[1], round) for x in rows], "dev_total": [fl(x[2], round) for x in rows],
+            "wifi": [fl(x[3], round) for x in rows], "vpn_on": [fl(x[4], round) for x in rows]}
+
+
+# ---------- analiza logów (tłumacz komunikatów RouterOS) ----------
+MGMT_PORTS = {"21": "FTP", "22": "SSH", "23": "Telnet", "80": "WWW", "443": "WWW (HTTPS)", "8291": "Winbox",
+              "8728": "API", "8729": "API-SSL", "3389": "RDP (Pulpit zdalny)", "53": "DNS", "161": "SNMP"}
+SVC_NAMES = {"ssh": "SSH", "telnet": "Telnet", "winbox": "Winbox", "web": "panelu WWW (WebFig)", "www": "panelu WWW (WebFig)",
+             "api": "API", "ftp": "FTP", "rest-api": "REST API", "local": "konsoli lokalnej", "dude": "The Dude"}
+SVC_PLAIN = {"web": "WWW / WebFig", "www": "WWW / WebFig", "local": "konsola", "rest-api": "REST API"}
+WIFI_REASONS = [
+    ("extensive data loss", "dużo utraconych pakietów: słaby sygnał lub zakłócenia"),
+    ("group key exchange timeout", "klient nie odpowiedział przy wymianie kluczy (często uśpiony telefon lub stary sterownik)"),
+    ("4-way handshake timeout", "nieudane uwierzytelnienie: zwykle błędne hasło Wi-Fi albo problem ze sterownikiem klienta"),
+    ("handshake timeout", "nieudane uwierzytelnienie: zwykle błędne hasło Wi-Fi albo problem ze sterownikiem klienta"),
+    ("inactivity", "klient był nieaktywny (np. uśpiony) i został rozłączony"),
+    ("received deauth", "klient sam się rozłączył (np. wyłączył Wi-Fi albo przeszedł do innej sieci)"),
+    ("received disassoc", "klient sam się rozłączył (np. wyłączył Wi-Fi albo przeszedł do innej sieci)"),
+    ("roamed", "klient przeszedł do innego punktu dostępowego (roaming)"),
+    ("ok", "normalne rozłączenie"),
+]
+
+
+def is_public(ip):
+    try:
+        a = ipaddress.ip_address(ip.split("%")[0])
+        return not (a.is_private or a.is_loopback or a.is_link_local)
+    except ValueError:
+        return False
+
+
+def _r(rx):
+    return re.compile(rx, re.I)
+
+
+# Każda reguła: (id, wyrażenie, funkcja(match, topics) -> dict albo None)
+# dict: title, level ('bad'|'warn'|'info'), explain, advice, det {etykieta: wartość}
+def _login_fail(m, tp):
+    ip, svc = m.group("ip"), SVC_NAMES.get(m.group("svc").lower(), m.group("svc"))
+    if is_public(ip):
+        return {"id": "login_fail_wan", "level": "bad", "title": "Ktoś z internetu próbuje zalogować się do %s" % svc,
+                "explain": "Nieudane próby logowania z adresów spoza Twojej sieci. Zwykle to automatyczne boty, które "
+                           "zgadują hasła (atak brute force) na popularnych usługach.",
+                "advice": "Ogranicz usługę do sieci lokalnej, np. `/ip service set %s address=192.168.88.0/24`, wyłącz nieużywane "
+                          "usługi (`/ip service print`), używaj silnego hasła i innej nazwy użytkownika niż admin. Sprawdź, "
+                          "czy firewall blokuje ruch przychodzący z WAN do routera." % m.group("svc").lower(),
+                "det": {"Adres": ip, "Użytkownik": m.group("user"), "Usługa": svc}}
+    return {"id": "login_fail_lan", "level": "warn", "title": "Nieudane logowanie do %s z sieci lokalnej" % svc,
+            "explain": "Ktoś w Twojej sieci wpisał błędne hasło lub login. Pojedyncze przypadki to zwykle pomyłka; "
+                       "wiele prób z jednego adresu może oznaczać zainfekowane urządzenie lub próbę włamania od środka.",
+            "advice": "Sprawdź, jakie urządzenie ma ten adres (zakładka Urządzenia). Jeśli to nie Ty, zmień hasło routera.",
+            "det": {"Adres": ip, "Użytkownik": m.group("user"), "Usługa": svc}}
+
+
+def _login_ok(m, tp):
+    ip, k = m.group("ip"), m.group("svc").lower()
+    svc = SVC_PLAIN.get(k) or SVC_NAMES.get(k, m.group("svc"))
+    if is_public(ip):
+        return {"id": "login_ok_wan", "level": "warn", "title": "Logowanie do routera z internetu (%s)" % svc,
+                "explain": "Ktoś zalogował się do routera z adresu publicznego, czyli spoza Twojej sieci.",
+                "advice": "Upewnij się, że to Ty (np. zdalnie z pracy). Jeśli nie, natychmiast zmień hasło i ogranicz dostęp "
+                          "do usług zarządzania do sieci lokalnej lub VPN.",
+                "det": {"Adres": ip, "Użytkownik": m.group("user"), "Usługa": svc}}
+    return {"id": "login_ok", "level": "info", "title": "Logowanie do routera (%s)" % svc,
+            "explain": "Udane logowanie z sieci lokalnej. To normalne przy zarządzaniu routerem, również przez Winbox.",
+            "advice": "", "det": {"Użytkownik": m.group("user"), "Adres": ip}}
+
+
+def _logout(m, tp):
+    return {"id": "logout", "level": "info", "title": "Wylogowanie z routera",
+            "explain": "Sesja zarządzania została zakończona.", "advice": "", "det": {"Użytkownik": m.group("user")}}
+
+
+def _cfg_change(m, tp):
+    return {"id": "cfg_change", "level": "info", "title": "Zmiana konfiguracji routera",
+            "explain": "Ktoś zmienił ustawienia routera (dodał, zmienił lub usunął element konfiguracji). "
+                       "To wpis kontrolny: pozwala sprawdzić, kto i kiedy coś zmieniał.",
+            "advice": "Jeśli nie rozpoznajesz zmiany, sprawdź ją w `/log print where topics~\"system\"` i rozważ zmianę hasła.",
+            "det": {"Kto": m.group("user"), "Co": m.group("what")[:60]}}
+
+
+def _dhcp_assigned(m, tp):
+    return {"id": "dhcp_assigned", "level": "info", "title": "DHCP przydzielił adres urządzeniu",
+            "explain": "Urządzenie podłączyło się do sieci i dostało adres IP. Normalne zdarzenie.",
+            "advice": "", "det": {"Urządzenie": (m.group("host") or "").strip() or m.group("mac"), "Adres": m.group("ip")}}
+
+
+def _dhcp_deassigned(m, tp):
+    return {"id": "dhcp_deassigned", "level": "info", "title": "Urządzenie zwolniło adres DHCP",
+            "explain": "Dzierżawa adresu wygasła albo urządzenie odłączyło się od sieci. Normalne zdarzenie.",
+            "advice": "", "det": {"Adres": m.group("ip"), "MAC": m.group("mac")}}
+
+
+def _dhcp_nosuccess(m, tp):
+    return {"id": "dhcp_fail", "level": "warn", "title": "Urządzenie nie przyjmuje adresu z DHCP",
+            "explain": "Serwer DHCP proponuje adres, ale urządzenie go nie potwierdza. Przyczyną bywa słaby sygnał Wi-Fi, "
+                       "błędna konfiguracja klienta, drugi serwer DHCP w sieci albo wyczerpana pula adresów.",
+            "advice": "Sprawdź pulę adresów (`/ip pool print`), czy w sieci nie ma drugiego routera z włączonym DHCP "
+                      "i jaki sygnał ma to urządzenie.", "det": {"MAC": m.group("mac")}}
+
+
+def _dhcp_pool(m, tp):
+    return {"id": "dhcp_pool", "level": "bad", "title": "Zabrakło wolnych adresów w puli DHCP",
+            "explain": "Nowe urządzenia nie dostaną adresu IP, bo wszystkie adresy z puli są zajęte.",
+            "advice": "Powiększ pulę (`/ip pool print`, potem `/ip pool set`) albo skróć czas dzierżawy (lease-time).",
+            "det": {}}
+
+
+def _conflict(m, tp):
+    return {"id": "ip_conflict", "level": "warn", "title": "Konflikt adresów IP w sieci",
+            "explain": "Dwa urządzenia używają tego samego adresu IP. Może to powodować zrywanie połączeń.",
+            "advice": "Znajdź urządzenie z ręcznie ustawionym adresem z zakresu DHCP i zmień mu adres lub dodaj statyczną dzierżawę.",
+            "det": {}}
+
+
+def _link_down(m, tp):
+    return {"id": "link_down", "level": "warn", "title": "Interfejs stracił połączenie (link down)",
+            "explain": "Port przestał widzieć drugie urządzenie: odłączony kabel, wyłączone urządzenie, restart switcha "
+                       "lub uszkodzony przewód. Częste naprzemienne down/up (\"flapping\") zwykle oznacza problem z kablem lub portem.",
+            "advice": "Jeśli powtarza się wiele razy na tym samym porcie, wymień kabel, sprawdź wtyczki i spróbuj innego portu.",
+            "det": {"Interfejs": m.group("iface")}}
+
+
+def _link_up(m, tp):
+    sp = (m.group("speed") or "").strip()
+    if re.match(r"^(10|100)M", sp):
+        return {"id": "link_slow", "level": "warn", "title": "Port połączony z obniżoną prędkością",
+                "explain": "Połączenie działa, ale tylko z prędkością %s zamiast 1 Gb/s. Najczęściej winny jest kabel "
+                           "z uszkodzoną żyłą, zbyt długi przewód albo stare urządzenie po drugiej stronie." % sp,
+                "advice": "Wymień kabel na sprawny (kat. 5e lub lepszy) i sprawdź ustawienia autonegocjacji portu.",
+                "det": {"Interfejs": m.group("iface"), "Prędkość": sp}}
+    return {"id": "link_up", "level": "info", "title": "Interfejs odzyskał połączenie (link up)",
+            "explain": "Port znowu widzi drugie urządzenie.", "advice": "", "det": {"Interfejs": m.group("iface")}}
+
+
+def _wifi_conn(m, tp):
+    return {"id": "wifi_conn", "level": "info", "title": "Klient połączył się z Wi-Fi",
+            "explain": "Urządzenie podłączyło się do sieci bezprzewodowej. Normalne zdarzenie.", "advice": "",
+            "det": {"Interfejs": m.group("iface"), "MAC": m.group("mac")}}
+
+
+def _wifi_disc(m, tp):
+    reason = (m.group("reason") or "").strip().lower()
+    why = next((txt for key, txt in WIFI_REASONS if key in reason), reason or "brak podanego powodu")
+    bad = any(k in reason for k in ("data loss", "handshake", "key exchange"))
+    return {"id": "wifi_disc_bad" if bad else "wifi_disc", "level": "warn" if bad else "info",
+            "title": "Klient rozłączony z Wi-Fi: " + why.split(":")[0],
+            "explain": "Powód podany przez router: %s." % why,
+            "advice": ("Jeśli dotyczy wciąż tych samych urządzeń: sprawdź siłę sygnału w zakładce Wi-Fi, odległość od AP "
+                       "i kanał radiowy. Przy błędach handshake sprawdź hasło zapisane na urządzeniu.") if bad else "",
+            "det": {"Interfejs": m.group("iface"), "MAC": m.group("mac")}}
+
+
+def _caps(m, tp):
+    up = "disconn" not in m.group(0).lower() and "lost" not in m.group(0).lower()
+    return {"id": "caps_up" if up else "caps_down", "level": "info" if up else "warn",
+            "title": "Punkt dostępowy dołączył do CAPsMAN" if up else "Punkt dostępowy odłączył się od CAPsMAN",
+            "explain": "AP (CAP) nawiązał połączenie z kontrolerem CAPsMAN." if up else
+                       "Kontroler CAPsMAN stracił kontakt z AP. Sieć Wi-Fi z tego AP mogła przestać działać.",
+            "advice": "" if up else "Sprawdź zasilanie AP (PoE), kabel i czy AP jest widoczny w sieci.", "det": {}}
+
+
+def _reboot_bad(m, tp):
+    return {"id": "reboot_unclean", "level": "bad", "title": "Router uruchomił się po nieprawidłowym wyłączeniu",
+            "explain": "Router nie został wyłączony w normalny sposób: najczęściej zanik zasilania, wyrwana wtyczka "
+                       "albo awaria (zawieszenie) systemu.",
+            "advice": "Jeśli powtarza się bez zaników prądu, sprawdź zasilacz, temperaturę i pobierz plik autosupout.rif "
+                      "z Files (raport awarii) dla wsparcia MikroTika. Rozważ zasilacz awaryjny (UPS).", "det": {}}
+
+
+def _reboot(m, tp):
+    return {"id": "reboot", "level": "warn", "title": "Router został zrestartowany",
+            "explain": "Router uruchomił się ponownie (ręcznie, po aktualizacji albo z harmonogramu).",
+            "advice": "Jeśli nie restartowałeś go Ty, sprawdź w logach, kto był zalogowany przed restartem.", "det": {}}
+
+
+def _script_fail(m, tp):
+    txt = m.group(0).lower()
+    if "502" in txt or "bad gateway" in txt:
+        why = "serwer aplikacji chwilowo nie odpowiadał (np. podczas aktualizacji)"
+    elif "timeout" in txt or "timed out" in txt or "connection refused" in txt or "could not connect" in txt:
+        why = "router nie mógł połączyć się z serwerem"
+    elif "bad command" in txt or "syntax error" in txt:
+        why = "skrypt zawiera polecenie nieobsługiwane przez tę wersję RouterOS"
+    else:
+        why = "skrypt zakończył się błędem"
+    return {"id": "script_fail", "level": "warn", "title": "Błąd skryptu: " + why,
+            "explain": "Skrypt uruchamiany na routerze (np. monitoring lub whitelista tej aplikacji) nie wykonał się poprawnie.",
+            "advice": "Pojedyncze błędy podczas aktualizacji aplikacji są normalne. Jeśli powtarzają się stale, wklej ponownie "
+                      "komendę konfiguracyjną (zakładka Konfiguracja) i sprawdź, czy router widzi serwer.", "det": {}}
+
+
+def _firewall(m, tp):
+    src, dst, dport, chain = m.group("src"), m.group("dst"), m.group("dport") or "", m.group("chain").lower()
+    svc = MGMT_PORTS.get(dport)
+    if chain == "input" and is_public(src) and svc:
+        return {"id": "fw_mgmt_probe", "level": "warn", "title": "Próby połączenia z internetu do usługi %s na routerze" % svc,
+                "explain": "Reguła firewalla z logowaniem zarejestrowała pakiety z internetu kierowane do portu %s (%s). "
+                           "Zwykle to automatyczne skanowanie w poszukiwaniu otwartych usług." % (dport, svc),
+                "advice": "Upewnij się, że te pakiety są odrzucane (reguła drop dla ruchu z WAN) i że usługa nie jest "
+                          "wystawiona do internetu bez potrzeby.", "det": {"Źródło": src, "Port": "%s (%s)" % (dport, svc)}}
+    return {"id": "fw_log", "level": "info", "title": "Reguła firewalla zarejestrowała pakiet (%s)" % chain,
+            "explain": "To wpis z reguły firewalla, która ma włączone logowanie (log=yes). Pokazuje, skąd i dokąd szedł ruch.",
+            "advice": "Jeśli takich wpisów jest bardzo dużo, wyłącz logowanie w regule albo dodaj log-prefix, żeby je odróżnić.",
+            "det": {"Źródło": src, "Cel": "%s:%s" % (dst, dport) if dport else dst}}
+
+
+def _pppoe(m, tp):
+    return {"id": "pppoe_down", "level": "bad", "title": "Zerwane połączenie z operatorem (PPPoE)",
+            "explain": "Router stracił połączenie PPPoE z operatorem, więc przez ten czas nie było internetu.",
+            "advice": "Jeśli zdarza się często, sprawdź kabel do modemu/ONT i zgłoś problem operatorowi "
+                      "(podaj godziny z logów).", "det": {"Interfejs": m.group("iface")}}
+
+
+def _wg(m, tp):
+    return {"id": "wg_handshake", "level": "warn", "title": "WireGuard: brak połączenia z drugą stroną tunelu",
+            "explain": "Handshake z peerem nie doszedł do skutku. Druga strona jest wyłączona, nie ma internetu "
+                       "albo klucze lub adres endpoint są błędne.",
+            "advice": "Sprawdź w zakładce VPN, którego peera dotyczy, oraz jego klucz publiczny i adres.", "det": {}}
+
+
+def _loop(m, tp):
+    return {"id": "loop", "level": "bad", "title": "Prawdopodobna pętla w sieci",
+            "explain": "Na porcie pojawia się nadmiar ruchu broadcast/multicast, co zwykle oznacza, że kabel "
+                       "łączy dwa porty tego samego switcha albo dwa switche są połączone podwójnie.",
+            "advice": "Sprawdź okablowanie wskazanego portu i włącz RSTP w bridge (`/interface bridge set [find] protocol-mode=rstp`).",
+            "det": {"Interfejs": m.group("iface")}}
+
+
+def _poe(m, tp):
+    return {"id": "poe", "level": "warn", "title": "Problem z zasilaniem PoE",
+            "explain": "Port PoE wykrył przeciążenie, zwarcie albo zbyt duży pobór mocy przez zasilane urządzenie.",
+            "advice": "Sprawdź kabel i urządzenie zasilane z tego portu oraz limit mocy zasilacza routera.",
+            "det": {"Interfejs": m.group("iface")}}
+
+
+def _memory(m, tp):
+    return {"id": "memory", "level": "bad", "title": "Brak pamięci RAM",
+            "explain": "Routerowi zabrakło pamięci. Usługi mogą działać niestabilnie lub router może się zrestartować.",
+            "advice": "Sprawdź zużycie RAM na wykresie, wyłącz zbędne funkcje (np. duże listy adresów, proxy) lub zaktualizuj RouterOS.",
+            "det": {}}
+
+
+_ANA_SERVER = set()  # adresy serwera aplikacji (ustawiane przy każdej analizie)
+CFG_ACTIONS = [("new script scheduled", "dodano zadanie do harmonogramu"), ("removed from scheduler", "usunięto zadanie z harmonogramu"),
+               ("scheduler changed", "zmieniono zadanie harmonogramu"), ("new script added", "dodano skrypt"),
+               ("script added", "dodano skrypt"), ("script removed", "usunięto skrypt"), ("script changed", "zmieniono skrypt"),
+               ("added", "dodano element"), ("removed", "usunięto element"), ("changed", "zmieniono ustawienie"),
+               ("moved", "zmieniono kolejność"), ("enabled", "włączono element"), ("disabled", "wyłączono element")]
+
+
+def _client(c):
+    c = c.lower()
+    for k, v in (("winbox", "Winbox"), ("ssh", "SSH"), ("telnet", "Telnet"), ("web", "WebFig"), ("www", "WebFig"),
+                 ("api", "API"), ("import", "import pliku (.rsc)"), ("scheduler", "harmonogram"), ("script", "skrypt")):
+        if k in c:
+            return v
+    return c[:30]
+
+
+def _cfg_by(m, tp):
+    what, cmd = m.group("what").strip(), (m.group("cmd") or "").strip()
+    act = next((v for k, v in CFG_ACTIONS if k in what.lower()), "zmiana konfiguracji")
+    det = {"Kto": m.group("user"), "Akcja": act, "Narzędzie": _client(m.group("client")), "Skąd": m.group("addr")}
+    if "app-" in cmd or "app-" in what:
+        return {"id": "cfg_app", "level": "info", "title": "Zmiany skryptów i harmonogramów aplikacji RouterOS Monitor",
+                "explain": "Ślady konfiguracji tej aplikacji na routerze: wklejenie komendy konfiguracyjnej dodaje i usuwa skrypty "
+                           "oraz zadania app-…, a RouterOS zapisuje każdą taką zmianę w logu. Mogą to być też Twoje ręczne zmiany "
+                           "harmonogramów app-… (np. wyłączenie synchronizacji whitelisty).",
+                "advice": "Nic nie trzeba robić. Jeśli nie wklejałeś komendy ani niczego nie zmieniałeś, sprawdź, kto był zalogowany.",
+                "det": det}
+    det["Polecenie"] = cmd[:70]
+    return {"id": "cfg_change", "level": "info", "title": "Zmiana konfiguracji routera",
+            "explain": "Ktoś zmienił ustawienia routera. RouterOS zapisuje kto, czym (np. Winbox) i z jakiego adresu "
+                       "wprowadził zmianę oraz jakie polecenie zostało wykonane.",
+            "advice": "Jeśli nie rozpoznajesz zmiany albo użytkownika, zmień hasło i sprawdź listę użytkowników (`/user print`).",
+            "det": det}
+
+
+def _script_fragment(m, tp):
+    return {"id": "script_fragment", "level": "info", "title": "Fragmenty treści skryptów w logu (po wklejeniu komendy konfiguracyjnej)",
+            "explain": "Gdy komenda konfiguracyjna dodaje skrypty app-…, RouterOS zapisuje w logu całe polecenie razem z treścią "
+                       "skryptu. Długie wpisy są dzielone na wiele kawałków, stąd fragmenty kodu w logach. To nie są błędy.",
+            "advice": "Nic nie trzeba robić. Pojawiają się tylko przy wklejaniu komendy konfiguracyjnej.", "det": {}}
+
+
+def _bad_cmd(m, tp):
+    cmd = m.group("cmd") if "cmd" in m.groupdict() and m.group("cmd") else ""
+    known = {"wireless": "stary pakiet Wi-Fi `wireless`, którego nie ma na routerach z nowym pakietem `wifi` (modele ax)",
+             "wifi": "nowy pakiet Wi-Fi `wifi`, którego nie ma na tym routerze",
+             "health": "menu `/system health`, którego nie ma na tym modelu (brak czujników)"}
+    why = known.get(cmd.lower(), "polecenie `%s` niedostępne w tej wersji RouterOS lub na tym modelu" % cmd if cmd else
+                    "składnię nieobsługiwaną przez tę wersję RouterOS")
+    return {"id": "script_syntax", "level": "warn", "title": "Skrypt używa polecenia niedostępnego na tym routerze",
+            "explain": "Skrypt odwołuje się do: %s. RouterOS przerywa taki skrypt przy wczytywaniu." % why,
+            "advice": "Jeśli to skrypt app-… tej aplikacji, wklej ponownie aktualną komendę konfiguracyjną (zakładka Konfiguracja); "
+                      "nowsze wersje uruchamiają tylko skrypty pasujące do routera. Własny skrypt trzeba poprawić ręcznie.",
+            "det": {"Polecenie": cmd, "Miejsce": "linia %s, kolumna %s" % (m.group("line"), m.group("col"))}}
+
+
+def _exec_script(m, tp):
+    name = m.group("name")
+    return {"id": "script_exec_fail", "level": "warn", "title": "Skrypt %s zakończył się błędem" % ("aplikacji" if name.startswith("app-") else "routera"),
+            "explain": "RouterOS zapisuje ten wpis razem z właściwym błędem (zwykle linia obok w logu). Sam w sobie wskazuje "
+                       "tylko, który skrypt się nie wykonał.",
+            "advice": "Sprawdź sąsiedni wpis z opisem błędu. Dla skryptów app-…: pojedyncze przypadki (np. podczas aktualizacji "
+                      "aplikacji) są normalne; stałe błędy naprawia ponowne wklejenie komendy konfiguracyjnej.",
+            "det": {"Skrypt": name}}
+
+
+def _fetch(m, tp):
+    ip, ok = m.group("host"), m.group("res").upper() == "FINISHED"
+    ours = ip in _ANA_SERVER
+    if ok:
+        return {"id": "fetch_ok_app" if ours else "fetch_ok", "level": "info",
+                "title": "Synchronizacja whitelisty z serwerem aplikacji" if ours else "Router pobrał plik z %s" % ip,
+                "explain": ("Skrypt app-whitelist co 5 minut pobiera aktualną whitelistę z tej aplikacji. Każde pobranie "
+                            "zostawia ten wpis, więc jest ich ok. 288 na dobę.") if ours else
+                           "Router pobrał plik poleceniem `/tool fetch` (skrypt lub ręczne polecenie).",
+                "advice": ("Nowa komenda konfiguracyjna nie przesyła już tych wpisów do aplikacji. Na routerze możesz je wyciszyć "
+                           "także w jego własnym logu: `/system logging set [find action=memory topics=info] topics=info,!fetch`. "
+                           "Jeśli na tym routerze nie używasz whitelisty, wyłącz zadanie: `/system scheduler disable [find name=app-wl]`.")
+                          if ours else "", "det": {"Serwer": ip}}
+    return {"id": "fetch_fail", "level": "warn", "title": "Nieudane pobieranie pliku z %s" % ip,
+            "explain": "Router nie mógł pobrać pliku (serwer niedostępny, błąd sieci albo błędny adres).",
+            "advice": "Jeśli to serwer aplikacji, sprawdź, czy działa (`docker compose ps`) i czy router go widzi.", "det": {"Serwer": ip}}
+
+
+def _cap_connected(m, tp):
+    return {"id": "cap_connected", "level": "info", "title": "AP połączył się z kontrolerem CAPsMAN",
+            "explain": "Ten punkt dostępowy (CAP) nawiązał połączenie z kontrolerem CAPsMAN %s i pobiera od niego konfigurację Wi-Fi."
+                       % m.group("name"), "advice": "", "det": {"Kontroler": "%s (%s)" % (m.group("name"), m.group("ip"))}}
+
+
+def _cap_selected(m, tp):
+    return {"id": "cap_selected", "level": "info", "title": "AP wybrał kontroler CAPsMAN",
+            "explain": "Punkt dostępowy znalazł w sieci kontroler CAPsMAN %s i wybrał go do zarządzania. Zwykle chwilę później "
+                       "pojawia się wpis o połączeniu." % m.group("name"), "advice": "",
+            "det": {"Kontroler": "%s (%s)" % (m.group("name"), m.group("ip"))}}
+
+
+def _cap_lost(m, tp):
+    return {"id": "cap_lost", "level": "warn", "title": "AP stracił połączenie z kontrolerem CAPsMAN",
+            "explain": "Punkt dostępowy rozłączył się z kontrolerem %s. Przez ten czas Wi-Fi z tego AP mogło nie działać." % m.group("name"),
+            "advice": "Jeśli się powtarza, sprawdź połączenie kablowe AP z siecią i czy kontroler CAPsMAN był dostępny (restart, aktualizacja).",
+            "det": {"Kontroler": "%s (%s)" % (m.group("name"), m.group("ip"))}}
+
+
+
+def _time_change(m, tp):
+    src_ = (m.group("src") or "").lower()
+    who = {"cloud": "usługę MikroTik IP Cloud", "ntp": "klienta NTP", "sntp": "klienta NTP"}.get(src_, "synchronizację czasu")
+    diff = None
+    try:
+        a = dt.datetime.strptime(m.group("a"), "%b/%d/%Y %H:%M:%S")
+        b = dt.datetime.strptime(m.group("b"), "%b/%d/%Y %H:%M:%S")
+        diff = int((b - a).total_seconds())
+    except ValueError:
+        pass
+    big = diff is not None and abs(diff) > 300
+    nom = {"cloud": "MikroTik IP Cloud", "ntp": "NTP", "sntp": "NTP"}.get(src_, "synchronizacja czasu")
+    det = {"Źródło": nom, "Korekta": ("%+d s" % diff) if diff is not None else "?"}
+    return {"id": "time_change_big" if big else "time_change", "level": "warn" if big else "info",
+            "title": "Duża korekta zegara routera" if big else "Korekta zegara routera",
+            "explain": ("Zegar routera został ustawiony przez %s. " % who) +
+                       ("Różnica była duża, więc godziny we wcześniejszych logach mogły być błędne (np. po restarcie routera bez baterii zegara)."
+                        if big else "Drobne korekty o kilka-kilkadziesiąt sekund są normalne."),
+            "advice": "Dla dokładnego czasu włącz klienta NTP: `/system ntp client set enabled=yes servers=pool.ntp.org`. "
+                      "Poprawny czas jest ważny dla logów, certyfikatów i harmonogramów." if big or src_ == "cloud" else "",
+            "det": det}
+
+
+def _dhcp_client(m, tp):
+    got = m.group("act").lower() == "got"
+    return {"id": "dhcp_client_got" if got else "dhcp_client_lost", "level": "info" if got else "warn",
+            "title": "Router otrzymał adres IP z DHCP" if got else "Router stracił adres IP z DHCP",
+            "explain": ("To sam router (jako klient DHCP na interfejsie %s) dostał adres od serwera DHCP w sieci, np. AP od routera głównego "
+                        "albo router od operatora. To nie jest przydzielenie adresu innemu urządzeniu." % m.group("iface")) if got else
+                       ("Klient DHCP routera na interfejsie %s utracił adres: serwer DHCP nie odpowiedział albo łącze było niedostępne." % m.group("iface")),
+            "advice": "" if got else "Sprawdź połączenie na tym interfejsie i dostępność serwera DHCP (np. routera głównego lub modemu operatora).",
+            "det": {"Interfejs": m.group("iface"), "Adres": m.group("ip") or ""}}
+
+
+def _pkg(m, tp):
+    name, ver, inst = m.group("pkg"), m.group("ver"), m.group("act").lower() == "installed"
+    label = "RouterOS (system)" if name in ("system", "routeros") else name
+    return {"id": "pkg_installed" if inst else "pkg_removed", "level": "info",
+            "title": "Zainstalowano pakiet RouterOS" if inst else "Odinstalowano pakiet RouterOS",
+            "explain": ("Na routerze zainstalowano pakiet %s w wersji %s, zwykle w ramach aktualizacji systemu (wpis pojawia się po restarcie)."
+                        % (label, ver)) if inst else "Pakiet %s %s został usunięty z routera." % (label, ver),
+            "advice": "Po aktualizacji RouterOS wgraj też firmware płyty: `/system routerboard upgrade`, a potem zrestartuj router "
+                      "(panel pokaże znaczek „firmware do wgrania”, jeśli to potrzebne)." if inst and name in ("system", "routeros") else "",
+            "det": {"Pakiet": "%s %s" % (label, ver)}}
+
+
+LOG_RULES = [
+    (_r(r"\\; ?\\n|\\5B|on-error=\{\}|\$send u=\$url|\$buf \.|\[:len \\?\$buf\]"), _script_fragment),
+    (_r(r"^(?P<what>.+?) by (?P<client>[^\s:]+):(?P<user>[^@\s]+)@(?P<addr>[0-9a-f:.]+?)/(?P<path>\S*)(?:\s+\((?P<cmd>.*)\))?\s*$"), _cfg_by),
+    (_r(r"(?:download from|upload to) (?P<host>\S+) (?P<res>finished|failed)"), _fetch),
+    (_r(r"bad command name (?P<cmd>\S+) \(line (?P<line>\d+) column (?P<col>\d+)\)"), _bad_cmd),
+    (_r(r"(?:syntax error|bad parameter (?P<cmd>\S+)) \(line (?P<line>\d+) column (?P<col>\d+)\)"), _bad_cmd),
+    (_r(r"^executing script (?P<name>\S+)"), _exec_script),
+    (_r(r"selected capsman (?P<name>\S+?)@(?P<ip>[\d.]+)"), _cap_selected),
+    (_r(r"^connected to (?P<name>\S+?)@(?P<ip>[\d.]+)"), _cap_connected),
+    (_r(r"^(?:disconnected from|lost connection to) (?P<name>\S+?)@(?P<ip>[\d.]+)"), _cap_lost),
+    (_r(r"(?:(?P<src>cloud|ntp|sntp) )?change time (?P<a>\w{3}/\d\d/\d{4} \d\d:\d\d:\d\d) => (?P<b>\w{3}/\d\d/\d{4} \d\d:\d\d:\d\d)"), _time_change),
+    (_r(r"^(?P<client>\S+) on (?P<iface>\S+) (?P<act>got|lost) ip address(?: (?P<ip>[\d.]+))?"), _dhcp_client),
+    (_r(r"^(?P<act>installed|uninstalled) (?P<pkg>[a-z0-9-]+?)-(?P<ver>\d+(?:\.\d+)+(?:beta\d+|rc\d+)?)\b"), _pkg),
+    (_r(r"login failure for user (?P<user>\S+) from (?P<ip>[0-9a-f.:]+) via (?P<svc>[\w-]+)"), _login_fail),
+    (_r(r"user (?P<user>\S+) logged in from (?P<ip>[0-9a-f.:]+) via (?P<svc>[\w-]+)"), _login_ok),
+    (_r(r"user (?P<user>\S+) logged out from (?P<ip>[0-9a-f.:]+) via (?P<svc>[\w-]+)"), _logout),
+    (_r(r"rebooted without proper shutdown|unexpected (reboot|shutdown)|kernel failure|watchdog"), _reboot_bad),
+    (_r(r"router rebooted|system rebooted|rebooted by"), _reboot),
+    (_r(r"out of memory|memory (is )?low"), _memory),
+    (_r(r"(?P<iface>\S+?):? excessive (broadcasts|multicasts)|loop detected|probably a loop"), _loop),
+    (_r(r"(?P<iface>\S+?):? poe[- ]out status: (short|overload|current_too_low|power_reset|voltage)"), _poe),
+    (_r(r"failure: .*|script error|executing script .* failed"), _script_fail),
+    (_r(r"(?P<chain>input|forward|output|srcnat|dstnat|prerouting|postrouting): in:\S+ out:\S+.*?proto (?P<proto>\w+).*?"
+        r"(?P<src>\d+\.\d+\.\d+\.\d+)(?::\d+)?->(?P<dst>\d+\.\d+\.\d+\.\d+)(?::(?P<dport>\d+))?"), _firewall),
+    (_r(r"(?P<srv>\S+) assigned (?P<ip>\d+\.\d+\.\d+\.\d+) (?:for|to) (?P<mac>[0-9a-f]{2}(?::[0-9a-f]{2}){5})\s*(?P<host>.*)"), _dhcp_assigned),
+    (_r(r"(?P<srv>\S+) deassigned (?P<ip>\d+\.\d+\.\d+\.\d+) (?:for|from) (?P<mac>[0-9a-f]{2}(?::[0-9a-f]{2}){5})"), _dhcp_deassigned),
+    (_r(r"offering lease \S+ for (?P<mac>[0-9a-f]{2}(?::[0-9a-f]{2}){5}) without success"), _dhcp_nosuccess),
+    (_r(r"failed to give out ip address|no (more )?free (ip )?address|pool .* (is )?empty"), _dhcp_pool),
+    (_r(r"conflict|address already (in )?use|duplicate address"), _conflict),
+    (_r(r"(?P<iface>\S+?):? link down"), _link_down),
+    (_r(r"(?P<iface>\S+?):? link up(?: \(speed (?P<speed>[^,)]+))?"), _link_up),
+    (_r(r"(?P<mac>[0-9a-f]{2}(?::[0-9a-f]{2}){5})@(?P<iface>[\w.-]+):? disconnected,?\s*(?P<reason>.*)"), _wifi_disc),
+    (_r(r"(?P<mac>[0-9a-f]{2}(?::[0-9a-f]{2}){5})@(?P<iface>[\w.-]+):? (?:connected|established)"), _wifi_conn),
+    (_r(r"\bcap\b.*\b(connected|disconnected|lost|joined)\b|capsman.*\b(connected|disconnected|lost)\b"), _caps),
+    (_r(r"(?P<iface>pppoe[\w-]*):? (?:terminating|disconnected)|peer is not responding"), _pppoe),
+    (_r(r"handshake for peer did not complete"), _wg),
+    (_r(r"(?P<what>.+?) (?:changed|added|removed) by (?P<user>[\w.@-]+)"), _cfg_change),
+]
+
+
+def translate_log(msg, topics=""):
+    for rx, fn in LOG_RULES:
+        m = rx.search(msg)
+        if m:
+            try:
+                res = fn(m, topics)
+            except (IndexError, AttributeError):
+                res = None
+            if res:
+                return res
+    return None
+
+
+def _norm(msg):
+    return re.sub(r"\d+", "#", msg)[:120]
+
+
+@app.get("/api/routers/{rid}/logs/analysis", dependencies=[Depends(user)])
+def logs_analysis(request: Request, rid: int, hours: int = 24, s: Session = Depends(db)):
+    global _ANA_SERVER
+    _ANA_SERVER = {x for x in (syslog_target(request), os.getenv("SYSLOG_HOST"), request.url.hostname) if x}
+    hours = max(1, min(hours, 168))
+    rows = s.execute(select(LogEntry.ts, LogEntry.sev, LogEntry.topics, LogEntry.msg)
+                     .where(LogEntry.router_id == rid, LogEntry.ts > now() - dt.timedelta(hours=hours))
+                     .order_by(LogEntry.ts.desc()).limit(20000)).all()
+    groups, unknown = {}, {}
+    for ts, sev, tp, msg in rows:
+        res = translate_log(msg, tp)
+        if not res:
+            u = unknown.setdefault(_norm(msg), {"msg": msg, "count": 0, "last": ts, "cls": sev_cls(sev)})
+            u["count"] += 1
+            continue
+        g = groups.get(res["id"])
+        if not g:
+            g = groups[res["id"]] = {"id": res["id"], "level": res["level"], "title": res["title"], "explain": res["explain"],
+                                     "advice": res["advice"], "count": 0, "first": ts, "last": ts, "det": {}, "examples": []}
+        g["count"] += 1
+        g["first"] = min(g["first"], ts)
+        g["last"] = max(g["last"], ts)
+        if res["level"] == "bad" and g["level"] != "bad":
+            g["level"] = "bad"
+        for k, v in res["det"].items():
+            if v:
+                d = g["det"].setdefault(k, {})
+                d[v] = d.get(v, 0) + 1
+        if len(g["examples"]) < 3:
+            g["examples"].append(msg)
+    # brute force: wiele nieudanych logowań z jednego publicznego adresu
+    lf = groups.get("login_fail_wan")
+    if lf:
+        top = max(lf["det"].get("Adres", {}).values() or [0])
+        if top >= 5:
+            lf["title"] = "Atak na hasło (brute force) z internetu"
+            lf["explain"] = ("Wiele nieudanych prób logowania z tych samych adresów publicznych (najwięcej: %d). "
+                             "To automatyczny atak polegający na zgadywaniu hasła.") % top + " " + lf["explain"].split(". ", 1)[-1]
+    # częste zmiany stanu łącza na tym samym porcie = flapping
+    ld = groups.get("link_down")
+    if ld and max(ld["det"].get("Interfejs", {}).values() or [0]) >= 5:
+        ld["level"] = "bad"
+        ld["title"] = "Niestabilne łącze na porcie (częste rozłączenia)"
+    out = []
+    for g in groups.values():
+        g["det"] = {k: sorted(v.items(), key=lambda x: -x[1])[:5] for k, v in g["det"].items()}
+        g["first"], g["last"] = g["first"].isoformat(timespec="seconds"), g["last"].isoformat(timespec="seconds")
+        out.append(g)
+    order = {"bad": 0, "warn": 1, "info": 2}
+    out.sort(key=lambda g: (order[g["level"]], -g["count"]))
+    unk = sorted(unknown.values(), key=lambda u: -u["count"])[:15]
+    for u in unk:
+        u["last"] = u["last"].isoformat(timespec="seconds")
+    return {"groups": out, "unknown": unk, "total": len(rows),
+            "summary": {k: sum(g["count"] for g in out if g["level"] == k) for k in order}}
+
+
+# ---------- RouterOS update check ----------
+_VER = {}
+
+
+def vtuple(v):
+    m = re.match(r"(\d+(?:\.\d+)*)(?:(beta|rc)(\d+))?", v or "")
+    if not m:
+        return None
+    nums = tuple(int(x) for x in m.group(1).split("."))
+    nums = nums + (0,) * (4 - len(nums))
+    pre = (0 if m.group(2) == "beta" else 1, int(m.group(3))) if m.group(2) else (2, 0)
+    return nums + pre
+
+
+def latest_version(major, channel):
+    key = (major, channel)
+    c = _VER.get(key)
+    if c and time.time() - c[1] < (6 * 3600 if c[0] else 1800):
+        return c[0]
+    v = None
+    try:
+        url = "https://upgrade.mikrotik.com/routeros/NEWEST%s.%s" % ("a7" if major >= 7 else "6", channel)
+        resp = httpx.get(url, timeout=5)
+        tok = resp.text.split()[0] if resp.status_code == 200 and resp.text.strip() else ""
+        if re.fullmatch(r"\d+(\.\d+)+((beta|rc)\d+)?", tok):
+            v = tok
+    except Exception:
+        pass
+    _VER[key] = (v, time.time())
+    return v
+
+
+def update_available(r):
+    """Zwraca nowszą wersję RouterOS z tego samego kanału (stable/long-term/testing) albo None."""
+    m = re.match(r"\s*(\S+)\s*(?:\((\S+)\))?", r.ver or "")
+    cur = vtuple(m.group(1)) if m else None
+    if not cur:
+        return None
+    channel = (m.group(2) or "stable").lower()
+    if channel not in ("stable", "long-term", "testing", "development"):
+        channel = "stable"
+    new = latest_version(cur[0], channel)
+    return new if new and vtuple(new) > cur else None
+
+
+# ---------- whitelist ----------
+HOST_RE = re.compile(r"^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$")
+
+
+def parse_ip(ip):
+    """Adres IPv4, sieć IPv4 (CIDR) albo nazwa domeny (router sam ją rozwiązuje przez DNS)."""
+    ip = ip.strip().lower().rstrip(".")
+    try:
+        net = str(ipaddress.ip_network(ip, strict=False))
+    except ValueError:
+        if HOST_RE.match(ip) and not re.fullmatch(r"[\d.]+", ip):
+            return ip
+        raise
+    if ":" in net:
+        raise ValueError("ipv4 only")
+    return net[:-3] if net.endswith("/32") else net
+
+
+def cmt(c):
+    return re.sub(r"[^\w .\-@]", "", c or "")[:60]
+
+
+def scope(v):
+    return int(v) if str(v).strip().isdigit() else None
+
+
+def parse_exp(x):
+    """liczba dni | RRRR-MM-DD (ważne do końca tego dnia) | RRRR-MM-DD GG:MM (dokładny czas, UTC)"""
+    x = (x or "").strip()
+    if x.isdigit() and int(x) > 0:
+        return now() + dt.timedelta(days=int(x))
+    try:
+        return dt.datetime.strptime(x, "%Y-%m-%d %H:%M")
+    except ValueError:
+        pass
+    try:
+        return dt.datetime.strptime(x, "%Y-%m-%d") + dt.timedelta(days=1)
+    except ValueError:
+        return None
+
+
+def fmt_exp(e):
+    if not e:
+        return ""
+    if e.time() == dt.time(0):
+        return (e - dt.timedelta(days=1)).strftime("%Y-%m-%d")
+    return e.strftime("%Y-%m-%d %H:%M")
+
+
+def back(msg="", kind="err"):
+    return RedirectResponse("/whitelist" + ("?%s=%s" % (kind, quote(msg)) if msg else ""), 303)
+
+
+@app.get("/whitelist", dependencies=[Depends(user)])
+def wl_page(request: Request, s: Session = Depends(db), err: str = "", ok: str = ""):
+    items = s.scalars(select(Whitelist).order_by(Whitelist.id)).all()
+    routers = ordered_routers(s)
+    return templates.TemplateResponse(request, "whitelist.html", {
+        "items": items, "routers": routers, "names": {r.id: r.name for r in routers},
+        "err": err, "ok": ok, "now": now()})
+
+
+@app.post("/whitelist", dependencies=[Depends(admin)])
+def wl_add(ip: str = Form(), comment: str = Form(""), days: str = Form(""), router: str = Form(""),
+           s: Session = Depends(db)):
+    try:
+        net = parse_ip(ip)
+    except ValueError:
+        return back("Niepoprawny adres: podaj IPv4, sieć (np. 10.0.0.0/24) albo domenę")
+    s.add(Whitelist(ip=net, comment=cmt(comment), expires=parse_exp(days), router_id=scope(router)))
+    log(s, "whitelist+", "%s (%s) zakres=%s" % (net, cmt(comment), scope(router) or "wszystkie"))
+    s.commit()
+    return back()
+
+
+@app.post("/whitelist/import", dependencies=[Depends(admin)])
+def wl_import(data: str = Form(""), router: str = Form(""), s: Session = Depends(db)):
+    default = scope(router)
+    ids = {r.name: r.id for r in s.scalars(select(Router))}
+    have = {(w.ip, w.router_id) for w in s.scalars(select(Whitelist))}
+    added = bad = 0
+    for line in data.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        p = [x.strip() for x in next(csv.reader([line]))]
+        if p[0].lower() == "ip":
+            continue
+        try:
+            ip = parse_ip(p[0])
+        except ValueError:
+            bad += 1
+            continue
+        if len(p) > 3 and p[3]:
+            if p[3] not in ids:  # nieznany router: nie rozszerzaj po cichu na wszystkie routery
+                bad += 1
+                continue
+            rid = ids[p[3]]
+        else:
+            rid = default
+        if (ip, rid) in have:
+            continue
+        s.add(Whitelist(ip=ip, comment=cmt(p[1] if len(p) > 1 else ""),
+                        expires=parse_exp(p[2]) if len(p) > 2 else None, router_id=rid))
+        have.add((ip, rid))
+        added += 1
+    log(s, "whitelist import", "dodano %d, błędnych %d" % (added, bad))
+    s.commit()
+    return back("Zaimportowano: %d, błędnych linii: %d" % (added, bad), "ok")
+
+
+@app.get("/whitelist/export", dependencies=[Depends(admin)])
+def wl_export(s: Session = Depends(db)):
+    names = {r.id: r.name for r in s.scalars(select(Router))}
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["ip", "comment", "expires", "router"])
+    for x in s.scalars(select(Whitelist).order_by(Whitelist.id)):
+        w.writerow([x.ip, x.comment, fmt_exp(x.expires), names.get(x.router_id, "")])
+    return Response(buf.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=whitelist.csv"})
+
+
+@app.post("/whitelist/{wid}/toggle", dependencies=[Depends(admin)])
+def wl_toggle(wid: int, s: Session = Depends(db)):
+    w = s.get(Whitelist, wid)
+    if w:
+        w.active = not w.active
+        log(s, "whitelist " + ("włączono" if w.active else "wyłączono"), w.ip)
+        s.commit()
+    return back()
+
+
+@app.post("/whitelist/{wid}/delete", dependencies=[Depends(admin)])
+def wl_del(wid: int, s: Session = Depends(db)):
+    w = s.get(Whitelist, wid)
+    if w:
+        log(s, "whitelist-", "%s (%s)" % (w.ip, w.comment))
+        s.delete(w)
+        s.commit()
+    return back()
+
+
+@app.get("/api/whitelist.rsc", response_class=PlainTextResponse)
+def wl_rsc(t: str, list: str = "whitelist", s: Session = Depends(db)):
+    r = get_router(s, t)
+    lst = clean(list, "whitelist")
+    items = s.scalars(select(Whitelist).where(Whitelist.active == True,  # noqa: E712
+                                              or_(Whitelist.router_id.is_(None), Whitelist.router_id == r.id))).all()
+    keep, lines = [], []
+    for w in items:
+        if (w.expires and w.expires < now()) or w.ip in keep:
+            continue
+        keep.append(w.ip)
+        lines.append(':do {/ip firewall address-list add list="%s" address=%s comment="wl:%s"} on-error={}'
+                     % (lst, w.ip, w.comment))
+    cond = "".join(' and address!="%s"' % ip for ip in keep)
+    lines.append('/ip firewall address-list remove [find where list="%s" and dynamic=no and comment~"^wl:"%s]' % (lst, cond))
+    return "\n".join(lines) + "\n"
+
+
+@app.get("/log", dependencies=[Depends(admin)])
+def log_page(request: Request, s: Session = Depends(db)):
+    rows = s.scalars(select(AuditLog).order_by(AuditLog.id.desc()).limit(300)).all()
+    return templates.TemplateResponse(request, "log.html", {"rows": rows})
+
+
+# ---------- users ----------
+UNAME_RE = re.compile(r"^[A-Za-z0-9._@-]{3,40}$")
+
+
+def users_view(request, s, msg="", ok=True):
+    rows = s.scalars(select(User).order_by(User.username)).all()
+    return templates.TemplateResponse(request, "users.html", {"users": rows, "roles": ROLES, "msg": msg, "ok": ok})
+
+
+def active_admins(s):
+    return s.scalar(select(func.count(User.id)).where(User.role == "admin", User.active == True))  # noqa: E712
+
+
+@app.get("/users", dependencies=[Depends(admin)])
+def users_page(request: Request, s: Session = Depends(db)):
+    return users_view(request, s)
+
+
+@app.post("/users", dependencies=[Depends(admin)])
+def user_add(request: Request, username: str = Form(), password: str = Form(), role: str = Form("viewer"),
+             s: Session = Depends(db)):
+    username = username.strip()
+    if not UNAME_RE.match(username):
+        return users_view(request, s, "Login: 3-40 znaków, litery, cyfry, . _ @ -", False)
+    if len(password) < 8:
+        return users_view(request, s, "Hasło musi mieć co najmniej 8 znaków.", False)
+    if role not in ROLES:
+        return users_view(request, s, "Nieznana rola.", False)
+    if s.scalar(select(User).where(User.username == username)):
+        return users_view(request, s, "Taki login już istnieje.", False)
+    s.add(User(username=username, pw=hash_pw(password), role=role, created=now()))
+    log(s, "użytkownik+", "%s (%s)" % (username, role))
+    s.commit()
+    return users_view(request, s, "Dodano użytkownika %s." % username)
+
+
+def guard(request, s, target, me):
+    """Nie pozwól zablokować sobie dostępu ani usunąć ostatniego administratora."""
+    if not target:
+        return users_view(request, s, "Nie ma takiego użytkownika.", False)
+    if target.id == me.id:
+        return users_view(request, s, "Nie możesz zmienić roli, wyłączyć ani usunąć własnego konta.", False)
+    return None
+
+
+@app.post("/users/{uid}/role")
+def user_role(request: Request, uid: int, role: str = Form(), me: User = Depends(admin), s: Session = Depends(db)):
+    t = s.get(User, uid)
+    err = guard(request, s, t, me)
+    if err:
+        return err
+    if role not in ROLES:
+        return users_view(request, s, "Nieznana rola.", False)
+    if t.role == "admin" and role != "admin" and t.active and active_admins(s) <= 1:
+        return users_view(request, s, "To ostatni aktywny administrator.", False)
+    t.role, t.ver = role, t.ver + 1
+    log(s, "rola", "%s: %s" % (t.username, role))
+    s.commit()
+    return users_view(request, s, "Zmieniono rolę %s." % t.username)
+
+
+@app.post("/users/{uid}/toggle")
+def user_toggle(request: Request, uid: int, me: User = Depends(admin), s: Session = Depends(db)):
+    t = s.get(User, uid)
+    err = guard(request, s, t, me)
+    if err:
+        return err
+    if t.active and t.role == "admin" and active_admins(s) <= 1:
+        return users_view(request, s, "To ostatni aktywny administrator.", False)
+    t.active, t.ver = not t.active, t.ver + 1
+    log(s, "użytkownik " + ("włączony" if t.active else "wyłączony"), t.username)
+    s.commit()
+    return users_view(request, s, "Zapisano.")
+
+
+@app.post("/users/{uid}/password")
+def user_reset(request: Request, uid: int, password: str = Form(), me: User = Depends(admin),
+               s: Session = Depends(db)):
+    t = s.get(User, uid)
+    if not t:
+        return users_view(request, s, "Nie ma takiego użytkownika.", False)
+    if len(password) < 8:
+        return users_view(request, s, "Hasło musi mieć co najmniej 8 znaków.", False)
+    t.pw, t.ver = hash_pw(password), t.ver + 1
+    log(s, "reset hasła", t.username)
+    s.commit()
+    if t.id == me.id:
+        request.session["v"] = t.ver
+    return users_view(request, s, "Ustawiono nowe hasło dla %s." % t.username)
+
+
+@app.post("/users/{uid}/delete")
+def user_del(request: Request, uid: int, me: User = Depends(admin), s: Session = Depends(db)):
+    t = s.get(User, uid)
+    err = guard(request, s, t, me)
+    if err:
+        return err
+    if t.role == "admin" and t.active and active_admins(s) <= 1:
+        return users_view(request, s, "To ostatni aktywny administrator.", False)
+    log(s, "użytkownik-", t.username)
+    s.delete(t)
+    s.commit()
+    return users_view(request, s, "Usunięto użytkownika.")
+
+
+@app.get("/account")
+def account_page(request: Request, me: User = Depends(user)):
+    return templates.TemplateResponse(request, "account.html", {"msg": "", "ok": True})
+
+
+@app.post("/account")
+def account_save(request: Request, current: str = Form(), password: str = Form(), password2: str = Form(),
+                 me: User = Depends(user), s: Session = Depends(db)):
+    def view(msg, ok):
+        return templates.TemplateResponse(request, "account.html", {"msg": msg, "ok": ok})
+    if not check_pw(current, me.pw):
+        time.sleep(1.5)
+        return view("Obecne hasło jest nieprawidłowe.", False)
+    if len(password) < 8:
+        return view("Nowe hasło musi mieć co najmniej 8 znaków.", False)
+    if password != password2:
+        return view("Nowe hasła nie są takie same.", False)
+    me.pw, me.ver = hash_pw(password), me.ver + 1
+    log(s, "zmiana hasła", me.username)
+    s.commit()
+    request.session["v"] = me.ver
+    return view("Hasło zmienione. Inne otwarte sesje zostały wylogowane.", True)
+
+
+# ---------- settings / HTTPS ----------
+DOMAIN_RE = re.compile(r"^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$")
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[a-z]{2,}$", re.I)
+
+
+def caddyfile(domain, email):
+    g = "{\n\tadmin 0.0.0.0:2019 {\n\t\torigins caddy:2019\n\t}\n"
+    if email:
+        g += "\temail %s\n" % email
+    g += "}\n"
+    body = "\treverse_proxy app:8000 {\n\t\ttransport http {\n\t\t\tkeepalive 30s\n\t\t}\n\t}\n"
+    out = g + ":80 {\n" + body + "}\n"
+    if domain:
+        out += "%s {\n%s}\n" % (domain, body)
+    return out
+
+
+BACKUP_DIR = "/backups"
+BACKUP_RE = re.compile(r"^monitor-\d{4}-\d\d-\d\d_\d{6}\.dump$")
+
+
+def backups_info():
+    files = []
+    try:
+        for n in os.listdir(BACKUP_DIR):
+            p = os.path.join(BACKUP_DIR, n)
+            if BACKUP_RE.match(n) and os.path.isfile(p):
+                st = os.stat(p)
+                files.append({"name": n, "size": bytes_h(st.st_size),
+                              "ts": dt.datetime.fromtimestamp(st.st_mtime, dt.timezone.utc).replace(tzinfo=None)})
+    except OSError:
+        return {"available": False, "files": [], "pending": False, "error": None, "stale": False}
+    files.sort(key=lambda f: f["ts"], reverse=True)
+    err = None
+    try:
+        with open(os.path.join(BACKUP_DIR, ".last_error"), encoding="utf-8") as fh:
+            err = fh.read().strip()
+    except OSError:
+        pass
+    return {"available": True, "files": files, "pending": os.path.exists(os.path.join(BACKUP_DIR, ".now")),
+            "error": err, "stale": not files or (now() - files[0]["ts"]).total_seconds() > 2 * 86400,
+            "total": bytes_h(sum(os.path.getsize(os.path.join(BACKUP_DIR, f["name"])) for f in files)),
+            "hour": os.getenv("BACKUP_HOUR", "3"), "keep": os.getenv("BACKUP_KEEP_DAYS", "14")}
+
+
+def settings_view(request, s, msg="", ok=True):
+    return templates.TemplateResponse(request, "settings.html", {
+        "domain": sget(s, "domain"), "email": sget(s, "email"), "msg": msg, "ok": ok,
+        "interval": interval(s), "intervals": INTERVALS, "routers": ordered_routers(s), "bk": backups_info(),
+        "wl_enabled": whitelist_on(s), "speed_router": sget(s, "speed_router"), "speed_time": SPEED_TIME[:5],
+        "speed_engine": sget(s, "speed_engine", "ookla"), "speed_server": sget(s, "speed_server", ""), "ookla": bool(OOKLA_BIN)})
+
+
+@app.post("/settings/whitelist", dependencies=[Depends(admin)])
+def settings_whitelist(request: Request, on: str = Form(""), s: Session = Depends(db)):
+    sset(s, "whitelist_on", "1" if on == "1" else "0")
+    log(s, "moduł whitelisty", "włączony" if on == "1" else "wyłączony")
+    s.commit()
+    _WL_ON[1] = 0
+    return settings_view(request, s, ("Whitelista włączona." if on == "1" else "Whitelista wyłączona.") +
+                         " Wklej ponownie komendę konfiguracyjną na routerach, aby dodać lub usunąć skrypt synchronizacji.", True)
+
+
+@app.post("/settings/backup-now", dependencies=[Depends(admin)])
+def backup_now(request: Request, s: Session = Depends(db)):
+    try:
+        open(os.path.join(BACKUP_DIR, ".now"), "w").close()
+    except OSError as e:
+        return settings_view(request, s, "Nie można zlecić kopii: %s" % e, False)
+    log(s, "kopia bazy", "zlecona ręcznie")
+    s.commit()
+    return settings_view(request, s, "Kopia zlecona. Pojawi się na liście w ciągu ok. 30 sekund (odśwież stronę).", True)
+
+
+@app.get("/backups/{name}", dependencies=[Depends(admin)])
+def backup_download(name: str, s: Session = Depends(db)):
+    p = os.path.join(BACKUP_DIR, name)
+    if not BACKUP_RE.match(name) or not os.path.isfile(p):
+        raise HTTPException(404)
+    log(s, "pobrano kopię", name)
+    s.commit()
+    return FileResponse(p, filename=name, media_type="application/octet-stream")
+
+
+@app.post("/backups/{name}/delete", dependencies=[Depends(admin)])
+def backup_delete(request: Request, name: str, s: Session = Depends(db)):
+    p = os.path.join(BACKUP_DIR, name)
+    if BACKUP_RE.match(name) and os.path.isfile(p):
+        os.remove(p)
+        log(s, "usunięto kopię", name)
+        s.commit()
+    return RedirectResponse("/settings#backup", 303)
+
+
+@app.post("/settings/interval", dependencies=[Depends(admin)])
+def settings_interval(request: Request, every: int = Form(60), s: Session = Depends(db)):
+    if every not in INTERVALS:
+        return settings_view(request, s, "Niedozwolony interwał.", False)
+    sset(s, "interval", str(every))
+    log(s, "interwał", "%d s" % every)
+    s.commit()
+    return settings_view(request, s, "Zapisano interwał %d s. Wklej ponownie komendę konfiguracyjną na każdym "
+                                     "routerze, aby zaczął wysyłać dane częściej." % every, True)
+
+
+@app.get("/settings", dependencies=[Depends(admin)])
+def settings_page(request: Request, s: Session = Depends(db)):
+    return settings_view(request, s)
+
+
+@app.post("/settings", dependencies=[Depends(admin)])
+def settings_save(request: Request, domain: str = Form(""), email: str = Form(""), s: Session = Depends(db)):
+    domain, email = domain.strip().lower(), email.strip()
+    if domain and not DOMAIN_RE.match(domain):
+        return settings_view(request, s, "Niepoprawna nazwa domeny.", False)
+    if email and not EMAIL_RE.match(email):
+        return settings_view(request, s, "Niepoprawny adres e-mail.", False)
+    try:
+        r = httpx.post(CADDY + "/load", content=caddyfile(domain, email).encode(),
+                       headers={"Content-Type": "text/caddyfile"}, timeout=15)
+    except Exception as e:
+        return settings_view(request, s, "Brak połączenia z Caddy: %s" % e, False)
+    if r.status_code != 200:
+        return settings_view(request, s, "Caddy odrzucił konfigurację: %s" % r.text[:300], False)
+    sset(s, "domain", domain)
+    sset(s, "email", email)
+    log(s, "ustawienia", "domena=%s" % (domain or "brak"))
+    s.commit()
+    msg = ("Zapisano. Certyfikat Let's Encrypt jest pobierany w tle (sprawdź: docker compose logs caddy)."
+           if domain else "Domena usunięta, działa tylko HTTP.")
+    return settings_view(request, s, msg, True)

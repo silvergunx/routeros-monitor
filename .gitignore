@@ -1,0 +1,14 @@
+# Sekrety i dane lokalne - nigdy do repozytorium
+.env
+backups/
+*.dump
+*.part
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Systemowe
+.DS_Store
+Thumbs.db

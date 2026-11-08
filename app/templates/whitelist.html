@@ -1,0 +1,20 @@
+{% extends "base.html" %}{% block c %}
+<div class="card"><h2>Whitelist</h2>
+<p class="mut">Router pobiera listę co 5 minut i wpisuje ją do <code>/ip firewall address-list</code> (lista <code>whitelist</code>). Wpis może dotyczyć wszystkich routerów albo jednego wybranego. Domeny router rozwiązuje sam przez swój DNS i dodaje znalezione adresy IP jako wpisy dynamiczne.</p>
+{% if err %}<p class="err">{{err}}</p>{% endif %}{% if ok %}<p class="ok">{{ok}}</p>{% endif %}
+{% if request.state.user.is_admin %}<form method="post" action="/whitelist" class="row"><input name="ip" placeholder="IP, 10.0.0.0/24 lub domena" style="width:220px" required> <input name="comment" placeholder="Opis">
+<input name="days" type="number" min="1" placeholder="Ważne dni" style="width:110px">
+<select name="router"><option value="">Wszystkie routery</option>{% for r in routers %}<option value="{{r.id}}">{{r.name}}</option>{% endfor %}</select> <button class="p">Dodaj</button></form>{% endif %}</div>
+<div class="card scroll"><table><tr><th>Adres</th><th>Opis</th><th>Zakres</th><th>Wygasa</th><th>Status</th><th></th></tr>
+{% for w in items %}{% set dead = w.expires and w.expires < now %}<tr><td>{{w.ip}}</td><td>{{w.comment}}</td>
+<td>{{names.get(w.router_id, 'wszystkie') if w.router_id else 'wszystkie'}}</td>
+<td>{% if w.expires %}<span class="t" data-t="{{w.expires|iso}}Z"></span>{% else %}-{% endif %}</td>
+<td class="{{'ok' if w.active and not dead else 'off'}}">{{'wygasł' if dead else ('aktywny' if w.active else 'wyłączony')}}</td>
+<td>{% if request.state.user.is_admin %}<form class="i" method="post" action="/whitelist/{{w.id}}/toggle"><button>{{'Wyłącz' if w.active else 'Włącz'}}</button></form>
+<form class="i" method="post" action="/whitelist/{{w.id}}/delete"><button>Usuń</button></form>{% endif %}</td></tr>{% endfor %}</table></div>
+{% if request.state.user.is_admin %}<div class="card"><h2>Import / eksport</h2>
+<p class="mut">Jedna linia = jeden wpis: <code>adres,opis,termin,router</code>. Adres: IPv4, sieć (CIDR) albo domena. Termin: liczba dni albo data RRRR-MM-DD (ważne do końca dnia). Opis, termin i router są opcjonalne; nieznana nazwa routera = linia odrzucona. Duplikaty są pomijane.</p>
+<form method="post" action="/whitelist/import"><textarea name="data" rows="5" style="width:100%" placeholder="203.0.113.5,Biuro&#10;198.51.100.0/24,Partner,30"></textarea>
+<div class="row" style="margin-top:8px"><select name="router"><option value="">Zakres domyślny: wszystkie routery</option>{% for r in routers %}<option value="{{r.id}}">Zakres domyślny: {{r.name}}</option>{% endfor %}</select>
+<button class="p">Importuj</button> <a href="/whitelist/export">Pobierz CSV</a></div></form></div>{% endif %}
+{% endblock %}

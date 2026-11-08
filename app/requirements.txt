@@ -1,0 +1,9 @@
+fastapi>=0.110
+uvicorn[standard]
+sqlalchemy>=2.0
+psycopg2-binary
+jinja2
+python-multipart
+itsdangerous
+httpx
+tzdata

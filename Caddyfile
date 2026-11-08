@@ -1,0 +1,12 @@
+{
+	admin 0.0.0.0:2019 {
+		origins caddy:2019
+	}
+}
+:80 {
+	reverse_proxy app:8000 {
+		transport http {
+			keepalive 30s
+		}
+	}
+}
