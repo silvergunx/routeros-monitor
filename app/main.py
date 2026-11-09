@@ -1672,10 +1672,25 @@ def log_mute(rid: int, msg: str = Form(), s: Session = Depends(db)):
         return JSONResponse({"ok": False, "msg": tr("msg.mu_max")}, 400)
     lst.append({"pat": pat, "rid": rid, "ts": now().isoformat(timespec="seconds")})
     sset(s, "log_mutes", json.dumps(lst, ensure_ascii=False))
-    log(s, "log wyciszony", "router %d: %s" % (rid, pat))
+    deleted = purge_muted(s, rid, pat)
+    log(s, "log wyciszony", "router %d: %s (usunięto %d starych wpisów, zostawiono najnowszy)" % (rid, pat, deleted))
     s.commit()
     _MUTE_CACHE[0] = 0
-    return {"ok": True, "pat": pat}
+    return {"ok": True, "pat": pat, "deleted": deleted}
+
+
+def purge_muted(s, rid, pat):
+    """Usuwa stare wpisy routera pasujące do wzorca (tylko ostrzeżenia i niżej), zostawiając najnowszy (znacznik 🔕 w liście).
+    Zwraca liczbę usuniętych. Przeszukuje najwyżej 300 tys. najnowszych wpisów routera."""
+    prefix = re.split(r"#|MAC", pat)[0]  # stały początek wzorca przyspiesza wyszukiwanie
+    q = select(LogEntry.id, LogEntry.msg).where(LogEntry.router_id == rid, LogEntry.sev >= 4)
+    if len(prefix) >= 3:
+        q = q.where(LogEntry.msg.startswith(prefix, autoescape=True))
+    ids = [i for i, msg in s.execute(q.order_by(LogEntry.id.desc()).limit(300000)) if _mute_norm(msg) == pat]
+    old = ids[1:]  # ids[0] to najnowszy wpis, zostaje
+    for k in range(0, len(old), 1000):
+        s.execute(delete(LogEntry).where(LogEntry.id.in_(old[k:k + 1000])))
+    return len(old)
 
 
 @app.post("/api/routers/{rid}/logs/unmute", dependencies=[Depends(admin)])
