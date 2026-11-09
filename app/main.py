@@ -1,6 +1,7 @@
 import unicodedata
+import platform
 import os, re, csv, io, json, math, asyncio, socket, hashlib, hmac, secrets, time, ipaddress, datetime as dt
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urlparse, urlencode
 import i18n
 import version as appver
 import speedengines
@@ -3280,6 +3281,34 @@ def wl_rsc(t: str, list: str = "whitelist", s: Session = Depends(db)):
 @app.get("/api/blacklist.rsc", response_class=PlainTextResponse)
 def bl_rsc(t: str, list: str = "blacklist", s: Session = Depends(db)):
     return list_rsc(t, list, "black", s)
+
+
+def report_data(s):
+    """Dane diagnostyczne do zgłoszenia błędu. Celowo bez haseł, tokenów, adresów IP, nazw i identyfikatorów routerów."""
+    routers = []
+    for r in ordered_routers(s):
+        si = sys_info(s, r)
+        item = ", ".join(x for x in (si["model"], ("RouterOS " + r.ver) if r.ver else "") if x)
+        if item:
+            routers.append(item)
+    ros = "; ".join(dict.fromkeys(routers))[:300]
+    d = {"version": appver.current(), "channel": os.getenv("APP_CHANNEL", "").strip() or "-",
+         "platform": "%s, Python %s" % (platform.machine() or "?", platform.python_version()),
+         "database": engine.dialect.name, "routers": str(len(routers)), "routeros": ros}
+    text = "\n".join([
+        "- Application version: " + d["version"],
+        "- Image channel: " + d["channel"],
+        "- Platform: " + d["platform"],
+        "- Database: " + d["database"],
+        "- Monitored routers: " + d["routers"]] + ["- Router: " + x for x in dict.fromkeys(routers)])
+    qs = urlencode({"template": "bug.yml", "version": d["version"], "platform": d["platform"], "routeros": ros})
+    return d, text, "https://github.com/%s/issues/new?%s" % (appver.REPO, qs)
+
+
+@app.get("/report", dependencies=[Depends(admin)])
+def report_page(request: Request, s: Session = Depends(db)):
+    d, text, url = report_data(s)
+    return templates.TemplateResponse(request, "report.html", {"d": d, "text": text, "issue_url": url})
 
 
 @app.get("/log", dependencies=[Depends(admin)])

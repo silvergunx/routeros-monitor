@@ -9,6 +9,9 @@ Notes marked **Routers** mean the configuration command has to be pasted again o
 
 Work in progress on `develop` (version 1.3.0).
 
+### Added
+- **Report a problem** (administrators, link in the footer, page `/report`): shows diagnostic data for a bug report (application version, image channel, server platform, database type, models and RouterOS versions of the monitored routers), a "Copy data" button and a button that opens the GitHub bug form with the fields filled in. The application sends nothing by itself, and the data contains no passwords, tokens, IP addresses, router names or log contents.
+
 ## [1.2.0] - 2026-11-08
 ### Added
 - **Ban button in the log analysis**: failed logins from public addresses show a "Ban" button next to each address (administrators, when the blacklist module is on). It adds the address to the blacklist for all routers without expiry, after a confirmation, using the same protections as the blacklist page (own address, application server, monitored routers). Already banned addresses are marked.
