@@ -1,0 +1,64 @@
+name: Bug report / Zgłoszenie błędu
+description: Something does not work as expected / Coś nie działa tak, jak powinno
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please do **not** paste passwords, tokens (`?t=...`) or public IP addresses you want to keep private.
+        Dziękuję za zgłoszenie! **Nie wklejaj** haseł, tokenów (`?t=...`) ani publicznych adresów IP, które chcesz zachować w tajemnicy.
+        Security problems: use the private report in the Security tab instead / Luki bezpieczeństwa zgłaszaj prywatnie w zakładce Security.
+  - type: input
+    id: version
+    attributes:
+      label: Application version / Wersja aplikacji
+      description: Shown in the footer of the panel / Widoczna w stopce panelu
+      placeholder: "1.2.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How do you run it? / Jak go uruchamiasz?
+      options:
+        - Ready-made Docker image (docker compose pull) / Gotowy obraz Dockera
+        - Built from source (docker compose up --build) / Zbudowany z kodu
+        - Other / Inaczej
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Server hardware and OS / Sprzęt i system serwera
+      placeholder: "Raspberry Pi 4 (arm64), Debian 12"
+  - type: input
+    id: routeros
+    attributes:
+      label: Router model and RouterOS version / Model routera i wersja RouterOS
+      placeholder: "RB5009, RouterOS 7.20.4"
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened? / Co się stało?
+      description: What did you expect and what did you see instead? / Czego oczekiwałeś, a co zobaczyłeś?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce / Kroki do odtworzenia
+      placeholder: |
+        1. ...
+        2. ...
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Logi
+      description: |
+        Output of `docker compose logs --tail=100 app`, remove tokens and secrets first.
+        Wynik `docker compose logs --tail=100 app`, najpierw usuń tokeny i sekrety.
+      render: shell
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots or other details / Zrzuty ekranu lub inne szczegóły
