@@ -433,6 +433,9 @@ def check_pw(p, stored):
         return False
 
 
+_PANEL_IPS = {}  # adres -> czas ostatniego zalogowanego żądania do panelu (auto-ban nigdy nie blokuje adresów, z których ostatnio korzystano)
+
+
 def user(request: Request, s: Session = Depends(db)):
     uid = request.session.get("uid")
     u = s.get(User, uid) if isinstance(uid, int) else None
@@ -440,6 +443,8 @@ def user(request: Request, s: Session = Depends(db)):
         request.session.clear()
         raise NeedLogin()
     request.state.user = u
+    if request.client and request.client.host:
+        _PANEL_IPS[request.client.host] = time.time()
     s.info["who"] = u.username
     return u
 
@@ -1610,6 +1615,86 @@ def flush_logs(batch):
         with Session(engine) as s:
             s.add_all(rows)
             s.commit()
+        try:
+            autoban_check(rows)
+        except Exception as e:  # auto-ban nie może zatrzymać zapisu logów
+            print("autoban: %s" % e, flush=True)
+
+
+# ---------- auto-ban (fail2ban): czasowa blokada adresów z wieloma nieudanymi logowaniami z internetu ----------
+AUTOBAN_HOURS = (1, 6, 24, 72)
+AUTOBAN_MAX_ACTIVE = 500  # górna granica liczby wpisów auto-banu naraz (ochrona przed zalaniem listy)
+_FAIL_RX = re.compile(r"login failure for user \S+ from (?P<ip>\d{1,3}(?:\.\d{1,3}){3}) via [\w-]+", re.I)
+_AB_HITS = {}  # adres -> czasy ostatnich nieudanych logowań
+
+
+def autoban_cfg(s):
+    def num(k, d, lo, hi):
+        v = sget(s, k, "")
+        return min(hi, max(lo, int(v))) if v.isdigit() else d
+    return {"on": blacklist_on(s) and sget(s, "autoban_on", "0") == "1",
+            "n": num("autoban_n", 5, 3, 50), "min": num("autoban_min", 10, 1, 120), "h": num("autoban_h", 1, 1, 168)}
+
+
+def _list_networks(s, kind):
+    out = []
+    for w in s.scalars(select(Whitelist).where(Whitelist.kind == kind, Whitelist.active == True)):  # noqa: E712
+        try:
+            out.append(ipaddress.ip_network(w.ip, strict=False))
+        except ValueError:  # domena
+            continue
+    return out
+
+
+def autoban_check(rows):
+    """Dodaje do blacklisty (na czas z ustawień) adresy publiczne, z których było >= N nieudanych logowań w oknie M minut."""
+    cand = []
+    for x in rows:
+        m = _FAIL_RX.search(x.msg or "")
+        if m and is_public(m.group("ip")):
+            cand.append((x.ts, m.group("ip")))
+    if not cand:
+        return
+    with Session(engine) as s:
+        cfg = autoban_cfg(s)
+        if not cfg["on"]:
+            _AB_HITS.clear()
+            return
+        window = dt.timedelta(minutes=cfg["min"])
+        hit = []
+        for ts, ip in cand:
+            lst = _AB_HITS.setdefault(ip, [])
+            lst.append(ts)
+            lst[:] = [t for t in lst if ts - t <= window]
+            if len(lst) >= cfg["n"] and ip not in hit:
+                hit.append(ip)
+        for ip in [k for k, v in _AB_HITS.items() if not v or now() - v[-1] > window]:
+            del _AB_HITS[ip]
+        if not hit:
+            return
+        mine = [os.getenv("SYSLOG_HOST", "")] + [r.log_ip for r in s.scalars(select(Router)) if r.log_ip]
+        mine += [ip for ip, t in _PANEL_IPS.items() if time.time() - t < 86400]  # adresy, z których ostatnio korzystano z panelu
+        white = _list_networks(s, "white")
+        active = s.scalars(select(Whitelist).where(Whitelist.kind == "black", Whitelist.active == True)).all()  # noqa: E712
+        banned = {w.ip for w in active if not (w.expires and w.expires < now())}
+        auto_n = sum(1 for w in active if (w.comment or "").startswith("auto-ban"))
+        for ip in hit:
+            n_hits = len(_AB_HITS.get(ip, []))
+            _AB_HITS.pop(ip, None)
+            try:
+                net = parse_ip(ip)
+                a = ipaddress.ip_address(ip)
+            except ValueError:
+                continue
+            if net in banned or any(a in n for n in white) or netguard.check_ban(net, mine, ""):
+                continue
+            if auto_n >= AUTOBAN_MAX_ACTIVE:
+                break
+            auto_n += 1
+            s.add(Whitelist(kind="black", ip=net, comment=cmt("auto-ban %d failed logins" % n_hits),
+                            expires=now() + dt.timedelta(hours=cfg["h"]), router_id=None))
+            log(s, "blacklist+ (auto)", "%s: %d nieudanych logowan w %d min, ban na %d h" % (net, n_hits, cfg["min"], cfg["h"]))
+        s.commit()
 
 
 def purge_logs():
@@ -3676,7 +3761,8 @@ def settings_view(request, s, msg="", ok=True):
     return templates.TemplateResponse(request, "settings.html", {
         "domain": sget(s, "domain"), "email": sget(s, "email"), "msg": msg, "ok": ok,
         "interval": interval(s), "intervals": INTERVALS, "routers": ordered_routers(s), "bk": backups_view(s),
-        "wl_enabled": whitelist_on(s), "bl_enabled": blacklist_on(s), "speed_router": sget(s, "speed_router"), "speed_time": SPEED_TIME[:5],
+        "wl_enabled": whitelist_on(s), "bl_enabled": blacklist_on(s), "ab": autoban_cfg(s), "ab_hours": AUTOBAN_HOURS,
+        "speed_router": sget(s, "speed_router"), "speed_time": SPEED_TIME[:5],
         "speed_engine": sget(s, "speed_engine", "") or default_engine(),
         "speed_server": server_setting(s, sget(s, "speed_engine", "") or default_engine()),
         "ookla": bool(OOKLA_BIN), "librespeed": bool(LS_BIN), "ls_best": best_result(s)})
@@ -3698,6 +3784,24 @@ def settings_blacklist(request: Request, on: str = Form(""), s: Session = Depend
     s.commit()
     _BL_ON[1] = 0
     return settings_view(request, s, (tr("msg.bl_on") if on == "1" else tr("msg.bl_off")) + " " + tr("msg.wl_paste"), True)
+
+
+@app.post("/settings/autoban", dependencies=[Depends(admin)])
+def settings_autoban(request: Request, on: str = Form(""), n: str = Form("5"), minutes: str = Form("10"), hours: str = Form("1"),
+                     s: Session = Depends(db)):
+    cfg = autoban_cfg(s)
+    n = int(n) if n.isdigit() else cfg["n"]
+    minutes = int(minutes) if minutes.isdigit() else cfg["min"]
+    hours = int(hours) if hours.isdigit() and int(hours) in AUTOBAN_HOURS else 1
+    sset(s, "autoban_on", "1" if on == "1" else "0")
+    sset(s, "autoban_n", str(min(50, max(3, n))))
+    sset(s, "autoban_min", str(min(120, max(1, minutes))))
+    sset(s, "autoban_h", str(hours))
+    log(s, "auto-ban", ("włączony" if on == "1" else "wyłączony") + ": %d prób / %d min, ban na %d h" % (
+        min(50, max(3, n)), min(120, max(1, minutes)), hours))
+    s.commit()
+    _AB_HITS.clear()
+    return settings_view(request, s, tr("msg.ab_saved"), True)
 
 
 @app.post("/settings/backup-now", dependencies=[Depends(admin)])
