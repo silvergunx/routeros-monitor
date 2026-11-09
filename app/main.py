@@ -1678,6 +1678,19 @@ def log_mute(rid: int, msg: str = Form(), s: Session = Depends(db)):
     return {"ok": True, "pat": pat}
 
 
+@app.post("/api/routers/{rid}/logs/unmute", dependencies=[Depends(admin)])
+def log_unmute(rid: int, msg: str = Form(), s: Session = Depends(db)):
+    pat = _mute_norm(msg)
+    lst = mutes_get(s)
+    new = [m for m in lst if not (m["pat"] == pat and m.get("rid") == rid)]
+    if len(new) != len(lst):
+        sset(s, "log_mutes", json.dumps(new, ensure_ascii=False))
+        log(s, "log: wyciszenie zdjęte", "router %d: %s" % (rid, pat))
+        s.commit()
+        _MUTE_CACHE[0] = 0
+    return {"ok": True, "pat": pat}
+
+
 @app.post("/settings/log-mutes/delete", dependencies=[Depends(admin)])
 def settings_mute_delete(request: Request, rid: str = Form(""), pat: str = Form(), s: Session = Depends(db)):
     lst = mutes_get(s)
@@ -1936,8 +1949,10 @@ def logs_api(request: Request, rid: int, sev: str = "", topic: str = "", q: str 
                                                          LogEntry.ts > now() - dt.timedelta(days=7))
                            .distinct().limit(1000)).all():
         words.update(w for w in (tp or "").split(",") if w and w not in SEV_WORDS)
+    mset = muted_set() if request.state.user.is_admin else set()
     return {"items": [{"t": x.ts.isoformat(timespec="seconds"), "cls": sev_cls(x.sev), "label": tr(SEV_LABEL[sev_cls(x.sev)]),
-                       "topics": [w for w in x.topics.split(",") if w and w not in SEV_WORDS], "msg": x.msg}
+                       "topics": [w for w in x.topics.split(",") if w and w not in SEV_WORDS], "msg": x.msg,
+                       "muted": x.sev >= 4 and (rid, _mute_norm(x.msg)) in mset}
                       for x in rows],
             "counts": counts, "topics": sorted(words),
             "ack": (log_ack_time(request.state.user, rid) or dt.datetime(2000, 1, 1)).isoformat(timespec="seconds"),
