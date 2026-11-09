@@ -10,7 +10,7 @@
   "rep.title": "Report a problem",
   "rep.help": "Below is the diagnostic data that helps to analyse a bug. You can review it, copy it and paste it into a GitHub issue. The application sends nothing by itself: the button only opens the issue form in your browser.",
   "rep.privacy_h": "What is not included:",
-  "rep.privacy": "passwords, tokens, IP addresses, router names or identifiers, and log contents. Only the application version, the server platform and the models and RouterOS versions of the monitored routers are shown.",
+  "rep.privacy": "passwords, tokens, IP addresses, router names or identifiers, user names and log contents. Routers are listed as \"Router 1, 2...\" (model, RouterOS version, state, time of last contact). Besides that: the application version, the server (OS, memory, time zone), the database (table sizes), backups, the enabled modules and the number of IP list entries.",
   "rep.copy": "Copy data",
   "rep.copied": "Copied",
   "rep.open": "Open the issue on GitHub",

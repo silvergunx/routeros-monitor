@@ -10,7 +10,7 @@
   "rep.title": "Zgłoś problem",
   "rep.help": "Poniżej są dane diagnostyczne, które pomogą w analizie błędu. Możesz je przejrzeć, skopiować i wkleić do zgłoszenia na GitHubie. Aplikacja niczego nie wysyła sama: przycisk tylko otwiera w przeglądarce formularz zgłoszenia.",
   "rep.privacy_h": "Czego tu nie ma:",
-  "rep.privacy": "haseł, tokenów, adresów IP, nazw ani identyfikatorów routerów i zawartości logów. Jest tylko wersja aplikacji, platforma serwera oraz modele i wersje RouterOS monitorowanych routerów.",
+  "rep.privacy": "haseł, tokenów, adresów IP, nazw ani identyfikatorów routerów, nazw użytkowników i zawartości logów. Routery są podane jako „Router 1, 2…” (model, wersja RouterOS, stan, czas ostatniego kontaktu). Poza tym: wersja aplikacji, serwer (system, pamięć, strefa czasowa), baza (rozmiar tabel), kopie zapasowe, włączone moduły i liczba wpisów na listach IP.",
   "rep.copy": "Kopiuj dane",
   "rep.copied": "Skopiowano",
   "rep.open": "Otwórz zgłoszenie na GitHubie",

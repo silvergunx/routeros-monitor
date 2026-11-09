@@ -10,7 +10,7 @@ Notes marked **Routers** mean the configuration command has to be pasted again o
 Work in progress on `develop` (version 1.3.0).
 
 ### Added
-- **Report a problem** (administrators, link in the footer, page `/report`): shows diagnostic data for a bug report (application version, image channel, server platform, database type, models and RouterOS versions of the monitored routers), a "Copy data" button and a button that opens the GitHub bug form with the fields filled in. The application sends nothing by itself, and the data contains no passwords, tokens, IP addresses, router names or log contents.
+- **Report a problem** (administrators, link in the footer, page `/report`): shows diagnostic data for a bug report and lets you copy it or open the GitHub bug form with the fields filled in. It covers the environment (version, image channel, platform, OS, time zone, memory, uptime), the database (size and row counts of the largest tables, retention settings, monitoring interval), routers (as "Router 1, 2...": model, RouterOS and firmware, state, last contact, number of log entries in the last hour, rejected syslog sources), backups (count, size, age, last error, limit, free space) and features (modules, number of list entries, update check status, speed test engine and last result). The application sends nothing by itself, and the data contains no passwords, tokens, IP addresses, router or user names or log contents.
 
 ## [1.2.0] - 2026-11-08
 ### Added

@@ -3283,26 +3283,142 @@ def bl_rsc(t: str, list: str = "blacklist", s: Session = Depends(db)):
     return list_rsc(t, list, "black", s)
 
 
+_STARTED = time.time()
+
+
+def _age(sec):
+    sec = int(max(0, sec))
+    if sec < 90:
+        return "%d s" % sec
+    if sec < 5400:
+        return "%d min" % (sec // 60)
+    if sec < 172800:
+        return "%d h" % (sec // 3600)
+    return "%d d" % (sec // 86400)
+
+
+def _read_text(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
+
+def _diag_env(s):
+    mem = {}
+    for line in _read_text("/proc/meminfo").splitlines():
+        k, _, v = line.partition(":")
+        if k in ("MemTotal", "MemAvailable") and v.split():
+            mem[k] = int(v.split()[0]) * 1024
+    lim = _read_text("/sys/fs/cgroup/memory.max")
+    out = ["- Application version: %s" % appver.current(),
+           "- Image channel: %s" % (os.getenv("APP_CHANNEL", "").strip() or "-"),
+           "- Platform: %s, Python %s" % (platform.machine() or "?", platform.python_version()),
+           "- OS: %s %s" % (platform.system(), platform.release()),
+           "- Time zone: %s (UTC%s), TZ=%s" % (time.strftime("%Z"), time.strftime("%z"), os.getenv("TZ", "-")),
+           "- Application uptime: %s" % _age(time.time() - _STARTED)]
+    if mem.get("MemTotal"):
+        out.append("- Server memory: %s available of %s" % (bytes_h(mem.get("MemAvailable", 0)), bytes_h(mem["MemTotal"])))
+    if lim.isdigit():
+        out.append("- Container memory limit: %s" % bytes_h(int(lim)))
+    return out
+
+
+def _diag_db(s):
+    out = []
+    if engine.dialect.name == "postgresql":
+        out.append("- Database: PostgreSQL %s, size %s" % (s.scalar(text("show server_version")),
+                                                          bytes_h(s.scalar(text("select pg_database_size(current_database())")))))
+        for n, est, sz in s.execute(text(
+                "select relname, reltuples::bigint, pg_total_relation_size(oid) from pg_class where relkind = 'r' "
+                "and relname in ('iface_metrics', 'metrics', 'logs', 'client_stats', 'audit') order by 3 desc")).all():
+            out.append("  - table %s: ~%d rows, %s" % (n, max(est, 0), bytes_h(sz)))
+    else:
+        out.append("- Database: %s" % engine.dialect.name)
+    out.append("- Retention (days): measurements %d, interface samples %d, logs %d" % (RETENTION, IFACE_RETENTION, LOG_DAYS))
+    out.append("- Monitoring interval: %d s" % interval(s))
+    return out
+
+
+def _diag_routers(s):
+    rs = ordered_routers(s)
+    hour = dict(s.execute(select(LogEntry.router_id, func.count()).where(LogEntry.ts > now() - dt.timedelta(hours=1))
+                          .group_by(LogEntry.router_id)).all())
+    out = ["- Monitored routers: %d (%d online)" % (len(rs), sum(1 for r in rs if r.online))]
+    for i, r in enumerate(rs, 1):
+        si = sys_info(s, r)
+        p = [si["model"] or "?", "RouterOS " + (r.ver or "?")]
+        if si["fw"]:
+            p.append("firmware " + si["fw"])
+        p.append("online" if r.online else "offline")
+        p.append("last contact %s ago" % _age((now() - r.last_seen).total_seconds()) if r.last_seen else "never contacted")
+        if r.edge:
+            p.append("edge")
+        if si["manager"]:
+            p.append("CAPsMAN manager")
+        p.append("syslog %s, %d log entries in the last hour" % ("source set" if r.log_ip else "source not set", hour.get(r.id, 0)))
+        out.append("  - Router %d: %s" % (i, ", ".join(p)))
+    out.append("- Syslog packets rejected (unknown source): %d from %d sources" % (
+        sum(c[0] for c in _log_rejected.values()), len(_log_rejected)))
+    return out
+
+
+def _diag_backups(s):
+    b = backups_view(s)
+    if not b.get("available"):
+        return ["- Backups: directory not available"]
+    if b["files"]:
+        n = b["files"][0]
+        out = ["- Backups: %d files, total %s, newest %s ago (%s)" % (len(b["files"]), b["total"],
+                                                                      _age((now() - n["ts"]).total_seconds()), n["size"])]
+    else:
+        out = ["- Backups: none"]
+    out.append("- Backup settings: size limit %s, keep %s days, chart history in backups %s, free disk %s" % (
+        b.get("limit_h") or "none", b["keep"], "yes" if os.getenv("BACKUP_INCLUDE_METRICS", "0") == "1" else "no", b.get("free") or "?"))
+    if b.get("error"):
+        out.append("- Last backup error: %s" % " ".join(b["error"].split())[:120])
+    return out
+
+
+def _diag_features(s):
+    cnt = dict(s.execute(select(Whitelist.kind, func.count()).where(Whitelist.active == True)  # noqa: E712
+                         .group_by(Whitelist.kind)).all())
+    out = ["- Modules: whitelist %s (%d entries), blacklist %s (%d entries)" % (
+        "on" if whitelist_on(s) else "off", cnt.get("white", 0), "on" if blacklist_on(s) else "off", cnt.get("black", 0)),
+        "- Update check: %s" % appver.status(),
+        "- Speed test engine: %s (Ookla %s, LibreSpeed %s)" % (sget(s, "speed_engine", "") or default_engine(),
+                                                              "installed" if OOKLA_BIN else "not installed",
+                                                              "installed" if LS_BIN else "not installed")]
+    for i, r in enumerate(ordered_routers(s), 1):
+        t = s.scalars(select(SpeedTest).where(SpeedTest.router_id == r.id).order_by(SpeedTest.ts.desc()).limit(1)).first() if r.edge else None
+        if t:
+            out.append("- Last speed test (router %d): %s via %s, %s ago" % (
+                i, "ok" if t.ok else "failed", t.source or "?", _age((now() - t.ts).total_seconds())))
+    return out
+
+
 def report_data(s):
     """Dane diagnostyczne do zgłoszenia błędu. Celowo bez haseł, tokenów, adresów IP, nazw i identyfikatorów routerów."""
+    parts = []
+    for title, fn in (("Environment", _diag_env), ("Database", _diag_db), ("Routers", _diag_routers),
+                      ("Backups", _diag_backups), ("Features", _diag_features)):
+        try:
+            lines = fn(s)
+        except Exception as e:  # jedna sekcja nie może zepsuć całej strony
+            s.rollback()
+            lines = ["- (unavailable: %s)" % type(e).__name__]
+        parts.append("## " + title + "\n" + "\n".join(lines))
     routers = []
     for r in ordered_routers(s):
-        si = sys_info(s, r)
-        item = ", ".join(x for x in (si["model"], ("RouterOS " + r.ver) if r.ver else "") if x)
+        item = ", ".join(x for x in (sys_info(s, r)["model"], ("RouterOS " + r.ver) if r.ver else "") if x)
         if item:
             routers.append(item)
     ros = "; ".join(dict.fromkeys(routers))[:300]
-    d = {"version": appver.current(), "channel": os.getenv("APP_CHANNEL", "").strip() or "-",
-         "platform": "%s, Python %s" % (platform.machine() or "?", platform.python_version()),
-         "database": engine.dialect.name, "routers": str(len(routers)), "routeros": ros}
-    text = "\n".join([
-        "- Application version: " + d["version"],
-        "- Image channel: " + d["channel"],
-        "- Platform: " + d["platform"],
-        "- Database: " + d["database"],
-        "- Monitored routers: " + d["routers"]] + ["- Router: " + x for x in dict.fromkeys(routers)])
+    d = {"version": appver.current(), "platform": "%s, Python %s" % (platform.machine() or "?", platform.python_version()),
+         "routeros": ros}
     qs = urlencode({"template": "bug.yml", "version": d["version"], "platform": d["platform"], "routeros": ros})
-    return d, text, "https://github.com/%s/issues/new?%s" % (appver.REPO, qs)
+    return d, "\n\n".join(parts), "https://github.com/%s/issues/new?%s" % (appver.REPO, qs)
 
 
 @app.get("/report", dependencies=[Depends(admin)])

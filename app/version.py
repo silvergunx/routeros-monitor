@@ -67,7 +67,7 @@ def _fetch():
     return r.json()
 
 
-_state = {"info": None, "t": 0.0, "ttl": 0, "busy": False}
+_state = {"info": None, "t": 0.0, "ttl": 0, "busy": False, "ok": None}
 _lock = threading.Lock()
 
 
@@ -79,7 +79,14 @@ def _refresh():
     except Exception:
         info = _state["info"]  # przy błędzie zostaje poprzedni wynik
     with _lock:
-        _state.update(info=info, t=time.time(), ttl=TTL_OK if ok else TTL_FAIL, busy=False)
+        _state.update(info=info, t=time.time(), ttl=TTL_OK if ok else TTL_FAIL, busy=False, ok=ok)
+
+
+def status():
+    """Do diagnostyki: 'off' (wyłączone), 'not checked yet', 'ok' albo 'failed' (ostatnie zapytanie do GitHuba)."""
+    if not ENABLED:
+        return "off"
+    return {None: "not checked yet", True: "ok", False: "failed"}[_state["ok"]]
 
 
 def update_info():
