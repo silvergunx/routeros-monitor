@@ -10,6 +10,7 @@ Notes marked **Routers** mean the configuration command has to be pasted again o
 Work in progress on `develop` (version 1.3.0).
 
 ### Added
+- **Outdated router script indicator**: the router now reports the version of its script with every measurement. When the script on a router is older than the one the application expects, administrators see a badge "router script outdated" on the router list and on the router page, and the "Report a problem" page lists it. **Routers**: paste the configuration command once more on every router (the scripts of earlier versions send no version, so they are shown as outdated until then). From then on the panel tells you whenever a new version needs a re-paste.
 - **Report a problem** (administrators, link in the footer, page `/report`): shows diagnostic data for a bug report and lets you copy it or open the GitHub bug form with the fields filled in. It covers the environment (version, image channel, platform, OS, time zone, memory, uptime), the database (size and row counts of the largest tables, retention settings, monitoring interval), routers (as "Router 1, 2...": model, RouterOS and firmware, state, last contact, number of log entries in the last hour, rejected syslog sources), backups (count, size, age, last error, limit, free space) and features (modules, number of list entries, update check status, speed test engine and last result). The application sends nothing by itself, and the data contains no passwords, tokens, IP addresses, router or user names or log contents.
 
 ## [1.2.0] - 2026-11-08

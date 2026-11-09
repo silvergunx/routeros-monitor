@@ -536,6 +536,7 @@ def index(request: Request, s: Session = Depends(db)):
                                                               "wans": {r.id: wan_info(s, r)[2] for r in routers},
                                                               "invs": {r.id: inventory_view(s, r) for r in routers},
                                                               "upds": {r.id: update_available(r) for r in routers},
+                                                              "stale": {r.id: script_stale(r) for r in routers} if request.state.user.is_admin else {},
                                                               "sis": {r.id: sys_info(s, r) for r in routers},
                                                               "lcs": {r.id: unread_counts(s, request.state.user, r.id)
                                                                       for r in routers}})
@@ -563,6 +564,17 @@ def q(text):
         else:
             out.append(c)
     return "".join(out)
+
+
+# Wersja skryptów na routerze. Zwiększ ją TYLKO wtedy, gdy zmiana skryptów wymaga ponownego wklejenia komendy konfiguracyjnej:
+# panel pokazuje wtedy administratorowi, że skrypt routera jest nieaktualny. Router podaje swoją wersję w każdym zapytaniu (cv).
+SCRIPT_VERSION = 1
+_ROUTER_CV = {}  # id routera -> wersja skryptu zgłoszona w ostatnim zapytaniu (0 = skrypt bez znacznika wersji); po restarcie pusto do pierwszego pomiaru
+
+
+def script_stale(r):
+    cv = _ROUTER_CV.get(r.id)
+    return cv is not None and cv < SCRIPT_VERSION
 
 
 MON = r'''
@@ -619,9 +631,9 @@ MON = r'''
   } on-error={}
   :local j "{\"id\":\"$id\",\"ver\":\"$ver\",\"up\":\"$up\",\"cpu\":$cpu,\"tm\":$tm,\"fm\":$fm,\"temp\":$temp,\"conns\":$conns,\"dhcp\":$dhcp,\"nw\":\5B$nw\5D,\"ifs\":\5B$ifs\5D}"
   :local resp ""
-  :do {:set resp ([/tool fetch url="@URL@/api/metrics?t=@TOKEN@" http-method=post http-data=$j http-header-field="Content-Type: application/json" output=user as-value]->"data")} on-error={
+  :do {:set resp ([/tool fetch url="@URL@/api/metrics?t=@TOKEN@&cv=@CV@" http-method=post http-data=$j http-header-field="Content-Type: application/json" output=user as-value]->"data")} on-error={
     :delay 3s
-    :do {:set resp ([/tool fetch url="@URL@/api/metrics?t=@TOKEN@" http-method=post http-data=$j http-header-field="Content-Type: application/json" output=user as-value]->"data")} on-error={:log warning "app-monitor: brak polaczenia z serwerem aplikacji"}
+    :do {:set resp ([/tool fetch url="@URL@/api/metrics?t=@TOKEN@&cv=@CV@" http-method=post http-data=$j http-header-field="Content-Type: application/json" output=user as-value]->"data")} on-error={:log warning "app-monitor: brak polaczenia z serwerem aplikacji"}
   }
   :if ($resp ~ "\"live\":1") do={
     :if ([:len [/system script job find where script="app-live"]] = 0) do={:execute script="/system script run app-live"}
@@ -790,7 +802,7 @@ def setup_rsc(request: Request, t: str, iface: str = "ether1", list: str = "whit
     bl = 1 if blacklist_on(s) else 0
     base = str(request.base_url).rstrip("/")
     rep = {"@URL@": base, "@TOKEN@": t, "@IFACE@": clean(iface, "ether1"), "@LIST@": clean(list, "whitelist"),
-           "@SPEEDURL@": SPEED_URL, "@SPEEDBYTES@": str(SPEED_BYTES), "@SPEEDN@": str(SPEED_STREAMS_ROUTER)}
+           "@CV@": str(SCRIPT_VERSION), "@SPEEDURL@": SPEED_URL, "@SPEEDBYTES@": str(SPEED_BYTES), "@SPEEDN@": str(SPEED_STREAMS_ROUTER)}
 
     def fill(x):
         for k, v in rep.items():
@@ -844,6 +856,7 @@ def router_page(rid: int, request: Request, s: Session = Depends(db)):
     names, wan, w = wan_info(s, r)
     return templates.TemplateResponse(request, "router.html", {"r": r, "cmd": cmd, "m": m, "names": names,
                                                               "inv": inventory_view(s, r), "upd": update_available(r),
+                                                              "stale": script_stale(r) and request.state.user.is_admin,
                                                               "si": sys_info(s, r),
                                                               "hours": router_hours(request.state.user, r.id),
                                                               "nw": nw_view(r),
@@ -1032,14 +1045,14 @@ def rate(cur, old, sec):
 
 
 @app.post("/api/metrics")
-async def metrics(request: Request, t: str):
+async def metrics(request: Request, t: str, cv: str = ""):
     raw = (await request.body()).decode("utf-8", "replace")
-    return await run_in_threadpool(store_metrics, t, raw, request.client.host if request.client else None)
+    return await run_in_threadpool(store_metrics, t, raw, request.client.host if request.client else None, int(cv) if cv.isdigit() else 0)
 
 
-def store_metrics(t, raw, ip=None):
+def store_metrics(t, raw, ip=None, cv=0):
     with Session(engine) as s:
-        return _store_metrics(s, t, raw, ip)
+        return _store_metrics(s, t, raw, ip, cv)
 
 
 def _median(v):
@@ -1108,8 +1121,9 @@ def nw_metrics(r, d):
     return out
 
 
-def _store_metrics(s, t, raw, ip=None):
+def _store_metrics(s, t, raw, ip=None, cv=0):
     r = get_router(s, t)
+    _ROUTER_CV[r.id] = cv
     if ip and not r.log_ip_fixed and r.log_ip != ip:
         r.log_ip = ip
     try:
@@ -3357,6 +3371,7 @@ def _diag_routers(s):
             p.append("edge")
         if si["manager"]:
             p.append("CAPsMAN manager")
+        p.append("script %s" % ("outdated (v%s, current v%d)" % (_ROUTER_CV.get(r.id), SCRIPT_VERSION) if script_stale(r) else "ok" if r.id in _ROUTER_CV else "version not reported yet"))
         p.append("syslog %s, %d log entries in the last hour" % ("source set" if r.log_ip else "source not set", hour.get(r.id, 0)))
         out.append("  - Router %d: %s" % (i, ", ".join(p)))
     out.append("- Syslog packets rejected (unknown source): %d from %d sources" % (
