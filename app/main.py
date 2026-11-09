@@ -1602,9 +1602,15 @@ def refresh_ipmap():
 
 def flush_logs(batch):
     rows, seen = [], {}
+    try:
+        muted = muted_set()
+    except Exception:  # wyciszanie nie może zatrzymać zapisu logów
+        muted = set()
     for rid, ts, data in batch:
         sev, topics, msg = parse_syslog(data)
         if not msg:
+            continue
+        if sev >= 4 and (rid, _mute_norm(msg)) in muted:  # błędy i komunikaty krytyczne nigdy nie są pomijane
             continue
         k = (rid, topics, msg)
         if k in seen and (ts - seen[k]).total_seconds() < 2:  # ten sam wpis z kilku reguł logowania
@@ -1612,13 +1618,76 @@ def flush_logs(batch):
         seen[k] = ts
         rows.append(LogEntry(router_id=rid, ts=ts, sev=sev, topics=topics[:100], msg=msg[:1000]))
     if rows:
+        fresh = [(x.ts, x.msg) for x in rows]  # po commit obiekty są odłączone od sesji, więc kopiujemy potrzebne pola wcześniej
         with Session(engine) as s:
             s.add_all(rows)
             s.commit()
         try:
-            autoban_check(rows)
+            autoban_check(fresh)
         except Exception as e:  # auto-ban nie może zatrzymać zapisu logów
             print("autoban: %s" % e, flush=True)
+
+
+# ---------- wyciszanie komunikatów logu: wybrane powtarzające się wpisy routera nie są zapisywane ----------
+MUTE_MAX = 100
+_MAC_RX = re.compile(r"(?<![0-9A-Fa-f:])[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}(?![0-9A-Fa-f:])")
+_MUTE_CACHE = [0.0, set()]
+
+
+def _mute_norm(msg):
+    """Wzorzec komunikatu do wyciszania: adresy MAC i liczby zastąpione znacznikami (jak _norm, ale z MAC-ami)."""
+    return _norm(_MAC_RX.sub("MAC", msg))
+
+
+def mutes_get(s):
+    try:
+        return [m for m in json.loads(sget(s, "log_mutes", "[]")) if isinstance(m, dict) and m.get("pat")]
+    except ValueError:
+        return []
+
+
+def muted_set():
+    """Zbiór (id routera, wzorzec) wyciszonych komunikatów; odświeżany co 30 s albo po zmianie."""
+    if time.time() - _MUTE_CACHE[0] > 30:
+        with Session(engine) as s:
+            _MUTE_CACHE[1] = {(m.get("rid"), m["pat"]) for m in mutes_get(s)}
+        _MUTE_CACHE[0] = time.time()
+    return _MUTE_CACHE[1]
+
+
+@app.post("/api/routers/{rid}/logs/mute", dependencies=[Depends(admin)])
+def log_mute(rid: int, msg: str = Form(), s: Session = Depends(db)):
+    row = s.scalars(select(LogEntry).where(LogEntry.router_id == rid, LogEntry.msg == msg[:1000])
+                    .order_by(LogEntry.id.desc()).limit(1)).first()
+    if not row or row.sev <= 3:
+        return JSONResponse({"ok": False, "msg": tr("msg.mu_err")}, 400)
+    res = translate_log(row.msg, row.topics)
+    if _FAIL_RX.search(row.msg) or (res and res["level"] == "bad"):  # ataki i problemy muszą zostać widoczne (i liczone przez auto-ban)
+        return JSONResponse({"ok": False, "msg": tr("msg.mu_bad")}, 400)
+    pat = _mute_norm(row.msg)
+    lst = mutes_get(s)
+    if any(m["pat"] == pat and m.get("rid") == rid for m in lst):
+        return {"ok": True, "pat": pat}
+    if len(lst) >= MUTE_MAX:
+        return JSONResponse({"ok": False, "msg": tr("msg.mu_max")}, 400)
+    lst.append({"pat": pat, "rid": rid, "ts": now().isoformat(timespec="seconds")})
+    sset(s, "log_mutes", json.dumps(lst, ensure_ascii=False))
+    log(s, "log wyciszony", "router %d: %s" % (rid, pat))
+    s.commit()
+    _MUTE_CACHE[0] = 0
+    return {"ok": True, "pat": pat}
+
+
+@app.post("/settings/log-mutes/delete", dependencies=[Depends(admin)])
+def settings_mute_delete(request: Request, rid: str = Form(""), pat: str = Form(), s: Session = Depends(db)):
+    lst = mutes_get(s)
+    new = [m for m in lst if not (m["pat"] == pat and str(m.get("rid")) == rid)]
+    if len(new) != len(lst):
+        sset(s, "log_mutes", json.dumps(new, ensure_ascii=False))
+        log(s, "log: wyciszenie zdjęte", "router %s: %s" % (rid, pat))
+        s.commit()
+        _MUTE_CACHE[0] = 0
+    return settings_view(request, s, tr("msg.mu_removed"), True)
 
 
 # ---------- auto-ban (fail2ban): czasowa blokada adresów z wieloma nieudanymi logowaniami z internetu ----------
@@ -1649,10 +1718,10 @@ def _list_networks(s, kind):
 def autoban_check(rows):
     """Dodaje do blacklisty (na czas z ustawień) adresy publiczne, z których było >= N nieudanych logowań w oknie M minut."""
     cand = []
-    for x in rows:
-        m = _FAIL_RX.search(x.msg or "")
+    for ts, msg in rows:  # rows: krotki (czas, treść)
+        m = _FAIL_RX.search(msg or "")
         if m and is_public(m.group("ip")):
-            cand.append((x.ts, m.group("ip")))
+            cand.append((ts, m.group("ip")))
     if not cand:
         return
     with Session(engine) as s:
@@ -3762,6 +3831,8 @@ def settings_view(request, s, msg="", ok=True):
         "domain": sget(s, "domain"), "email": sget(s, "email"), "msg": msg, "ok": ok,
         "interval": interval(s), "intervals": INTERVALS, "routers": ordered_routers(s), "bk": backups_view(s),
         "wl_enabled": whitelist_on(s), "bl_enabled": blacklist_on(s), "ab": autoban_cfg(s), "ab_hours": AUTOBAN_HOURS,
+        "mutes": [{"pat": m["pat"], "rid": m.get("rid"), "ts": m.get("ts", ""),
+                   "router": next((r.name for r in ordered_routers(s) if r.id == m.get("rid")), "?")} for m in mutes_get(s)],
         "speed_router": sget(s, "speed_router"), "speed_time": SPEED_TIME[:5],
         "speed_engine": sget(s, "speed_engine", "") or default_engine(),
         "speed_server": server_setting(s, sget(s, "speed_engine", "") or default_engine()),

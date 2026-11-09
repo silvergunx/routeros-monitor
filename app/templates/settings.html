@@ -31,6 +31,12 @@ document.getElementById('ivno').onclick=()=>{s.value=cur;d.close()};})();</scrip
 {% if not bl_enabled %}<p class="small mut">{{ t('set.ab.needs_bl') }}</p>{% endif %}
 <script>(function(){const f=document.getElementById('abform'),c=f.querySelector('[name=on]'),was=c.checked;
 f.onsubmit=()=>{if(c.checked&&!was)return confirm({{ t('set.ab.confirm')|tojson }});return true}})();</script></div>
+<div class="card" id="muteset"><h2>{{ t('set.mu.title') }}</h2>
+<p><small class="mut">{{ t('set.mu.help') }}</small></p>
+{% if mutes %}<div class="scroll"><table><tr><th>{{ t('set.mu.router') }}</th><th>{{ t('set.mu.pattern') }}</th><th>{{ t('set.mu.since') }}</th><th></th></tr>
+{% for m in mutes %}<tr><td>{{ m.router }}</td><td class="small"><code>{{ m.pat }}</code></td><td class="small mut">{{ m.ts }}</td>
+<td><form method="post" action="/settings/log-mutes/delete" class="i"><input type="hidden" name="rid" value="{{ m.rid }}"><input type="hidden" name="pat" value="{{ m.pat }}"><button>{{ t('set.mu.remove') }}</button></form></td></tr>{% endfor %}</table></div>
+{% else %}<p class="mut">{{ t('set.mu.empty') }}</p>{% endif %}</div>
 <div class="card" id="spdset"><h2>{{ t('set.sp.title') }}</h2>
 <form method="post" action="/settings/speed">
 <label class="fl">{{ t('set.sp.router') }}
