@@ -28,8 +28,14 @@ document.getElementById('ivno').onclick=()=>{s.value=cur;d.close()};})();</scrip
 <p><small>{{ t('set.iv.after') }}</small></p>
 <h3 style="margin:14px 0 4px">{{ t('set.off.title') }}</h3>
 <form method="post" action="/settings/offline" class="row">{{ t('set.off.mult') }} <input name="mult" value="{{ ('%g' % off_mult)|replace('.', ',') }}" inputmode="decimal" style="width:80px" aria-label="{{ t('set.off.mult') }}"> <button class="p">{{ t('common.save') }}</button></form>
-<table class="small" style="margin-top:8px"><tr><th>{{ t('set.off.col_iv') }}</th><th>{{ t('set.off.col_nr') }}</th><th>{{ t('set.off.col_off') }}</th></tr>
-{% for i, nr, off in off_table %}<tr><td>{{ i }} s</td><td>{{ ('%g' % (nr|round(1)))|replace('.', ',') }} s</td><td>{{ ('%g' % (off|round(1)))|replace('.', ',') }} s</td></tr>{% endfor %}</table>
+{% macro f(v) %}{{ ('%g' % (v|round(1)))|replace('.', ',') }}{% endmacro %}
+<form method="post" action="/settings/offline/routers">
+<div class="scroll"><table class="small" style="margin-top:8px"><tr><th>{{ t('set.off.col_router') }}</th><th>{{ t('set.off.col_gap') }}</th><th>{{ t('set.off.col_nr') }}</th><th>{{ t('set.off.col_off') }}</th></tr>
+{% for x in thr_rows %}<tr><td><b>{{ x.name }}</b></td><td>{% if x.gap %}{{ f(x.gap) }} s{% else %}-{% endif %}</td>
+<td><input name="nr_{{ x.id }}" value="{{ f(x.own_nr) if x.own_nr else '' }}" placeholder="{{ f(x.auto_nr) }}" inputmode="decimal" style="width:70px"> <span class="mut">{{ t('set.off.in_effect') }} {{ f(x.eff_nr) }} s</span></td>
+<td><input name="off_{{ x.id }}" value="{{ f(x.own_off) if x.own_off else '' }}" placeholder="{{ f(x.auto_off) }}" inputmode="decimal" style="width:70px"> <span class="mut">{{ t('set.off.in_effect') }} {{ f(x.eff_off) }} s</span></td></tr>
+{% else %}<tr><td colspan="4" class="mut">{{ t('rt.none') }}</td></tr>{% endfor %}</table></div>
+<p style="margin:8px 0 0"><button class="p">{{ t('set.off.save_routers') }}</button></p></form>
 <p><small class="mut">{{ t('set.off.help') }}</small></p></div>
 <div class="card" id="order"><h2>{{ t('set.order.title') }}</h2>
 <table>{% for x in routers %}<tr><td style="width:40px" class="mut">{{loop.index}}.</td><td><b>{{x.name}}</b></td><td style="text-align:right">

@@ -98,9 +98,12 @@ def now():
 # zebrania próbek używamy interwału z ustawień):
 #   "brak odpowiedzi" (żółty) po: odstęp + odstęp/5 + 1 s   (5 s -> 7 s, 10 s -> 13 s, 15 s -> 19 s, 60 s -> 73 s)
 #   "offline" (czerwony) po:      czas "brak odpowiedzi" x mnożnik z ustawień (domyślnie 1,5)
+# Użytkownik może dla każdego routera wpisać własne progi (w sekundach, bez górnego limitu). Jedyne dolne granice:
+# "brak odpowiedzi" nie wcześniej niż zmierzony odstęp + 1 s, "offline" nie wcześniej niż "brak odpowiedzi" + 1 s.
 _GAPS = {}             # id routera -> ostatnie odstępy (s) między kolejnymi pomiarami
 _INTERVAL_S = [60]     # interwał monitoringu z ustawień (odświeżany w interval())
 _OFFLINE_MULT = [1.5]  # mnożnik czasu "brak odpowiedzi" dający próg offline (odświeżany w interval())
+_THR = {}              # id routera -> {"nr": własny próg "brak odpowiedzi" (s) albo None, "off": własny próg offline albo None}
 
 
 def reporting_gap(rid):
@@ -109,19 +112,46 @@ def reporting_gap(rid):
     return statistics.median(g) if g and len(g) >= 3 else None
 
 
+def _gap(rid):
+    return reporting_gap(rid) or _INTERVAL_S[0]
+
+
+def auto_no_response(rid):
+    return _gap(rid) * 1.2 + 1
+
+
+def auto_offline(rid):
+    """Automatyczny próg offline; bez własnych próbek (tuż po starcie) minimum 90 s, żeby restart nie robił z routerów „offline”."""
+    t = no_response_after(rid) * _OFFLINE_MULT[0]
+    return max(t, 90) if reporting_gap(rid) is None else t
+
+
 def no_response_after(rid):
-    """Po ilu sekundach bez pomiaru router ma status „brak odpowiedzi”."""
-    gap = reporting_gap(rid) or _INTERVAL_S[0]
-    return gap * 1.2 + 1
+    """Po ilu sekundach bez pomiaru router ma status „brak odpowiedzi”: własny próg albo automatyczny, nie mniej niż odstęp + 1 s."""
+    own = _THR.get(rid, {}).get("nr")
+    return max(own if own is not None else auto_no_response(rid), _gap(rid) + 1)
 
 
 def online_after(rid):
-    """Po ilu sekundach bez pomiaru router jest offline: „brak odpowiedzi” x mnożnik, najwyżej 300 s.
-    Bez własnych próbek (tuż po starcie) minimum 90 s, żeby restart nie robił z routerów „offline”."""
-    t = no_response_after(rid) * _OFFLINE_MULT[0]
-    if reporting_gap(rid) is None:
-        t = max(t, 90)
-    return min(300.0, t)
+    """Po ilu sekundach bez pomiaru router jest offline: własny próg albo automatyczny, nie mniej niż „brak odpowiedzi” + 1 s."""
+    own = _THR.get(rid, {}).get("off")
+    return max(own if own is not None else auto_offline(rid), no_response_after(rid) + 1)
+
+
+def router_thresholds(s):
+    """Własne progi routerów z ustawień ({id: {"nr":…, "off":…}}); błędne wpisy są pomijane."""
+    out = {}
+    try:
+        raw = json.loads(sget(s, "router_thr", "{}") or "{}")
+    except ValueError:
+        return out
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            if str(k).isdigit() and isinstance(v, dict):
+                nr, off = v.get("nr"), v.get("off")
+                out[int(k)] = {"nr": float(nr) if isinstance(nr, (int, float)) and nr >= 1 else None,
+                               "off": float(off) if isinstance(off, (int, float)) and off >= 1 else None}
+    return out
 
 
 class Base(DeclarativeBase):
@@ -1021,13 +1051,15 @@ def interval(s):
     iv = int(v) if v.isdigit() and int(v) in INTERVALS else 60
     _INTERVAL_S[0] = iv
     _OFFLINE_MULT[0] = offline_mult(s)
+    _THR.clear()
+    _THR.update(router_thresholds(s))
     return iv
 
 
 def offline_mult(s):
-    """Mnożnik czasu „brak odpowiedzi” dający próg offline: 1,0 do 10, domyślnie 1,5."""
+    """Mnożnik czasu „brak odpowiedzi” dający próg offline: od 1,0 (bez górnego limitu), domyślnie 1,5."""
     try:
-        return min(10.0, max(1.0, float(sget(s, "offline_mult", "1.5").replace(",", "."))))
+        return max(1.0, float(sget(s, "offline_mult", "1.5").replace(",", ".")))
     except ValueError:
         return 1.5
 
@@ -3740,8 +3772,9 @@ def _diag_routers(s):
         p.append("online" if r.online else "offline")
         p.append("last contact %s ago" % _age((now() - r.last_seen).total_seconds()) if r.last_seen else "never contacted")
         gap = reporting_gap(r.id)
-        p.append("reports every ~%.1f s, no response after %.0f s, offline after %.0f s" % (gap, no_response_after(r.id), online_after(r.id))
-                 if gap else "reporting rhythm not measured yet (offline after %.0f s)" % online_after(r.id))
+        own = " (own thresholds)" if any(v is not None for v in _THR.get(r.id, {}).values()) else ""
+        p.append("reports every ~%.1f s, no response after %.0f s, offline after %.0f s%s" % (gap, no_response_after(r.id), online_after(r.id), own)
+                 if gap else "reporting rhythm not measured yet (offline after %.0f s%s)" % (online_after(r.id), own))
         if r.edge:
             p.append("edge")
         if si["manager"]:
@@ -4076,7 +4109,10 @@ def settings_view(request, s, msg="", ok=True):
         "domain": sget(s, "domain"), "email": sget(s, "email"), "msg": msg, "ok": ok,
         "interval": interval(s), "intervals": INTERVALS, "routers": ordered_routers(s), "bk": backups_view(s),
         "wl_enabled": whitelist_on(s), "bl_enabled": blacklist_on(s), "ab": autoban_cfg(s), "ab_hours": AUTOBAN_HOURS,
-        "off_mult": offline_mult(s), "off_table": [(i, i * 1.2 + 1, min(300.0, (i * 1.2 + 1) * offline_mult(s))) for i in INTERVALS], "nf": notif_view(s), "langs": i18n.languages(),
+        "off_mult": offline_mult(s),
+        "thr_rows": [{"id": r.id, "name": r.name, "gap": reporting_gap(r.id), "auto_nr": auto_no_response(r.id),
+                      "auto_off": auto_offline(r.id), "own_nr": _THR.get(r.id, {}).get("nr"), "own_off": _THR.get(r.id, {}).get("off"),
+                      "eff_nr": no_response_after(r.id), "eff_off": online_after(r.id)} for r in ordered_routers(s)], "nf": notif_view(s), "langs": i18n.languages(),
         "mutes": [{"pat": m["pat"], "rid": m.get("rid"), "ts": m.get("ts", ""),
                    "router": next((r.name for r in ordered_routers(s) if r.id == m.get("rid")), "?")} for m in mutes_get(s)],
         "speed_router": sget(s, "speed_router"), "speed_time": SPEED_TIME[:5],
@@ -4218,13 +4254,51 @@ def backup_delete(request: Request, name: str, s: Session = Depends(db)):
     return RedirectResponse("/settings#backup", 303)
 
 
+def _save_router_thresholds(request, form):
+    """Zapisuje własne progi routerów z formularza (pola nr_<id> i off_<id>, puste = automatycznie, nie mniej niż 1 s)."""
+    with Session(engine) as s:
+        s.info["who"] = request.state.user.username
+        thr, bad = {}, False
+        for r in ordered_routers(s):
+            item = {}
+            for key, field in (("nr", "nr_%d" % r.id), ("off", "off_%d" % r.id)):
+                raw = str(form.get(field, "")).strip().replace(",", ".")
+                if not raw:
+                    continue
+                try:
+                    v = float(raw)
+                except ValueError:
+                    bad = True
+                    continue
+                if v < 1:
+                    bad = True
+                    continue
+                item[key] = round(v, 2)
+            if item:
+                thr[str(r.id)] = item
+        if bad:
+            return settings_view(request, s, tr("msg.off_routers_bad"), False)
+        sset(s, "router_thr", json.dumps(thr))
+        log(s, "progi routerów", "własne progi: %d routerów" % len(thr))
+        s.commit()
+        _THR.clear()
+        _THR.update(router_thresholds(s))
+        return settings_view(request, s, tr("msg.off_routers_ok"), True)
+
+
+@app.post("/settings/offline/routers", dependencies=[Depends(admin)])
+async def settings_offline_routers(request: Request):
+    form = dict(await request.form())
+    return await run_in_threadpool(_save_router_thresholds, request, form)
+
+
 @app.post("/settings/offline", dependencies=[Depends(admin)])
 def settings_offline(request: Request, mult: str = Form("1.5"), s: Session = Depends(db)):
     try:
         v = float(mult.strip().replace(",", "."))
     except ValueError:
         return settings_view(request, s, tr("msg.off_bad"), False)
-    if not 1.0 <= v <= 10.0:
+    if not 1.0 <= v <= 100000:
         return settings_view(request, s, tr("msg.off_bad"), False)
     txt = ("%.2f" % v).rstrip("0").rstrip(".")
     sset(s, "offline_mult", txt)
