@@ -7,6 +7,7 @@ import version as appver
 import speedengines
 import netguard
 import backups as backuplib
+import applog
 import httpx
 from fastapi import FastAPI, Request, Form, Depends, HTTPException, Body
 from fastapi.responses import JSONResponse, RedirectResponse, PlainTextResponse, Response, FileResponse, StreamingResponse
@@ -17,6 +18,7 @@ from sqlalchemy.engine import URL
 from sqlalchemy import inspect as sa_inspect, extract, create_engine, Date, Text, UniqueConstraint, String, Float, DateTime, Integer, Boolean, BigInteger, ForeignKey, Index, select, delete, func, or_, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
 
+applog.install()  # bufor ostatnich ostrzeżeń i błędów (raport „Zgłoś problem”)
 ADMIN_USER = os.getenv("ADMIN_USER", "admin")
 ADMIN_PASSWORD = os.environ["ADMIN_PASSWORD"]
 SECRET_KEY = os.environ["SECRET_KEY"]
@@ -1655,14 +1657,21 @@ def muted_set():
     return _MUTE_CACHE[1]
 
 
+def unmutable(msg, topics=""):
+    """Komunikaty, których nie wolno wyciszyć: próby logowania (liczone przez auto-ban) i wpisy oceniane jako problem."""
+    if _FAIL_RX.search(msg or ""):
+        return True
+    res = translate_log(msg or "", topics or "")
+    return bool(res and res["level"] == "bad")
+
+
 @app.post("/api/routers/{rid}/logs/mute", dependencies=[Depends(admin)])
 def log_mute(rid: int, msg: str = Form(), s: Session = Depends(db)):
     row = s.scalars(select(LogEntry).where(LogEntry.router_id == rid, LogEntry.msg == msg[:1000])
                     .order_by(LogEntry.id.desc()).limit(1)).first()
     if not row or row.sev <= 3:
         return JSONResponse({"ok": False, "msg": tr("msg.mu_err")}, 400)
-    res = translate_log(row.msg, row.topics)
-    if _FAIL_RX.search(row.msg) or (res and res["level"] == "bad"):  # ataki i problemy muszą zostać widoczne (i liczone przez auto-ban)
+    if unmutable(row.msg, row.topics):  # ataki i problemy muszą zostać widoczne (i liczone przez auto-ban)
         return JSONResponse({"ok": False, "msg": tr("msg.mu_bad")}, 400)
     pat = _mute_norm(row.msg)
     lst = mutes_get(s)
@@ -1964,10 +1973,12 @@ def logs_api(request: Request, rid: int, sev: str = "", topic: str = "", q: str 
                                                          LogEntry.ts > now() - dt.timedelta(days=7))
                            .distinct().limit(1000)).all():
         words.update(w for w in (tp or "").split(",") if w and w not in SEV_WORDS)
-    mset = muted_set() if request.state.user.is_admin else set()
+    admin_ = request.state.user.is_admin
+    mset = muted_set() if admin_ else set()
     return {"items": [{"t": x.ts.isoformat(timespec="seconds"), "cls": sev_cls(x.sev), "label": tr(SEV_LABEL[sev_cls(x.sev)]),
                        "topics": [w for w in x.topics.split(",") if w and w not in SEV_WORDS], "msg": x.msg,
-                       "muted": x.sev >= 4 and (rid, _mute_norm(x.msg)) in mset}
+                       "muted": x.sev >= 4 and (rid, _mute_norm(x.msg)) in mset,
+                       "nomute": bool(admin_ and x.sev >= 4 and unmutable(x.msg, x.topics))}  # bez przycisku wyciszania
                       for x in rows],
             "counts": counts, "topics": sorted(words),
             "ack": (log_ack_time(request.state.user, rid) or dt.datetime(2000, 1, 1)).isoformat(timespec="seconds"),
@@ -3597,11 +3608,35 @@ def _diag_features(s):
     return out
 
 
+def _diag_applog(s):
+    """Końcówka logu aplikacji (ostrzeżenia, błędy i komunikaty print) z wyciętymi tokenami, adresami IP, e-mailami,
+    nazwami routerów, użytkowników i domeny. Wycinanie nie jest nieomylne, dlatego strona raportu pozwala przejrzeć i poprawić tekst."""
+    names = {}
+    for i, r in enumerate(ordered_routers(s), 1):
+        for n in (r.name, r.ident):
+            if n:
+                names[n] = "router %d" % i
+    for u in s.scalars(select(User)):
+        names[u.username] = "user"
+    domain = sget(s, "domain")
+    if domain:
+        names[domain] = "<domain>"
+    out = ["- Application started %s ago; entries below are warnings, errors and printed messages since then (newest last)"
+           % _age(time.time() - _STARTED)]
+    items = applog.recent()
+    if not items:
+        out.append("- (none)")
+    for ts, text in items:
+        stamp = dt.datetime.fromtimestamp(ts, dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        out.append("[%s UTC] %s" % (stamp, applog.scrub(text, names)))
+    return out
+
+
 def report_data(s):
     """Dane diagnostyczne do zgłoszenia błędu. Celowo bez haseł, tokenów, adresów IP, nazw i identyfikatorów routerów."""
     parts = []
     for title, fn in (("Environment", _diag_env), ("Database", _diag_db), ("Routers", _diag_routers),
-                      ("Backups", _diag_backups), ("Features", _diag_features)):
+                      ("Backups", _diag_backups), ("Features", _diag_features), ("Application log", _diag_applog)):
         try:
             lines = fn(s)
         except Exception as e:  # jedna sekcja nie może zepsuć całej strony

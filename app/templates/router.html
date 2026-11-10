@@ -201,7 +201,7 @@ for(const it of d.items){
  const t1=lel('td','ltime');if(it.t>d.ack&&(it.cls==='err'||it.cls==='crit'))tr.classList.add('lnew');t1.append(lel('div',null,lfmt(it.t)),lel('div','since mut',''));
  const t2=lel('td');t2.append(lel('span','lbadge '+it.cls,it.label));
  const t3=lel('td','lmsg');it.topics.forEach(w=>t3.append(lel('span','chip c-'+w,w)));t3.append(lel('span',null,it.msg),lel('span','rep',''));
- if(ISADMIN&&it.cls!=='err'&&it.cls!=='crit'){const mb=lel('button',it.muted?'mute on':'mute',it.muted?'🔕':'🔇');mb.type='button';mb.title=it.muted?T.rp_unmute_title:T.rp_mute_title;mb.onclick=()=>muteMsg(it.msg,mb,it.muted);t3.append(mb)}
+ if(ISADMIN&&it.cls!=='err'&&it.cls!=='crit'&&!it.nomute){const mb=lel('button',it.muted?'mute on':'mute',it.muted?'🔕':'🔇');mb.type='button';mb.title=it.muted?T.rp_unmute_title:T.rp_mute_title;mb.onclick=()=>muteMsg(it.msg,mb,it.muted);t3.append(mb)}
  tr.append(t1,t2,t3);rows.push(tr);prev=it;prow=tr}
 if(!rows.length){const tr=lel('tr');tr.append(lel('td','mut',d.items.length?'':T.rp_logs_empty));rows.push(tr)}
 body.replaceChildren(...rows)}

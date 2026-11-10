@@ -9,6 +9,13 @@ Notes marked **Routers** mean the configuration command has to be pasted again o
 
 Work in progress on `develop` (version 1.4.0).
 
+### Added
+- **Application log in the "Report a problem" page**: the tail of the application log (warnings, errors including stack traces of server errors, and printed messages) is added to the report with tokens, IP and MAC addresses, e-mails and router, user and domain names removed automatically. The filter is best-effort, so the text can be reviewed and edited before copying. The log buffer lives in memory and is cleared on restart; access logs are not included.
+
+### Changed
+- The mute button (🔇) is no longer shown on login-failure entries and other entries that can never be muted.
+- `README.pl.md` links the Polish changelog.
+
 ## [1.3.0] - 2026-11-10
 ### Added
 - **Outdated router script indicator**: the router now reports the version of its script with every measurement. When the script on a router is older than the one the application expects, administrators see a badge "router script outdated" on the router list and on the router page, and the "Report a problem" page lists it. **Routers**: paste the configuration command once more on every router (the scripts of earlier versions send no version, so they are shown as outdated until then). From then on the panel tells you whenever a new version needs a re-paste.

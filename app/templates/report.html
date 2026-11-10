@@ -2,7 +2,7 @@
 <div class="card"><h2>{{ t('rep.title') }}</h2>
 <p class="mut">{{ t('rep.help') }}</p>
 <p class="small"><b>{{ t('rep.privacy_h') }}</b> {{ t('rep.privacy') }}</p>
-<textarea id="rtext" readonly rows="{{ [text.count('\n') + 2, 40]|min }}" style="width:100%;font-family:monospace">{{ text }}</textarea>
+<textarea id="rtext" rows="{{ [text.count('\n') + 2, 40]|min }}" style="width:100%;font-family:monospace">{{ text }}</textarea>
 <div class="row" style="margin-top:10px"><button type="button" class="p" id="rcopy">{{ t('rep.copy') }}</button>
 <button type="button" id="ropen">{{ t('rep.open') }}</button></div>
 <p class="mut small" style="margin-top:12px">{{ t('rep.logs_hint') }}</p></div>

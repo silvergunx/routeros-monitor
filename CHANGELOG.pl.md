@@ -10,6 +10,13 @@ Uwagi oznaczone **Routery** oznaczają, że trzeba ponownie wkleić komendę kon
 
 Prace w toku na gałęzi `develop` (wersja 1.4.0).
 
+### Dodano
+- **Log aplikacji na stronie „Zgłoś problem”**: do raportu trafia końcówka logu aplikacji (ostrzeżenia, błędy ze śladem stosu błędów serwera i wypisane komunikaty), z automatycznie wyciętymi tokenami, adresami IP i MAC, e-mailami oraz nazwami routerów, użytkowników i domeny. Filtr działa najlepiej jak potrafi, ale nie daje pewności, dlatego tekst można przejrzeć i poprawić przed skopiowaniem. Bufor logu jest tylko w pamięci i czyści się po restarcie; logi dostępu nie są uwzględniane.
+
+### Zmieniono
+- Przycisk wyciszania (🔇) nie jest już pokazywany przy wpisach z nieudanymi logowaniami i innych, których nie da się wyciszyć.
+- `README.pl.md` linkuje polski dziennik zmian.
+
 ## [1.3.0] - 2026-11-10
 ### Dodano
 - **Wskaźnik nieaktualnego skryptu routera**: router podaje teraz wersję swojego skryptu przy każdym pomiarze. Gdy skrypt na routerze jest starszy niż ten, którego oczekuje aplikacja, administrator widzi plakietkę „skrypt na routerze nieaktualny” na liście routerów i na stronie routera, a strona „Zgłoś problem” też to pokazuje. **Routery**: wklej jeszcze raz komendę konfiguracyjną na każdym routerze (skrypty ze starszych wersji nie wysyłają wersji, więc do tego czasu są pokazywane jako nieaktualne). Od tej chwili panel sam powie, kiedy nowa wersja wymaga ponownego wklejenia.
