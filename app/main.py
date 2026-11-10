@@ -1,5 +1,7 @@
 import unicodedata
 import platform
+import collections
+import statistics
 import os, re, csv, io, json, math, asyncio, socket, hashlib, hmac, secrets, time, ipaddress, datetime as dt
 from urllib.parse import quote, urlparse, urlencode
 import i18n
@@ -85,10 +87,32 @@ def fm(v, unit="", d=0):
 
 templates.env.globals["fm"] = fm
 templates.env.filters["iso"] = lambda d: d.strftime("%Y-%m-%dT%H:%M:%S") if d else ""
+templates.env.globals["ago"] = lambda d: _age((now() - d).total_seconds()) if d else ""  # np. "5 min", "2 h", "3 d"
 
 
 def now():
     return dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
+
+
+# Router uznajemy za offline, gdy od ostatniego pomiaru minęło więcej niż kilka jego zwykłych odstępów między pomiarami.
+# Odstępy mierzymy na bieżąco (ostatnie pomiary danego routera), a do czasu zebrania próbek używamy interwału z ustawień.
+_GAPS = {}           # id routera -> ostatnie odstępy (s) między kolejnymi pomiarami
+_INTERVAL_S = [60]   # interwał monitoringu z ustawień (odświeżany w interval())
+
+
+def online_after(rid):
+    """Po ilu sekundach bez pomiaru router jest offline: max(3 * typowy odstęp + 15, 30), najwyżej 300."""
+    g = _GAPS.get(rid)
+    if g and len(g) >= 3:
+        typical = statistics.median(g)
+        return int(min(300, max(3 * typical + 15, 30)))
+    return int(min(300, max(3 * _INTERVAL_S[0] + 15, 90)))  # brak własnych próbek: ostrożnie, min. 90 s
+
+
+def reporting_gap(rid):
+    """Zmierzony typowy odstęp między pomiarami routera (s) albo None."""
+    g = _GAPS.get(rid)
+    return int(statistics.median(g)) if g and len(g) >= 3 else None
 
 
 class Base(DeclarativeBase):
@@ -120,7 +144,7 @@ class Router(Base):
 
     @property
     def online(self):
-        return bool(self.last_seen) and (now() - self.last_seen).total_seconds() < 180
+        return bool(self.last_seen) and (now() - self.last_seen).total_seconds() < online_after(self.id)
 
 
 class Metric(Base):
@@ -980,7 +1004,14 @@ FAST_INTERVALS = (1, 5)  # wymagają potwierdzenia w panelu
 
 def interval(s):
     v = sget(s, "interval", "60")
-    return int(v) if v.isdigit() and int(v) in INTERVALS else 60
+    iv = int(v) if v.isdigit() and int(v) in INTERVALS else 60
+    _INTERVAL_S[0] = iv
+    return iv
+
+
+def refresh_interval_cache():
+    with Session(engine) as s:
+        interval(s)
 
 
 def fl(v, f=lambda x: x):
@@ -1182,6 +1213,10 @@ def _store_metrics(s, t, raw, ip=None, cv=0):
                  tx=None if w[1] is None else int(w[1]), rx_bps=w[2], tx_bps=w[3],
                  dhcp=None if dhcp is None else int(dhcp), **nw_metrics(r, d)))
     r.ident, r.ver, r.uptime = str(d.get("id", ""))[:80], str(d.get("ver", ""))[:40], str(d.get("up", ""))[:40]
+    if r.last_seen:  # zapamiętujemy rzeczywisty odstęp między pomiarami (dłuższe przerwy to awarie, nie rytm routera)
+        gap = (n - r.last_seen).total_seconds()
+        if 0.5 < gap < 600:
+            _GAPS.setdefault(r.id, collections.deque(maxlen=7)).append(gap)
     r.last_seen = n
     cutoff = n - dt.timedelta(days=RETENTION)
     s.execute(delete(Metric).where(Metric.router_id == r.id, Metric.ts < cutoff))
@@ -2011,6 +2046,8 @@ async def log_loop():
                 await run_in_threadpool(enforce_backup_limit)
             if n % 150 == 30:
                 await run_in_threadpool(purge_iface_metrics)
+            if n % 30 == 0:
+                await run_in_threadpool(refresh_interval_cache)
             if n % 15 == 3:
                 await run_in_threadpool(notify_check)
             if n % 15 == 7:
@@ -3679,6 +3716,9 @@ def _diag_routers(s):
             p.append("firmware " + si["fw"])
         p.append("online" if r.online else "offline")
         p.append("last contact %s ago" % _age((now() - r.last_seen).total_seconds()) if r.last_seen else "never contacted")
+        gap = reporting_gap(r.id)
+        p.append("reports every ~%d s, offline after %d s" % (gap, online_after(r.id)) if gap else
+                 "reporting rhythm not measured yet (offline after %d s)" % online_after(r.id))
         if r.edge:
             p.append("edge")
         if si["manager"]:
