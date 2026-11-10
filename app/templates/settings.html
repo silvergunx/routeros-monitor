@@ -25,7 +25,12 @@
 f.addEventListener('submit',e=>{if(!ok&&(s.value==='1'||s.value==='5')){e.preventDefault();d.showModal()}});
 document.getElementById('ivyes').onclick=()=>{ok=true;d.close();f.submit()};
 document.getElementById('ivno').onclick=()=>{s.value=cur;d.close()};})();</script>
-<p><small>{{ t('set.iv.after') }}</small></p></div>
+<p><small>{{ t('set.iv.after') }}</small></p>
+<h3 style="margin:14px 0 4px">{{ t('set.off.title') }}</h3>
+<form method="post" action="/settings/offline" class="row">{{ t('set.off.mult') }} <input name="mult" value="{{ ('%g' % off_mult)|replace('.', ',') }}" inputmode="decimal" style="width:80px" aria-label="{{ t('set.off.mult') }}"> <button class="p">{{ t('common.save') }}</button></form>
+<table class="small" style="margin-top:8px"><tr><th>{{ t('set.off.col_iv') }}</th><th>{{ t('set.off.col_nr') }}</th><th>{{ t('set.off.col_off') }}</th></tr>
+{% for i, nr, off in off_table %}<tr><td>{{ i }} s</td><td>{{ ('%g' % (nr|round(1)))|replace('.', ',') }} s</td><td>{{ ('%g' % (off|round(1)))|replace('.', ',') }} s</td></tr>{% endfor %}</table>
+<p><small class="mut">{{ t('set.off.help') }}</small></p></div>
 <div class="card" id="order"><h2>{{ t('set.order.title') }}</h2>
 <table>{% for x in routers %}<tr><td style="width:40px" class="mut">{{loop.index}}.</td><td><b>{{x.name}}</b></td><td style="text-align:right">
 <form class="i" method="post" action="/routers/{{x.id}}/move"><input type="hidden" name="dir" value="up"><button {{'disabled' if loop.first}} title="{{ t('set.order.up') }}">▲</button></form>

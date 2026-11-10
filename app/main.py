@@ -94,25 +94,34 @@ def now():
     return dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
 
 
-# Router uznajemy za offline, gdy od ostatniego pomiaru minęło więcej niż kilka jego zwykłych odstępów między pomiarami.
-# Odstępy mierzymy na bieżąco (ostatnie pomiary danego routera), a do czasu zebrania próbek używamy interwału z ustawień.
-_GAPS = {}           # id routera -> ostatnie odstępy (s) między kolejnymi pomiarami
-_INTERVAL_S = [60]   # interwał monitoringu z ustawień (odświeżany w interval())
-
-
-def online_after(rid):
-    """Po ilu sekundach bez pomiaru router jest offline: max(3 * typowy odstęp + 15, 30), najwyżej 300."""
-    g = _GAPS.get(rid)
-    if g and len(g) >= 3:
-        typical = statistics.median(g)
-        return int(min(300, max(3 * typical + 15, 30)))
-    return int(min(300, max(3 * _INTERVAL_S[0] + 15, 90)))  # brak własnych próbek: ostrożnie, min. 90 s
+# Status routera zależy od jego zwykłego odstępu między pomiarami (mierzonego na bieżąco z ostatnich pomiarów; do czasu
+# zebrania próbek używamy interwału z ustawień):
+#   "brak odpowiedzi" (żółty) po: odstęp + odstęp/5 + 1 s   (5 s -> 7 s, 10 s -> 13 s, 15 s -> 19 s, 60 s -> 73 s)
+#   "offline" (czerwony) po:      czas "brak odpowiedzi" x mnożnik z ustawień (domyślnie 1,5)
+_GAPS = {}             # id routera -> ostatnie odstępy (s) między kolejnymi pomiarami
+_INTERVAL_S = [60]     # interwał monitoringu z ustawień (odświeżany w interval())
+_OFFLINE_MULT = [1.5]  # mnożnik czasu "brak odpowiedzi" dający próg offline (odświeżany w interval())
 
 
 def reporting_gap(rid):
-    """Zmierzony typowy odstęp między pomiarami routera (s) albo None."""
+    """Zmierzony typowy odstęp między pomiarami routera (s, ułamek) albo None, gdy próbek jest mniej niż trzy."""
     g = _GAPS.get(rid)
-    return int(statistics.median(g)) if g and len(g) >= 3 else None
+    return statistics.median(g) if g and len(g) >= 3 else None
+
+
+def no_response_after(rid):
+    """Po ilu sekundach bez pomiaru router ma status „brak odpowiedzi”."""
+    gap = reporting_gap(rid) or _INTERVAL_S[0]
+    return gap * 1.2 + 1
+
+
+def online_after(rid):
+    """Po ilu sekundach bez pomiaru router jest offline: „brak odpowiedzi” x mnożnik, najwyżej 300 s.
+    Bez własnych próbek (tuż po starcie) minimum 90 s, żeby restart nie robił z routerów „offline”."""
+    t = no_response_after(rid) * _OFFLINE_MULT[0]
+    if reporting_gap(rid) is None:
+        t = max(t, 90)
+    return min(300.0, t)
 
 
 class Base(DeclarativeBase):
@@ -145,6 +154,11 @@ class Router(Base):
     @property
     def online(self):
         return bool(self.last_seen) and (now() - self.last_seen).total_seconds() < online_after(self.id)
+
+    @property
+    def no_response(self):
+        """Router jeszcze nie jest offline, ale spóźnia się z pomiarem (żółty status „brak odpowiedzi”)."""
+        return self.online and (now() - self.last_seen).total_seconds() >= no_response_after(self.id)
 
 
 class Metric(Base):
@@ -1006,7 +1020,16 @@ def interval(s):
     v = sget(s, "interval", "60")
     iv = int(v) if v.isdigit() and int(v) in INTERVALS else 60
     _INTERVAL_S[0] = iv
+    _OFFLINE_MULT[0] = offline_mult(s)
     return iv
+
+
+def offline_mult(s):
+    """Mnożnik czasu „brak odpowiedzi” dający próg offline: 1,0 do 10, domyślnie 1,5."""
+    try:
+        return min(10.0, max(1.0, float(sget(s, "offline_mult", "1.5").replace(",", "."))))
+    except ValueError:
+        return 1.5
 
 
 def refresh_interval_cache():
@@ -3717,8 +3740,8 @@ def _diag_routers(s):
         p.append("online" if r.online else "offline")
         p.append("last contact %s ago" % _age((now() - r.last_seen).total_seconds()) if r.last_seen else "never contacted")
         gap = reporting_gap(r.id)
-        p.append("reports every ~%d s, offline after %d s" % (gap, online_after(r.id)) if gap else
-                 "reporting rhythm not measured yet (offline after %d s)" % online_after(r.id))
+        p.append("reports every ~%.1f s, no response after %.0f s, offline after %.0f s" % (gap, no_response_after(r.id), online_after(r.id))
+                 if gap else "reporting rhythm not measured yet (offline after %.0f s)" % online_after(r.id))
         if r.edge:
             p.append("edge")
         if si["manager"]:
@@ -4052,7 +4075,8 @@ def settings_view(request, s, msg="", ok=True):
     return templates.TemplateResponse(request, "settings.html", {
         "domain": sget(s, "domain"), "email": sget(s, "email"), "msg": msg, "ok": ok,
         "interval": interval(s), "intervals": INTERVALS, "routers": ordered_routers(s), "bk": backups_view(s),
-        "wl_enabled": whitelist_on(s), "bl_enabled": blacklist_on(s), "ab": autoban_cfg(s), "ab_hours": AUTOBAN_HOURS, "nf": notif_view(s), "langs": i18n.languages(),
+        "wl_enabled": whitelist_on(s), "bl_enabled": blacklist_on(s), "ab": autoban_cfg(s), "ab_hours": AUTOBAN_HOURS,
+        "off_mult": offline_mult(s), "off_table": [(i, i * 1.2 + 1, min(300.0, (i * 1.2 + 1) * offline_mult(s))) for i in INTERVALS], "nf": notif_view(s), "langs": i18n.languages(),
         "mutes": [{"pat": m["pat"], "rid": m.get("rid"), "ts": m.get("ts", ""),
                    "router": next((r.name for r in ordered_routers(s) if r.id == m.get("rid")), "?")} for m in mutes_get(s)],
         "speed_router": sget(s, "speed_router"), "speed_time": SPEED_TIME[:5],
@@ -4192,6 +4216,22 @@ def backup_delete(request: Request, name: str, s: Session = Depends(db)):
         log(s, "usunięto kopię", name)
         s.commit()
     return RedirectResponse("/settings#backup", 303)
+
+
+@app.post("/settings/offline", dependencies=[Depends(admin)])
+def settings_offline(request: Request, mult: str = Form("1.5"), s: Session = Depends(db)):
+    try:
+        v = float(mult.strip().replace(",", "."))
+    except ValueError:
+        return settings_view(request, s, tr("msg.off_bad"), False)
+    if not 1.0 <= v <= 10.0:
+        return settings_view(request, s, tr("msg.off_bad"), False)
+    txt = ("%.2f" % v).rstrip("0").rstrip(".")
+    sset(s, "offline_mult", txt)
+    log(s, "próg offline", "mnożnik %s" % txt)
+    s.commit()
+    _OFFLINE_MULT[0] = v
+    return settings_view(request, s, tr("msg.off_ok", x=txt.replace(".", ",")), True)
 
 
 @app.post("/settings/interval", dependencies=[Depends(admin)])
