@@ -8,6 +8,7 @@ import speedengines
 import netguard
 import backups as backuplib
 import applog
+import notify
 import httpx
 from fastapi import FastAPI, Request, Form, Depends, HTTPException, Body
 from fastapi.responses import JSONResponse, RedirectResponse, PlainTextResponse, Response, FileResponse, StreamingResponse
@@ -1630,6 +1631,118 @@ def flush_logs(batch):
             print("autoban: %s" % e, flush=True)
 
 
+# ---------- powiadomienia (ntfy, webhook) ----------
+NOTIF_BAN_EVERY = 600  # zbiorcze powiadomienie o automatycznych banach najczęściej co 10 min
+_PENDING_BANS = {"n": 0, "h": 1, "sent": 0.0}
+_NOTIF_RETRY = [0.0]  # po błędzie wysyłki kolejna próba dopiero po tym czasie (czas z time.time())
+
+
+def notif_cfg(s):
+    def g(k, d=""):
+        return sget(s, "notif_" + k, d)
+
+    def num(k, d, lo, hi):
+        v = g(k)
+        return min(hi, max(lo, int(v))) if v.isdigit() else d
+    return {"on": g("on", "0") == "1", "ntfy_url": g("ntfy_url", "https://ntfy.sh"), "ntfy_topic": g("ntfy_topic"),
+            "ntfy_token": g("ntfy_token"), "hook_url": g("hook_url"), "lang": g("lang") if g("lang") in i18n.LOCALES else "en",
+            "offline_min": num("offline_min", 5, 1, 120), "inet_min": num("inet_min", 3, 1, 120),
+            **{"r_" + r: g("r_" + r, "1") == "1" for r in ("offline", "inet", "backup", "ban")}}
+
+
+def notif_event(cfg, kind, severity, tkey, router=None, **kw):
+    """Zdarzenie do wysłania; treść w języku z ustawień. Bez adresów IP, tokenów i haseł."""
+    return {"app": "routeros-monitor", "version": appver.current(), "kind": kind, "severity": severity,
+            "title": i18n.translate(cfg["lang"], "notif.%s.title" % tkey, **kw),
+            "message": i18n.translate(cfg["lang"], "notif.%s.msg" % tkey, **kw),
+            "router": router, "time": now().isoformat(timespec="seconds") + "Z"}
+
+
+def _notif_state(s):
+    try:
+        d = json.loads(sget(s, "notif_state", "{}") or "{}")
+        return d if isinstance(d, dict) else {}
+    except ValueError:
+        return {}
+
+
+def _mins(a, b):
+    return max(1, int((b - a).total_seconds() // 60))
+
+
+def notify_check():
+    """Co ok. 30 s: sprawdza routery, internet i kopie i wysyła powiadomienie przy zmianie stanu (jedno na zdarzenie)."""
+    if time.time() < _NOTIF_RETRY[0]:
+        return
+    with Session(engine) as s:
+        cfg = notif_cfg(s)
+        if not cfg["on"]:
+            return
+        state = _notif_state(s)
+        before = json.dumps(state, sort_keys=True)
+        events = []  # (klucz stanu, nowa wartość albo None = usuń, zdarzenie)
+        warmup = time.time() - _STARTED < 300  # tuż po starcie routery jeszcze się nie zgłosiły, więc nie oceniamy ich jako offline
+        for r in ordered_routers(s):
+            if r.last_seen is None:
+                continue
+            gap = (now() - r.last_seen).total_seconds()
+            k, st = "router:%d" % r.id, state.get("router:%d" % r.id)
+            if cfg["r_offline"] and not warmup and gap >= cfg["offline_min"] * 60 and not st:
+                events.append((k, {"t": r.last_seen.isoformat(timespec="seconds")},
+                               notif_event(cfg, "router_offline", "critical", "offline", r.name, name=r.name, min=int(gap // 60))))
+            elif r.online and st:
+                since = dt.datetime.fromisoformat(st["t"]) if st.get("t") else r.last_seen
+                events.append((k, None, notif_event(cfg, "router_online", "info", "online", r.name, name=r.name, min=_mins(since, now()))))
+            if cfg["r_inet"] and r.edge and r.online:
+                ik = "inet:%d" % r.id
+                ist = state.get(ik)
+                rows = s.execute(select(Metric.ts, Metric.inet_up).where(
+                    Metric.router_id == r.id, Metric.inet_up.is_not(None), Metric.ts > now() - dt.timedelta(hours=2))
+                    .order_by(Metric.ts.desc()).limit(2000)).all()
+                if rows and (now() - rows[0][0]).total_seconds() < 300:
+                    down_since = None
+                    for ts, up in rows:  # od najnowszego: jak długo trwa ciągła przerwa
+                        if up is not False:
+                            break
+                        down_since = ts
+                    if down_since and not ist and (now() - down_since).total_seconds() >= cfg["inet_min"] * 60:
+                        events.append((ik, {"t": down_since.isoformat(timespec="seconds")},
+                                       notif_event(cfg, "internet_down", "critical", "inet", r.name, name=r.name,
+                                                   min=_mins(down_since, now()))))
+                    elif not down_since and ist:
+                        t0 = dt.datetime.fromisoformat(ist["t"]) if ist.get("t") else now()
+                        events.append((ik, None, notif_event(cfg, "internet_up", "info", "inet_ok", r.name, name=r.name,
+                                                             min=_mins(t0, now()))))
+        if cfg["r_backup"]:
+            b = backups_info()
+            problem = ""
+            if b.get("error"):
+                problem = " ".join(b["error"].split())[:120]
+            elif b.get("available") and b.get("files") and b.get("stale"):
+                problem = i18n.translate(cfg["lang"], "notif.backup.stale")
+            if problem and "backup" not in state:
+                events.append(("backup", {"d": problem[:60]}, notif_event(cfg, "backup_failed", "warning", "backup", detail=problem)))
+            elif not problem and "backup" in state:
+                events.append(("backup", None, notif_event(cfg, "backup_ok", "info", "backup_ok")))
+        if cfg["r_ban"] and _PENDING_BANS["n"] and time.time() - _PENDING_BANS["sent"] >= NOTIF_BAN_EVERY:
+            events.append((None, None, notif_event(cfg, "auto_ban", "warning", "ban", n=_PENDING_BANS["n"], h=_PENDING_BANS["h"])))
+        for key, new, ev in events:
+            errs = notify.dispatch(cfg, ev)
+            if errs:
+                print("notify: %s" % "; ".join(errs), flush=True)
+                _NOTIF_RETRY[0] = time.time() + 300
+                break
+            if key is None:
+                _PENDING_BANS.update(n=0, sent=time.time())
+            elif new is None:
+                state.pop(key, None)
+            else:
+                state[key] = new
+        if json.dumps(state, sort_keys=True) != before:
+            sset(s, "notif_state", json.dumps(state))
+            s.commit()
+
+
 # ---------- wyciszanie komunikatów logu: wybrane powtarzające się wpisy routera nie są zapisywane ----------
 MUTE_MAX = 100
 _MAC_RX = re.compile(r"(?<![0-9A-Fa-f:])[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}(?![0-9A-Fa-f:])")
@@ -1800,6 +1913,8 @@ def autoban_check(rows):
             s.add(Whitelist(kind="black", ip=net, comment=cmt("auto-ban %d failed logins" % n_hits),
                             expires=now() + dt.timedelta(hours=cfg["h"]), router_id=None))
             log(s, "blacklist+ (auto)", "%s: %d nieudanych logowan w %d min, ban na %d h" % (net, n_hits, cfg["min"], cfg["h"]))
+            _PENDING_BANS["n"] += 1  # zbiorcze powiadomienie wysyła notify_check
+            _PENDING_BANS["h"] = cfg["h"]
         s.commit()
 
 
@@ -1896,6 +2011,8 @@ async def log_loop():
                 await run_in_threadpool(enforce_backup_limit)
             if n % 150 == 30:
                 await run_in_threadpool(purge_iface_metrics)
+            if n % 15 == 3:
+                await run_in_threadpool(notify_check)
             if n % 15 == 7:
                 rid = await run_in_threadpool(speed_due)
                 if rid:
@@ -3895,7 +4012,7 @@ def settings_view(request, s, msg="", ok=True):
     return templates.TemplateResponse(request, "settings.html", {
         "domain": sget(s, "domain"), "email": sget(s, "email"), "msg": msg, "ok": ok,
         "interval": interval(s), "intervals": INTERVALS, "routers": ordered_routers(s), "bk": backups_view(s),
-        "wl_enabled": whitelist_on(s), "bl_enabled": blacklist_on(s), "ab": autoban_cfg(s), "ab_hours": AUTOBAN_HOURS,
+        "wl_enabled": whitelist_on(s), "bl_enabled": blacklist_on(s), "ab": autoban_cfg(s), "ab_hours": AUTOBAN_HOURS, "nf": notif_view(s), "langs": i18n.languages(),
         "mutes": [{"pat": m["pat"], "rid": m.get("rid"), "ts": m.get("ts", ""),
                    "router": next((r.name for r in ordered_routers(s) if r.id == m.get("rid")), "?")} for m in mutes_get(s)],
         "speed_router": sget(s, "speed_router"), "speed_time": SPEED_TIME[:5],
@@ -3920,6 +4037,49 @@ def settings_blacklist(request: Request, on: str = Form(""), s: Session = Depend
     s.commit()
     _BL_ON[1] = 0
     return settings_view(request, s, (tr("msg.bl_on") if on == "1" else tr("msg.bl_off")) + " " + tr("msg.wl_paste"), True)
+
+
+def notif_view(s):
+    """Ustawienia powiadomień do formularza: bez sekretów (token ntfy i adres webhooka są tylko oznaczone jako zapisane)."""
+    c = notif_cfg(s)
+    hook = urlparse(c["hook_url"]).hostname if c["hook_url"] else ""
+    return {**{k: v for k, v in c.items() if k not in ("ntfy_token", "hook_url")},
+            "token_set": bool(c["ntfy_token"]), "hook_set": bool(c["hook_url"]), "hook_host": hook or ""}
+
+
+@app.post("/settings/notify", dependencies=[Depends(admin)])
+def settings_notify(request: Request, on: str = Form(""), ntfy_url: str = Form(""), ntfy_topic: str = Form(""),
+                    ntfy_token: str = Form(""), clear_token: str = Form(""), hook_url: str = Form(""), clear_hook: str = Form(""),
+                    lang: str = Form("en"), offline_min: str = Form("5"), inet_min: str = Form("3"),
+                    r_offline: str = Form(""), r_inet: str = Form(""), r_backup: str = Form(""), r_ban: str = Form(""),
+                    s: Session = Depends(db)):
+    ntfy_url, ntfy_topic, hook_url = ntfy_url.strip(), ntfy_topic.strip(), hook_url.strip()
+    if ntfy_topic and (not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", ntfy_topic) or not notify.valid_url(ntfy_url)):
+        return settings_view(request, s, tr("msg.nf_bad_ntfy"), False)
+    if hook_url and not notify.valid_url(hook_url):
+        return settings_view(request, s, tr("msg.nf_bad_hook"), False)
+    old = notif_cfg(s)
+    sset(s, "notif_on", "1" if on == "1" else "0")
+    sset(s, "notif_ntfy_url", ntfy_url or "https://ntfy.sh")
+    sset(s, "notif_ntfy_topic", ntfy_topic)
+    sset(s, "notif_ntfy_token", "" if clear_token == "1" else (ntfy_token.strip() or old["ntfy_token"]))
+    sset(s, "notif_hook_url", "" if clear_hook == "1" else (hook_url or old["hook_url"]))
+    sset(s, "notif_lang", lang if lang in i18n.LOCALES else "en")
+    for k, v, lo, hi in (("offline_min", offline_min, 1, 120), ("inet_min", inet_min, 1, 120)):
+        sset(s, "notif_" + k, str(min(hi, max(lo, int(v)))) if v.isdigit() else str(old[k]))
+    for k, v in (("offline", r_offline), ("inet", r_inet), ("backup", r_backup), ("ban", r_ban)):
+        sset(s, "notif_r_" + k, "1" if v == "1" else "0")
+    log(s, "powiadomienia", "włączone" if on == "1" else "wyłączone")  # bez adresów i tokenów w dzienniku
+    s.commit()
+    _NOTIF_RETRY[0] = 0
+    return settings_view(request, s, tr("msg.nf_saved"), True)
+
+
+@app.post("/settings/notify/test", dependencies=[Depends(admin)])
+def settings_notify_test(request: Request, s: Session = Depends(db)):
+    cfg = notif_cfg(s)
+    errs = notify.dispatch(cfg, notif_event(cfg, "test", "info", "test"), force=True)
+    return settings_view(request, s, tr("msg.nf_test_ok") if not errs else tr("msg.nf_test_err") + " " + "; ".join(errs), not errs)
 
 
 @app.post("/settings/autoban", dependencies=[Depends(admin)])
