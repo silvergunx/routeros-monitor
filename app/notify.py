@@ -10,7 +10,7 @@ import urllib.error
 import urllib.request
 from urllib.parse import urlparse
 
-TIMEOUT = 6
+TIMEOUT = 10  # serwer ntfy na małym urządzeniu (np. Pi Zero) bywa wolny
 MAX_PER_HOUR = 30  # górna granica liczby wiadomości na godzinę (ochrona przed zalaniem kanału)
 SEVERITY_PRIORITY = {"info": 3, "warning": 4, "critical": 5}   # priorytety ntfy (1-5)
 SEVERITY_TAGS = {"info": "information_source", "warning": "warning", "critical": "rotating_light"}

@@ -101,6 +101,7 @@ def now():
 # Użytkownik może dla każdego routera wpisać własne progi (w sekundach, bez górnego limitu). Jedyne dolne granice:
 # "brak odpowiedzi" nie wcześniej niż zmierzony odstęp + 1 s, "offline" nie wcześniej niż "brak odpowiedzi" + 1 s.
 _GAPS = {}             # id routera -> ostatnie odstępy (s) między kolejnymi pomiarami
+_SEEN = set()          # id routerów, które przysłały pomiar od startu aplikacji (po starcie oceniamy tylko je od razu)
 _INTERVAL_S = [60]     # interwał monitoringu z ustawień (odświeżany w interval())
 _OFFLINE_MULT = [1.5]  # mnożnik czasu "brak odpowiedzi" dający próg offline (odświeżany w interval())
 _THR = {}              # id routera -> {"nr": własny próg "brak odpowiedzi" (s) albo None, "off": własny próg offline albo None}
@@ -1268,6 +1269,7 @@ def _store_metrics(s, t, raw, ip=None, cv=0):
                  tx=None if w[1] is None else int(w[1]), rx_bps=w[2], tx_bps=w[3],
                  dhcp=None if dhcp is None else int(dhcp), **nw_metrics(r, d)))
     r.ident, r.ver, r.uptime = str(d.get("id", ""))[:80], str(d.get("ver", ""))[:40], str(d.get("up", ""))[:40]
+    _SEEN.add(r.id)
     if r.last_seen:  # zapamiętujemy rzeczywisty odstęp między pomiarami (dłuższe przerwy to awarie, nie rytm routera)
         gap = (n - r.last_seen).total_seconds()
         if 0.5 < gap < 600:
@@ -1724,7 +1726,9 @@ def flush_logs(batch):
 # ---------- powiadomienia (ntfy, webhook) ----------
 NOTIF_BAN_EVERY = 600  # zbiorcze powiadomienie o automatycznych banach najczęściej co 10 min
 _PENDING_BANS = {"n": 0, "h": 1, "sent": 0.0}
-_NOTIF_RETRY = [0.0]  # po błędzie wysyłki kolejna próba dopiero po tym czasie (czas z time.time())
+_NOTIF_NEXT = {}   # klucz zdarzenia -> czas (time.time()), przed którym nie ponawiamy próby po błędzie wysyłki (tylko to zdarzenie)
+_NOTIF_FAILS = {}  # klucz zdarzenia -> liczba kolejnych błędów (wydłuża przerwę: 15, 30, 60, 120 s)
+_NOTIF_STATS = {"check": 0.0, "sent": 0, "error": "", "error_ts": 0.0}  # do strony „Zgłoś problem”
 
 
 def notif_cfg(s):
@@ -1761,9 +1765,9 @@ def _mins(a, b):
 
 
 def notify_check():
-    """Co ok. 30 s: sprawdza routery, internet i kopie i wysyła powiadomienie przy zmianie stanu (jedno na zdarzenie)."""
-    if time.time() < _NOTIF_RETRY[0]:
-        return
+    """Co 15 s: sprawdza routery, internet i kopie i wysyła powiadomienie przy zmianie stanu (jedno na zdarzenie).
+    Błąd wysyłki jednego zdarzenia nie wstrzymuje pozostałych: to zdarzenie jest ponawiane po krótkiej, rosnącej przerwie."""
+    _NOTIF_STATS["check"] = time.time()
     with Session(engine) as s:
         cfg = notif_cfg(s)
         if not cfg["on"]:
@@ -1771,13 +1775,15 @@ def notify_check():
         state = _notif_state(s)
         before = json.dumps(state, sort_keys=True)
         events = []  # (klucz stanu, nowa wartość albo None = usuń, zdarzenie)
-        warmup = time.time() - _STARTED < 300  # tuż po starcie routery jeszcze się nie zgłosiły, więc nie oceniamy ich jako offline
+        # Tuż po starcie czas ostatniego kontaktu w bazie jest stary, więc router, który jeszcze się nie zgłosił od startu, nie jest
+        # oceniany jako offline do końca krótkiej rozgrzewki (ok. 2 interwały). Router, który już się zgłosił, jest oceniany od razu.
+        warmup = time.time() - _STARTED < min(300, max(30, 2 * _INTERVAL_S[0] + 15))
         for r in ordered_routers(s):
             if r.last_seen is None:
                 continue
             gap = (now() - r.last_seen).total_seconds()
             k, st = "router:%d" % r.id, state.get("router:%d" % r.id)
-            if cfg["r_offline"] and not warmup and gap >= cfg["offline_min"] * 60 and not st:
+            if cfg["r_offline"] and (not warmup or r.id in _SEEN) and gap >= cfg["offline_min"] * 60 and not st:
                 events.append((k, {"t": r.last_seen.isoformat(timespec="seconds")},
                                notif_event(cfg, "router_offline", "critical", "offline", r.name, name=r.name, min=int(gap // 60))))
             elif r.online and st:
@@ -1817,11 +1823,21 @@ def notify_check():
         if cfg["r_ban"] and _PENDING_BANS["n"] and time.time() - _PENDING_BANS["sent"] >= NOTIF_BAN_EVERY:
             events.append((None, None, notif_event(cfg, "auto_ban", "warning", "ban", n=_PENDING_BANS["n"], h=_PENDING_BANS["h"])))
         for key, new, ev in events:
+            ek = key or "ban"
+            if time.time() < _NOTIF_NEXT.get(ek, 0):
+                continue  # to zdarzenie czeka na ponowienie po błędzie; pozostałe idą normalnie
             errs = notify.dispatch(cfg, ev)
             if errs:
-                print("notify: %s" % "; ".join(errs), flush=True)
-                _NOTIF_RETRY[0] = time.time() + 300
-                break
+                fails = _NOTIF_FAILS[ek] = _NOTIF_FAILS.get(ek, 0) + 1
+                wait = min(120, 15 * 2 ** (fails - 1))
+                _NOTIF_NEXT[ek] = time.time() + wait
+                _NOTIF_STATS.update(error="; ".join(errs), error_ts=time.time())
+                print("notify: sending %s failed (%s), retry in %d s" % (ev["kind"], "; ".join(errs), wait), flush=True)
+                continue
+            _NOTIF_FAILS.pop(ek, None)
+            _NOTIF_NEXT.pop(ek, None)
+            _NOTIF_STATS["sent"] += 1
+            print("notify: sent %s: %s" % (ev["kind"], ev["message"]), flush=True)
             if key is None:
                 _PENDING_BANS.update(n=0, sent=time.time())
             elif new is None:
@@ -3895,11 +3911,30 @@ def _diag_applog(s):
     return out
 
 
+def _diag_notify(s):
+    c = notif_cfg(s)
+    ago = lambda ts: _age(time.time() - ts) + " ago" if ts else "never"
+    out = ["- Notifications: %s; channels: ntfy %s, webhook %s" % (
+        "on" if c["on"] else "off", "configured" if c["ntfy_url"] and c["ntfy_topic"] else "not configured",
+        "configured" if c["hook_url"] else "not configured")]
+    out.append("- Rules: router offline %s (after %d min), internet down %s (after %d min), backup %s, auto-ban %s" % (
+        "on" if c["r_offline"] else "off", c["offline_min"], "on" if c["r_inet"] else "off", c["inet_min"],
+        "on" if c["r_backup"] else "off", "on" if c["r_ban"] else "off"))
+    out.append("- Last check: %s; sent since start: %d; last error: %s" % (
+        ago(_NOTIF_STATS["check"]), _NOTIF_STATS["sent"],
+        ("%s (%s)" % (_NOTIF_STATS["error"][:80], ago(_NOTIF_STATS["error_ts"]))) if _NOTIF_STATS["error"] else "none"))
+    waiting = [k for k, v in _NOTIF_NEXT.items() if v > time.time()]
+    st = _notif_state(s)
+    out.append("- Events waiting for a retry: %d; open states (routers offline, internet down, backup problem): %d" % (len(waiting), len(st)))
+    return out
+
+
 def report_data(s):
     """Dane diagnostyczne do zgłoszenia błędu. Celowo bez haseł, tokenów, adresów IP, nazw i identyfikatorów routerów."""
     parts = []
     for title, fn in (("Environment", _diag_env), ("Database", _diag_db), ("Routers", _diag_routers),
-                      ("Backups", _diag_backups), ("Features", _diag_features), ("Application log", _diag_applog)):
+                      ("Backups", _diag_backups), ("Features", _diag_features), ("Notifications", _diag_notify),
+                      ("Application log", _diag_applog)):
         try:
             lines = fn(s)
         except Exception as e:  # jedna sekcja nie może zepsuć całej strony
@@ -4221,7 +4256,8 @@ def settings_notify(request: Request, on: str = Form(""), ntfy_url: str = Form("
         sset(s, "notif_r_" + k, "1" if v == "1" else "0")
     log(s, "powiadomienia", "włączone" if on == "1" else "wyłączone")  # bez adresów i tokenów w dzienniku
     s.commit()
-    _NOTIF_RETRY[0] = 0
+    _NOTIF_NEXT.clear()
+    _NOTIF_FAILS.clear()
     return settings_view(request, s, tr("msg.nf_saved"), True)
 
 
