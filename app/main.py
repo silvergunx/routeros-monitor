@@ -645,7 +645,7 @@ def q(text):
 
 # Wersja skryptów na routerze. Zwiększ ją TYLKO wtedy, gdy zmiana skryptów wymaga ponownego wklejenia komendy konfiguracyjnej:
 # panel pokazuje wtedy administratorowi, że skrypt routera jest nieaktualny. Router podaje swoją wersję w każdym zapytaniu (cv).
-SCRIPT_VERSION = 1
+SCRIPT_VERSION = 2
 _ROUTER_CV = {}  # id routera -> wersja skryptu zgłoszona w ostatnim zapytaniu (0 = skrypt bez znacznika wersji); po restarcie pusto do pierwszego pomiaru
 
 
@@ -800,6 +800,30 @@ BLK = r'''
 '''
 
 
+# Osobny, lekki skrypt (niezależny od app-monitor, więc jego błąd nie zepsuje monitoringu): co kilka sekund odczytuje zapamiętany stan
+# aktualizacji pakietów RouterOS (bez sprawdzania aktualizacji w sieci) i TYLKO przy jego zmianie wysyła go na serwer (jedna próba).
+UPG = r'''
+:global appUpgLast
+:local st ""
+:do {:set st [/system package update get status]} on-error={}
+:if ($st != $appUpgLast && [:len $st] > 0) do={
+  :set appUpgLast $st
+  :local iv ""
+  :local lv ""
+  :do {:set iv [/system package update get installed-version]} on-error={}
+  :do {:set lv [/system package update get latest-version]} on-error={}
+  :local o ""
+  :if ([:len $st] > 0) do={
+    :for k from=0 to=([:len $st] - 1) do={
+      :local ch [:pick $st $k]
+      :if ($ch != "\"" && $ch != "\\") do={:set o ($o . $ch)}
+    }
+  }
+  :do {/tool fetch url="@URL@/api/upgrade?t=@TOKEN@" http-method=post http-data=("{\"st\":\"" . $o . "\",\"iv\":\"" . $iv . "\",\"lv\":\"" . $lv . "\"}") http-header-field="Content-Type: application/json" output=none} on-error={}
+}
+'''
+
+
 def clean(v, default):
     return re.sub(r"[^\w\-.]", "", v)[:30] or default
 
@@ -901,6 +925,7 @@ def setup_rsc(request: Request, t: str, iface: str = "ether1", list: str = "whit
         '/system script add name=app-inv-vpn source="%s"' % q(fill(INV_VPN)),
         '/system script add name=app-inv-sys source="%s"' % q(fill(INV_SYS)),
         '/system script add name=app-inventory source="%s"' % q(fill(INV_MAIN)),
+        '/system script add name=app-upgrade source="%s"' % q(fill(UPG)),
         '/system script add name=app-speed source="%s"' % q(fill(SPEED)),
         '/system script add name=app-live source="%s"' % q(fill(LIVE)),
         '/system scheduler remove [find name~"^app-"]',
@@ -908,6 +933,7 @@ def setup_rsc(request: Request, t: str, iface: str = "ether1", list: str = "whit
     ] + ["/system scheduler add name=app-wl interval=5m on-event=app-whitelist"] * wl + [
         "/system scheduler add name=app-bl interval=5m on-event=app-blacklist"] * bl + [
         "/system scheduler add name=app-inv interval=1m on-event=app-inventory",
+        "/system scheduler add name=app-upg interval=5s on-event=app-upgrade",
     ] + netwatch_lines(r) + [
         "/system scheduler add name=app-spd start-time=%s interval=1d on-event=app-speed" % SPEED_TIME
     ] * bool(r.edge and sget(s, "speed_router") != str(r.id)) + [
@@ -1137,6 +1163,29 @@ def rate(cur, old, sec):
     if None in (cur[0], cur[1], old[0], old[1]) or sec <= 0 or cur[0] < old[0] or cur[1] < old[1]:
         return None, None
     return (cur[0] - old[0]) * 8 / sec, (cur[1] - old[1]) * 8 / sec
+
+
+_UPG = {}  # id routera -> {"st": stan aktualizacji pakietów RouterOS, "iv": zainstalowana wersja, "lv": najnowsza, "ts": czas zgłoszenia}
+
+
+def store_upgrade(t, raw):
+    with Session(engine) as s:
+        r = get_router(s, t)
+        try:
+            d = json.loads(raw)
+            assert isinstance(d, dict)
+        except Exception:
+            raise HTTPException(400, "bad body")  # uszkodzone zapytanie nie nadpisuje ostatniego znanego stanu
+        st, iv, lv = (str(d.get(k, ""))[:80] for k in ("st", "iv", "lv"))
+        _UPG[r.id] = {"st": st, "iv": iv, "lv": lv, "ts": time.time()}
+        print("router update status: %s: %r (installed %s, latest %s)" % (r.name, st, iv or "?", lv or "?"), flush=True)
+        return {"ok": True}
+
+
+@app.post("/api/upgrade")
+async def upgrade_report(request: Request, t: str):
+    raw = (await request.body()).decode("utf-8", "replace")
+    return await run_in_threadpool(store_upgrade, t, raw)
 
 
 @app.post("/api/metrics")
@@ -3837,6 +3886,9 @@ def _diag_routers(s):
             p.append("firmware " + si["fw"])
         p.append("online" if r.online else "offline")
         p.append("last contact %s ago" % _age((now() - r.last_seen).total_seconds()) if r.last_seen else "never contacted")
+        u = _UPG.get(r.id)
+        if u:
+            p.append("RouterOS update status %r (%s ago)" % (u["st"][:60], _age(time.time() - u["ts"])))
         gap = reporting_gap(r.id)
         own = " (own thresholds)" if any(v is not None for v in _THR.get(r.id, {}).values()) else ""
         p.append("reports every ~%.1f s, no response after %.0f s, offline after %.0f s%s" % (gap, no_response_after(r.id), online_after(r.id), own)
