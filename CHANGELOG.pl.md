@@ -8,8 +8,7 @@ Uwagi oznaczone **Routery** oznaczają, że trzeba ponownie wkleić komendę kon
 
 ## [Unreleased]
 
-Prace w toku na gałęzi `develop` (wersja 1.3.0).
-
+## [1.3.0] - 2026-11-10
 ### Dodano
 - **Wskaźnik nieaktualnego skryptu routera**: router podaje teraz wersję swojego skryptu przy każdym pomiarze. Gdy skrypt na routerze jest starszy niż ten, którego oczekuje aplikacja, administrator widzi plakietkę „skrypt na routerze nieaktualny” na liście routerów i na stronie routera, a strona „Zgłoś problem” też to pokazuje. **Routery**: wklej jeszcze raz komendę konfiguracyjną na każdym routerze (skrypty ze starszych wersji nie wysyłają wersji, więc do tego czasu są pokazywane jako nieaktualne). Od tej chwili panel sam powie, kiedy nowa wersja wymaga ponownego wklejenia.
 - **Automatyczny ban (jak fail2ban)**, domyślnie wyłączony (Ustawienia → Blacklista). Gdy publiczny adres wywoła N nieudanych logowań (domyślnie 5) w ciągu M minut (domyślnie 10), trafia na blacklistę wszystkich routerów na ograniczony czas (domyślnie **1 h**, do wyboru 1/6/24/72 h), a ban wygasa sam. **Możesz sam się zablokować**: strona ustawień pokazuje wyraźne ostrzeżenie i prosi o potwierdzenie przy włączaniu. Aplikacja nie banuje adresów z whitelisty, serwera aplikacji, monitorowanych routerów ani adresów, z których w ostatnich 24 godzinach korzystano z panelu, ale nie zna Twoich innych adresów (dodaj je do whitelisty). Ban działa dopiero wtedy, gdy na routerach jest wklejona reguła blokująca ze strony blacklisty. Każdy ban jest zapisany w blackliście i w dzienniku zmian; maksymalnie 500 automatycznych wpisów naraz.

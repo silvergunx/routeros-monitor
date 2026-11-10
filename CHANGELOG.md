@@ -7,8 +7,7 @@ Notes marked **Routers** mean the configuration command has to be pasted again o
 
 ## [Unreleased]
 
-Work in progress on `develop` (version 1.3.0).
-
+## [1.3.0] - 2026-11-10
 ### Added
 - **Outdated router script indicator**: the router now reports the version of its script with every measurement. When the script on a router is older than the one the application expects, administrators see a badge "router script outdated" on the router list and on the router page, and the "Report a problem" page lists it. **Routers**: paste the configuration command once more on every router (the scripts of earlier versions send no version, so they are shown as outdated until then). From then on the panel tells you whenever a new version needs a re-paste.
 - **Automatic ban (like fail2ban)**, off by default (Settings → Blacklist). When a public address causes N failed logins (default 5) within M minutes (default 10), it is added to the blacklist for all routers for a limited time (default **1 h**, choices 1/6/24/72 h) and the ban expires on its own. **You can lock yourself out**: the settings page shows a clear warning and asks for confirmation when you enable it. It never bans whitelisted addresses, the application server, monitored routers or addresses that accessed the panel in the last 24 hours, but it does not know your other addresses (add them to the whitelist). A ban only takes effect when the blocking rule from the blacklist page is pasted on the routers. Each ban is recorded in the blacklist and the change log; at most 500 automatic entries at once.
