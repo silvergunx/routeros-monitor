@@ -37,7 +37,7 @@ if os.getenv("DB_PASSWORD"):
                         host=os.getenv("DB_HOST", "db"), database="monitor")
 else:
     DB_URL = os.environ["DATABASE_URL"]
-engine = create_engine(DB_URL, pool_pre_ping=True)
+engine = create_engine(DB_URL, pool_pre_ping=True, pool_size=10, max_overflow=10)  # niezależne zadania w tle + żądania WWW
 app = FastAPI()
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=86400 * 7)
 templates = Jinja2Templates(directory="templates")
@@ -1642,8 +1642,7 @@ TS_RE = re.compile(r"^(?:[A-Z][a-z]{2}\s+\d{1,2}\s+\d\d:\d\d:\d\d|\d{4}-\d\d-\d\
 _log_buf = []
 _log_ipmap = {}
 _log_rejected = {}
-_log_task = None
-_notify_task = None
+_BG_TASKS = []  # referencje do zadań w tle (żeby nie zostały sprzątnięte przez GC)
 
 
 def is_topics(tok):
@@ -2104,36 +2103,67 @@ async def notify_loop():
         await asyncio.sleep(15)
 
 
-async def log_loop():
-    n = 0
+_HEAVY = None  # kolejka ciężkich zadań bazodanowych (po jednym naraz); lekkie zadania i powiadomienia nigdy na nią nie czekają
+
+
+async def _periodic(name, fn, every, first=0.0, heavy=False):
+    """Własna, niezależna pętla jednego zadania w tle: nie czeka na inne zadania, a samo nie nakłada się na siebie
+    (kolejne uruchomienie dopiero `every` sekund po zakończeniu poprzedniego). Ciężkie zadania idą pojedynczo przez _HEAVY."""
+    await asyncio.sleep(first)
     while True:
         try:
-            if n % 15 == 0:
-                await _run_timed(refresh_ipmap)
+            if heavy:
+                async with _HEAVY:
+                    await _run_timed(fn)
+            else:
+                await _run_timed(fn)
+        except Exception as e:
+            print("background task %s error: %s" % (name, e), flush=True)
+        await asyncio.sleep(every)
+
+
+async def _ingest_loop():
+    """Zapis logów z routerów (syslog): co 2 s, niezależnie od pozostałych zadań."""
+    while True:
+        try:
             if _log_buf:
                 batch = _log_buf[:]
                 del _log_buf[:len(batch)]
                 await _run_timed(flush_logs, batch)
-            if n % 1800 == 0:
-                await _run_timed(purge_logs)
-            if n % 30 == 5:
-                await _run_timed(record_clients)
-            if n % 300 == 10:
-                await _run_timed(update_traffic)
-            if n % 150 == 20:
-                await _run_timed(enforce_backup_limit)
-            if n % 150 == 30:
-                await _run_timed(purge_iface_metrics)
-            if n % 30 == 0:
-                await _run_timed(refresh_interval_cache)
-            if n % 15 == 7:
-                rid = await _run_timed(speed_due)
-                if rid:
-                    asyncio.create_task(server_speedtest(rid))
         except Exception as e:
-            print("log loop error: %s" % e, flush=True)
-        n += 1
+            print("log ingest error: %s" % e, flush=True)
         await asyncio.sleep(2)
+
+
+async def _speed_loop():
+    """Co 30 s sprawdza, czy pora na nocny test prędkości z serwera, i uruchamia go jako osobne zadanie."""
+    await asyncio.sleep(14)
+    while True:
+        try:
+            rid = await _run_timed(speed_due)
+            if rid:
+                asyncio.create_task(server_speedtest(rid))
+        except Exception as e:
+            print("background task speed_due error: %s" % e, flush=True)
+        await asyncio.sleep(30)
+
+
+def start_background_tasks():
+    """Uruchamia niezależne zadania w tle z własnymi harmonogramami (pierwsze uruchomienia rozłożone w czasie)."""
+    global _HEAVY
+    _HEAVY = asyncio.Semaphore(1)
+    jobs = [  # (nazwa, funkcja, co ile s, opóźnienie pierwszego uruchomienia, ciężkie)
+        ("refresh_ipmap", refresh_ipmap, 30, 0, False),
+        ("refresh_interval_cache", refresh_interval_cache, 60, 1, False),
+        ("record_clients", record_clients, 60, 10, False),
+        ("update_traffic", update_traffic, 600, 20, True),
+        ("enforce_backup_limit", enforce_backup_limit, 300, 40, True),
+        ("purge_iface_metrics", purge_iface_metrics, 300, 60, True),
+        ("purge_logs", purge_logs, 3600, 90, True),
+    ]
+    tasks = [asyncio.create_task(_periodic(*j[:4], heavy=j[4])) for j in jobs]
+    tasks += [asyncio.create_task(_ingest_loop()), asyncio.create_task(_speed_loop()), asyncio.create_task(notify_loop())]
+    return tasks
 
 
 async def push_caddy_config():
@@ -2158,13 +2188,11 @@ async def start_caddy_cfg():
 
 @app.on_event("startup")
 async def start_syslog():
-    global _log_task, _notify_task
     try:
         await asyncio.get_running_loop().create_datagram_endpoint(SyslogProto, local_addr=("0.0.0.0", SYSLOG_LISTEN))
     except OSError as e:
         print("syslog: nie można nasłuchiwać na UDP %d: %s" % (SYSLOG_LISTEN, e), flush=True)
-    _log_task = asyncio.create_task(log_loop())
-    _notify_task = asyncio.create_task(notify_loop())
+    _BG_TASKS[:] = start_background_tasks()
 
 
 LOG_CATS = {"error": (0, 1, 2, 3), "warning": (4,), "info": (5, 6), "debug": (7,)}

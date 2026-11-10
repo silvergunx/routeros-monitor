@@ -20,7 +20,7 @@ Work in progress on `develop` (version 1.4.0).
 - `README.pl.md` links the Polish changelog.
 
 ### Fixed
-- Notifications could arrive minutes late: they were checked in the same background loop as the heavy maintenance tasks (cleaning old data, WAN statistics, backups), which on a large database can block that loop for a long time. Notifications now have their own loop (checked every 15 s), and background tasks that take longer than 10 s are written to the application log (visible in "Report a problem" as `slow background task`).
+- Notifications could arrive minutes late, because all background work shared one loop in which a heavy task (cleaning old data, WAN statistics, backups) delayed everything after it. **Background tasks are now independent**: each has its own schedule and never waits for the others or overlaps itself (log ingestion every 2 s, notifications every 15 s, speed test check, client statistics, cache refresh), and the heavy database tasks (WAN statistics, cleaning interface samples and logs, backup size limit) go one at a time through a separate queue so they cannot pile onto the database or hold up the light tasks. The database connection pool was enlarged (10 + 10) for this. Tasks that take longer than 10 s are written to the application log (`slow background task`, visible in "Report a problem").
 
 ## [1.3.0] - 2026-11-10
 ### Added

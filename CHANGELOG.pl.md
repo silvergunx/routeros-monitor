@@ -21,7 +21,7 @@ Prace w toku na gałęzi `develop` (wersja 1.4.0).
 - `README.pl.md` linkuje polski dziennik zmian.
 
 ### Naprawiono
-- Powiadomienia mogły przychodzić z opóźnieniem rzędu minut: były sprawdzane w tej samej pętli w tle co ciężkie zadania porządkowe (czyszczenie starych danych, statystyki WAN, kopie), która na dużej bazie potrafi się zablokować na długo. Powiadomienia mają teraz własną pętlę (sprawdzanie co 15 s), a zadania w tle trwające dłużej niż 10 s są zapisywane w logu aplikacji (widać je w „Zgłoś problem” jako `slow background task`).
+- Powiadomienia mogły przychodzić z opóźnieniem rzędu minut, bo cała praca w tle dzieliła jedną pętlę, w której ciężkie zadanie (czyszczenie starych danych, statystyki WAN, kopie) opóźniało wszystko po sobie. **Zadania w tle są teraz niezależne**: każde ma własny harmonogram, nie czeka na pozostałe i nie nakłada się na siebie (zapis logów co 2 s, powiadomienia co 15 s, sprawdzanie testu prędkości, statystyki klientów, odświeżanie ustawień), a ciężkie zadania bazodanowe (statystyki WAN, czyszczenie próbek interfejsów i logów, limit rozmiaru kopii) idą pojedynczo osobną kolejką, więc nie nakładają się na bazę i nie wstrzymują lekkich zadań. Powiększono do tego pulę połączeń z bazą (10 + 10). Zadania trwające dłużej niż 10 s są zapisywane w logu aplikacji (`slow background task`, widoczne w „Zgłoś problem”).
 
 ## [1.3.0] - 2026-11-10
 ### Dodano
