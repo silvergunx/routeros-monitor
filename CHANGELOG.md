@@ -14,6 +14,7 @@ Work in progress on `develop` (version 1.4.0).
 - **Application log in the "Report a problem" page**: the tail of the application log (warnings, errors including stack traces of server errors, and printed messages) is added to the report with tokens, IP and MAC addresses, e-mails and router, user and domain names removed automatically. The filter is best-effort, so the text can be reviewed and edited before copying. The log buffer lives in memory and is cleared on restart; access logs are not included.
 
 ### Changed
+- **Settings are split into tabs** like the router page: General (HTTPS, monitoring interval, router order), Security (whitelist, blacklist and auto-ban), Notifications and logs, Speed test and Backups. Links such as `/settings#backup` open the right tab, the last tab is remembered, and the result message of a save is shown above the tabs.
 - The mute button (🔇) is no longer shown on login-failure entries and other entries that can never be muted.
 - `README.pl.md` links the Polish changelog.
 

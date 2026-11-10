@@ -15,6 +15,7 @@ Prace w toku na gałęzi `develop` (wersja 1.4.0).
 - **Log aplikacji na stronie „Zgłoś problem”**: do raportu trafia końcówka logu aplikacji (ostrzeżenia, błędy ze śladem stosu błędów serwera i wypisane komunikaty), z automatycznie wyciętymi tokenami, adresami IP i MAC, e-mailami oraz nazwami routerów, użytkowników i domeny. Filtr działa najlepiej jak potrafi, ale nie daje pewności, dlatego tekst można przejrzeć i poprawić przed skopiowaniem. Bufor logu jest tylko w pamięci i czyści się po restarcie; logi dostępu nie są uwzględniane.
 
 ### Zmieniono
+- **Ustawienia są podzielone na zakładki** jak strona routera: Ogólne (HTTPS, interwał monitoringu, kolejność routerów), Bezpieczeństwo (whitelista, blacklista i auto-ban), Powiadomienia i logi, Test prędkości oraz Kopie zapasowe. Linki typu `/settings#backup` otwierają właściwą zakładkę, ostatnia zakładka jest zapamiętywana, a komunikat po zapisie jest widoczny nad zakładkami.
 - Przycisk wyciszania (🔇) nie jest już pokazywany przy wpisach z nieudanymi logowaniami i innych, których nie da się wyciszyć.
 - `README.pl.md` linkuje polski dziennik zmian.
 
