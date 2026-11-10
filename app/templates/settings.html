@@ -22,7 +22,21 @@ document.getElementById('ivno').onclick=()=>{s.value=cur;d.close()};})();</scrip
 <p><small class="mut">{{ t('set.wl.help') }}</small></p></div>
 <div class="card" id="blset"><h2>{{ t('set.bl.title') }}</h2>
 <form method="post" action="/settings/blacklist" class="row"><label class="row" style="gap:6px"><input type="checkbox" name="on" value="1" {{'checked' if bl_enabled}}> {{ t('set.bl.on') }}</label><button class="p">{{ t('common.save') }}</button></form>
-<p><small class="mut">{{ t('set.bl.help') }}</small></p></div>
+<p><small class="mut">{{ t('set.bl.help') }}</small></p>
+<h3 style="margin-bottom:6px">{{ t('set.ab.title') }}</h3>
+<p class="small" style="border-left:3px solid var(--warn);padding-left:10px"><b>{{ t('set.ab.warn_h') }}</b> {{ t('set.ab.warn') }}</p>
+<form method="post" action="/settings/autoban" class="row" id="abform"><label class="row" style="gap:6px"><input type="checkbox" name="on" value="1" {{'checked' if ab.on}}> {{ t('set.ab.on') }}</label>
+{{ t('set.ab.after') }} <input type="number" name="n" min="3" max="50" value="{{ ab.n }}" style="width:70px"> {{ t('set.ab.within') }} <input type="number" name="minutes" min="1" max="120" value="{{ ab.min }}" style="width:70px"> {{ t('set.ab.min') }}, {{ t('set.ab.for') }}
+<select name="hours">{% for h in ab_hours %}<option value="{{h}}" {{'selected' if h == ab.h}}>{{ h }} h</option>{% endfor %}</select> <button class="p">{{ t('common.save') }}</button></form>
+{% if not bl_enabled %}<p class="small mut">{{ t('set.ab.needs_bl') }}</p>{% endif %}
+<script>(function(){const f=document.getElementById('abform'),c=f.querySelector('[name=on]'),was=c.checked;
+f.onsubmit=()=>{if(c.checked&&!was)return confirm({{ t('set.ab.confirm')|tojson }});return true}})();</script></div>
+<div class="card" id="muteset"><h2>{{ t('set.mu.title') }}</h2>
+<p><small class="mut">{{ t('set.mu.help') }}</small></p>
+{% if mutes %}<div class="scroll"><table><tr><th>{{ t('set.mu.router') }}</th><th>{{ t('set.mu.pattern') }}</th><th>{{ t('set.mu.since') }}</th><th></th></tr>
+{% for m in mutes %}<tr><td>{{ m.router }}</td><td class="small"><code>{{ m.pat }}</code></td><td class="small mut">{{ m.ts }}</td>
+<td><form method="post" action="/settings/log-mutes/delete" class="i"><input type="hidden" name="rid" value="{{ m.rid }}"><input type="hidden" name="pat" value="{{ m.pat }}"><button>{{ t('set.mu.remove') }}</button></form></td></tr>{% endfor %}</table></div>
+{% else %}<p class="mut">{{ t('set.mu.empty') }}</p>{% endif %}</div>
 <div class="card" id="spdset"><h2>{{ t('set.sp.title') }}</h2>
 <form method="post" action="/settings/speed">
 <label class="fl">{{ t('set.sp.router') }}

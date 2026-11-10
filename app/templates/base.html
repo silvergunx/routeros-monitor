@@ -81,6 +81,8 @@ table.iftab td{padding:5px 8px}tr.ifrow{cursor:pointer}tr.ifrow:hover{background
 .cnt.cerr{background:var(--bad);color:#fff}
 table.logs td{font-size:13px;vertical-align:top;padding:6px 8px}.ltime{white-space:nowrap;width:1%}.ltime .since{font-size:11px}
 .lmsg{word-break:break-word;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12.5px}
+.lmsg button.mute{padding:0 6px;margin-left:8px;font-size:12px;line-height:18px;opacity:.55;background:transparent;border:1px solid var(--bd)}.lmsg button.mute:hover{opacity:1}
+.lmsg button.mute.on{opacity:.95;border-style:dashed}
 tr.lv{border-left:3px solid transparent}tr.lv-crit{border-left-color:var(--bad);background:rgba(220,38,38,.12)}
 tr.lv-err{border-left-color:var(--bad);background:rgba(220,38,38,.06)}tr.lv-warn{border-left-color:var(--warn);background:rgba(217,119,6,.07)}
 tr.lv-dbg td{color:var(--mut)}
@@ -138,7 +140,7 @@ tr.lv-dbg td{color:var(--mut)}
 .lg{display:inline-flex;align-items:center;gap:6px;opacity:.65;text-decoration:none}.lg.on{opacity:1;font-weight:600}.lg img{border-radius:2px;box-shadow:0 0 0 1px #0003}.ltabs{display:flex;gap:6px;margin-bottom:10px}.ltabs a{padding:6px 16px;border:1px solid var(--bd);border-radius:8px;text-decoration:none;color:var(--fg)}.ltabs a.on{background:var(--acc);border-color:var(--acc);color:#fff}nav .updb{background:#f59e0b33;color:#fbbf24}.foot{text-align:center;font-size:12px;color:var(--mut);padding:18px 12px}.foot a{color:inherit}</style></head><body data-refresh="{{ (refresh or 30) * 1000 }}">
 {% import "_lang.html" as lang with context %}{% set me = request.state.user %}{% if me %}<nav id="nav"><b>RouterOS Monitor</b><button class="burger" onclick="document.getElementById('nav').classList.toggle('open')" aria-label="Menu">☰</button><div class="links"><a href="/">{{ t('nav.routers') }}</a>{% if wl_on() or bl_on() %}<a href="{{ '/whitelist' if wl_on() else '/blacklist' }}">{{ t('nav.lists') }}</a>{% endif %}{% if wifi_any() %}<a href="/live">{{ t('nav.live') }}</a>{% endif %}{% if me.is_admin %}<a href="/log">{{ t('nav.log') }}</a><a href="/users">{{ t('nav.users') }}</a><a href="/settings">{{ t('nav.settings') }}</a>{% endif %}<span class="sp"></span>{% set app_upd = update_info() if me.is_admin else none %}{% if app_upd %}<a class="updb" href="{{app_upd.url}}" target="_blank" rel="noopener" title="{{ t('nav.update_title') }}">⬆ {{ t('nav.update', v=app_upd.v) }}</a>{% endif %}<a href="/account" title="{{ t('nav.account') }}">{{me.username}}{% if not me.is_admin %} {{ t('nav.viewer') }}{% endif %}</a><button onclick="toggleTheme()" title="{{ t('nav.theme') }}">◐</button>{{ lang.switcher() }}<a href="/logout">{{ t('nav.logout') }}</a></div></nav>{% endif %}
 <main>{% block c %}{% endblock %}</main>
-<footer class="foot">RouterOS Monitor v{{ app_version }} · <a href="https://github.com/silvergunx/routeros-monitor" target="_blank" rel="noopener">GitHub</a></footer>
+<footer class="foot">RouterOS Monitor v{{ app_version }} · <a href="https://github.com/silvergunx/routeros-monitor" target="_blank" rel="noopener">GitHub</a>{% if me and me.is_admin %} · <a href="/report">{{ t('nav.report') }}</a>{% endif %}</footer>
 <script>
 function fmtTimes(){document.querySelectorAll('.t').forEach(e=>e.textContent=new Date(e.dataset.t).toLocaleString())}
 fmtTimes();

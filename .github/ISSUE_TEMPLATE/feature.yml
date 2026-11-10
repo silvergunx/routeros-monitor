@@ -1,0 +1,28 @@
+name: Feature request / Propozycja funkcji
+description: Suggest an improvement / Zaproponuj usprawnienie
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would it solve? / Jaki problem to rozwiąże?
+      description: Describe the situation, not only the solution / Opisz sytuację, nie tylko rozwiązanie
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea / Twój pomysł
+      description: How should it work? Mockups welcome / Jak miałoby to działać? Szkice mile widziane
+  - type: textarea
+    id: alt
+    attributes:
+      label: Alternatives you tried / Co już próbowałeś
+  - type: dropdown
+    id: help
+    attributes:
+      label: Would you like to help? / Czy chcesz pomóc?
+      options:
+        - I can test it / Mogę przetestować
+        - I can send a pull request / Mogę wysłać pull request
+        - No, just an idea / Nie, to tylko pomysł

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability / Luka bezpieczeństwa
+    url: https://github.com/silvergunx/routeros-monitor/security/advisories/new
+    about: Report privately, do not open a public issue / Zgłoś prywatnie, nie otwieraj publicznego zgłoszenia

@@ -1,6 +1,7 @@
 import unicodedata
+import platform
 import os, re, csv, io, json, math, asyncio, socket, hashlib, hmac, secrets, time, ipaddress, datetime as dt
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urlparse, urlencode
 import i18n
 import version as appver
 import speedengines
@@ -432,6 +433,9 @@ def check_pw(p, stored):
         return False
 
 
+_PANEL_IPS = {}  # adres -> czas ostatniego zalogowanego żądania do panelu (auto-ban nigdy nie blokuje adresów, z których ostatnio korzystano)
+
+
 def user(request: Request, s: Session = Depends(db)):
     uid = request.session.get("uid")
     u = s.get(User, uid) if isinstance(uid, int) else None
@@ -439,6 +443,8 @@ def user(request: Request, s: Session = Depends(db)):
         request.session.clear()
         raise NeedLogin()
     request.state.user = u
+    if request.client and request.client.host:
+        _PANEL_IPS[request.client.host] = time.time()
     s.info["who"] = u.username
     return u
 
@@ -535,6 +541,7 @@ def index(request: Request, s: Session = Depends(db)):
                                                               "wans": {r.id: wan_info(s, r)[2] for r in routers},
                                                               "invs": {r.id: inventory_view(s, r) for r in routers},
                                                               "upds": {r.id: update_available(r) for r in routers},
+                                                              "stale": {r.id: script_stale(r) for r in routers} if request.state.user.is_admin else {},
                                                               "sis": {r.id: sys_info(s, r) for r in routers},
                                                               "lcs": {r.id: unread_counts(s, request.state.user, r.id)
                                                                       for r in routers}})
@@ -562,6 +569,17 @@ def q(text):
         else:
             out.append(c)
     return "".join(out)
+
+
+# Wersja skryptów na routerze. Zwiększ ją TYLKO wtedy, gdy zmiana skryptów wymaga ponownego wklejenia komendy konfiguracyjnej:
+# panel pokazuje wtedy administratorowi, że skrypt routera jest nieaktualny. Router podaje swoją wersję w każdym zapytaniu (cv).
+SCRIPT_VERSION = 1
+_ROUTER_CV = {}  # id routera -> wersja skryptu zgłoszona w ostatnim zapytaniu (0 = skrypt bez znacznika wersji); po restarcie pusto do pierwszego pomiaru
+
+
+def script_stale(r):
+    cv = _ROUTER_CV.get(r.id)
+    return cv is not None and cv < SCRIPT_VERSION
 
 
 MON = r'''
@@ -618,9 +636,9 @@ MON = r'''
   } on-error={}
   :local j "{\"id\":\"$id\",\"ver\":\"$ver\",\"up\":\"$up\",\"cpu\":$cpu,\"tm\":$tm,\"fm\":$fm,\"temp\":$temp,\"conns\":$conns,\"dhcp\":$dhcp,\"nw\":\5B$nw\5D,\"ifs\":\5B$ifs\5D}"
   :local resp ""
-  :do {:set resp ([/tool fetch url="@URL@/api/metrics?t=@TOKEN@" http-method=post http-data=$j http-header-field="Content-Type: application/json" output=user as-value]->"data")} on-error={
+  :do {:set resp ([/tool fetch url="@URL@/api/metrics?t=@TOKEN@&cv=@CV@" http-method=post http-data=$j http-header-field="Content-Type: application/json" output=user as-value]->"data")} on-error={
     :delay 3s
-    :do {:set resp ([/tool fetch url="@URL@/api/metrics?t=@TOKEN@" http-method=post http-data=$j http-header-field="Content-Type: application/json" output=user as-value]->"data")} on-error={:log warning "app-monitor: brak polaczenia z serwerem aplikacji"}
+    :do {:set resp ([/tool fetch url="@URL@/api/metrics?t=@TOKEN@&cv=@CV@" http-method=post http-data=$j http-header-field="Content-Type: application/json" output=user as-value]->"data")} on-error={:log warning "app-monitor: brak polaczenia z serwerem aplikacji"}
   }
   :if ($resp ~ "\"live\":1") do={
     :if ([:len [/system script job find where script="app-live"]] = 0) do={:execute script="/system script run app-live"}
@@ -789,7 +807,7 @@ def setup_rsc(request: Request, t: str, iface: str = "ether1", list: str = "whit
     bl = 1 if blacklist_on(s) else 0
     base = str(request.base_url).rstrip("/")
     rep = {"@URL@": base, "@TOKEN@": t, "@IFACE@": clean(iface, "ether1"), "@LIST@": clean(list, "whitelist"),
-           "@SPEEDURL@": SPEED_URL, "@SPEEDBYTES@": str(SPEED_BYTES), "@SPEEDN@": str(SPEED_STREAMS_ROUTER)}
+           "@CV@": str(SCRIPT_VERSION), "@SPEEDURL@": SPEED_URL, "@SPEEDBYTES@": str(SPEED_BYTES), "@SPEEDN@": str(SPEED_STREAMS_ROUTER)}
 
     def fill(x):
         for k, v in rep.items():
@@ -843,6 +861,7 @@ def router_page(rid: int, request: Request, s: Session = Depends(db)):
     names, wan, w = wan_info(s, r)
     return templates.TemplateResponse(request, "router.html", {"r": r, "cmd": cmd, "m": m, "names": names,
                                                               "inv": inventory_view(s, r), "upd": update_available(r),
+                                                              "stale": script_stale(r) and request.state.user.is_admin,
                                                               "si": sys_info(s, r),
                                                               "hours": router_hours(request.state.user, r.id),
                                                               "nw": nw_view(r),
@@ -1031,14 +1050,14 @@ def rate(cur, old, sec):
 
 
 @app.post("/api/metrics")
-async def metrics(request: Request, t: str):
+async def metrics(request: Request, t: str, cv: str = ""):
     raw = (await request.body()).decode("utf-8", "replace")
-    return await run_in_threadpool(store_metrics, t, raw, request.client.host if request.client else None)
+    return await run_in_threadpool(store_metrics, t, raw, request.client.host if request.client else None, int(cv) if cv.isdigit() else 0)
 
 
-def store_metrics(t, raw, ip=None):
+def store_metrics(t, raw, ip=None, cv=0):
     with Session(engine) as s:
-        return _store_metrics(s, t, raw, ip)
+        return _store_metrics(s, t, raw, ip, cv)
 
 
 def _median(v):
@@ -1107,8 +1126,9 @@ def nw_metrics(r, d):
     return out
 
 
-def _store_metrics(s, t, raw, ip=None):
+def _store_metrics(s, t, raw, ip=None, cv=0):
     r = get_router(s, t)
+    _ROUTER_CV[r.id] = cv
     if ip and not r.log_ip_fixed and r.log_ip != ip:
         r.log_ip = ip
     try:
@@ -1582,9 +1602,15 @@ def refresh_ipmap():
 
 def flush_logs(batch):
     rows, seen = [], {}
+    try:
+        muted = muted_set()
+    except Exception:  # wyciszanie nie może zatrzymać zapisu logów
+        muted = set()
     for rid, ts, data in batch:
         sev, topics, msg = parse_syslog(data)
         if not msg:
+            continue
+        if sev >= 4 and (rid, _mute_norm(msg)) in muted:  # błędy i komunikaty krytyczne nigdy nie są pomijane
             continue
         k = (rid, topics, msg)
         if k in seen and (ts - seen[k]).total_seconds() < 2:  # ten sam wpis z kilku reguł logowania
@@ -1592,9 +1618,180 @@ def flush_logs(batch):
         seen[k] = ts
         rows.append(LogEntry(router_id=rid, ts=ts, sev=sev, topics=topics[:100], msg=msg[:1000]))
     if rows:
+        fresh = [(x.ts, x.msg) for x in rows]  # po commit obiekty są odłączone od sesji, więc kopiujemy potrzebne pola wcześniej
         with Session(engine) as s:
             s.add_all(rows)
             s.commit()
+        try:
+            autoban_check(fresh)
+        except Exception as e:  # auto-ban nie może zatrzymać zapisu logów
+            print("autoban: %s" % e, flush=True)
+
+
+# ---------- wyciszanie komunikatów logu: wybrane powtarzające się wpisy routera nie są zapisywane ----------
+MUTE_MAX = 100
+_MAC_RX = re.compile(r"(?<![0-9A-Fa-f:])[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}(?![0-9A-Fa-f:])")
+_MUTE_CACHE = [0.0, set()]
+
+
+def _mute_norm(msg):
+    """Wzorzec komunikatu do wyciszania: adresy MAC i liczby zastąpione znacznikami (jak _norm, ale z MAC-ami)."""
+    return _norm(_MAC_RX.sub("MAC", msg))
+
+
+def mutes_get(s):
+    try:
+        return [m for m in json.loads(sget(s, "log_mutes", "[]")) if isinstance(m, dict) and m.get("pat")]
+    except ValueError:
+        return []
+
+
+def muted_set():
+    """Zbiór (id routera, wzorzec) wyciszonych komunikatów; odświeżany co 30 s albo po zmianie."""
+    if time.time() - _MUTE_CACHE[0] > 30:
+        with Session(engine) as s:
+            _MUTE_CACHE[1] = {(m.get("rid"), m["pat"]) for m in mutes_get(s)}
+        _MUTE_CACHE[0] = time.time()
+    return _MUTE_CACHE[1]
+
+
+@app.post("/api/routers/{rid}/logs/mute", dependencies=[Depends(admin)])
+def log_mute(rid: int, msg: str = Form(), s: Session = Depends(db)):
+    row = s.scalars(select(LogEntry).where(LogEntry.router_id == rid, LogEntry.msg == msg[:1000])
+                    .order_by(LogEntry.id.desc()).limit(1)).first()
+    if not row or row.sev <= 3:
+        return JSONResponse({"ok": False, "msg": tr("msg.mu_err")}, 400)
+    res = translate_log(row.msg, row.topics)
+    if _FAIL_RX.search(row.msg) or (res and res["level"] == "bad"):  # ataki i problemy muszą zostać widoczne (i liczone przez auto-ban)
+        return JSONResponse({"ok": False, "msg": tr("msg.mu_bad")}, 400)
+    pat = _mute_norm(row.msg)
+    lst = mutes_get(s)
+    if any(m["pat"] == pat and m.get("rid") == rid for m in lst):
+        return {"ok": True, "pat": pat}
+    if len(lst) >= MUTE_MAX:
+        return JSONResponse({"ok": False, "msg": tr("msg.mu_max")}, 400)
+    lst.append({"pat": pat, "rid": rid, "ts": now().isoformat(timespec="seconds")})
+    sset(s, "log_mutes", json.dumps(lst, ensure_ascii=False))
+    deleted = purge_muted(s, rid, pat)
+    log(s, "log wyciszony", "router %d: %s (usunięto %d starych wpisów, zostawiono najnowszy)" % (rid, pat, deleted))
+    s.commit()
+    _MUTE_CACHE[0] = 0
+    return {"ok": True, "pat": pat, "deleted": deleted}
+
+
+def purge_muted(s, rid, pat):
+    """Usuwa stare wpisy routera pasujące do wzorca (tylko ostrzeżenia i niżej), zostawiając najnowszy (znacznik 🔕 w liście).
+    Zwraca liczbę usuniętych. Przeszukuje najwyżej 300 tys. najnowszych wpisów routera."""
+    prefix = re.split(r"#|MAC", pat)[0]  # stały początek wzorca przyspiesza wyszukiwanie
+    q = select(LogEntry.id, LogEntry.msg).where(LogEntry.router_id == rid, LogEntry.sev >= 4)
+    if len(prefix) >= 3:
+        q = q.where(LogEntry.msg.startswith(prefix, autoescape=True))
+    ids = [i for i, msg in s.execute(q.order_by(LogEntry.id.desc()).limit(300000)) if _mute_norm(msg) == pat]
+    old = ids[1:]  # ids[0] to najnowszy wpis, zostaje
+    for k in range(0, len(old), 1000):
+        s.execute(delete(LogEntry).where(LogEntry.id.in_(old[k:k + 1000])))
+    return len(old)
+
+
+@app.post("/api/routers/{rid}/logs/unmute", dependencies=[Depends(admin)])
+def log_unmute(rid: int, msg: str = Form(), s: Session = Depends(db)):
+    pat = _mute_norm(msg)
+    lst = mutes_get(s)
+    new = [m for m in lst if not (m["pat"] == pat and m.get("rid") == rid)]
+    if len(new) != len(lst):
+        sset(s, "log_mutes", json.dumps(new, ensure_ascii=False))
+        log(s, "log: wyciszenie zdjęte", "router %d: %s" % (rid, pat))
+        s.commit()
+        _MUTE_CACHE[0] = 0
+    return {"ok": True, "pat": pat}
+
+
+@app.post("/settings/log-mutes/delete", dependencies=[Depends(admin)])
+def settings_mute_delete(request: Request, rid: str = Form(""), pat: str = Form(), s: Session = Depends(db)):
+    lst = mutes_get(s)
+    new = [m for m in lst if not (m["pat"] == pat and str(m.get("rid")) == rid)]
+    if len(new) != len(lst):
+        sset(s, "log_mutes", json.dumps(new, ensure_ascii=False))
+        log(s, "log: wyciszenie zdjęte", "router %s: %s" % (rid, pat))
+        s.commit()
+        _MUTE_CACHE[0] = 0
+    return settings_view(request, s, tr("msg.mu_removed"), True)
+
+
+# ---------- auto-ban (fail2ban): czasowa blokada adresów z wieloma nieudanymi logowaniami z internetu ----------
+AUTOBAN_HOURS = (1, 6, 24, 72)
+AUTOBAN_MAX_ACTIVE = 500  # górna granica liczby wpisów auto-banu naraz (ochrona przed zalaniem listy)
+_FAIL_RX = re.compile(r"login failure for user \S+ from (?P<ip>\d{1,3}(?:\.\d{1,3}){3}) via [\w-]+", re.I)
+_AB_HITS = {}  # adres -> czasy ostatnich nieudanych logowań
+
+
+def autoban_cfg(s):
+    def num(k, d, lo, hi):
+        v = sget(s, k, "")
+        return min(hi, max(lo, int(v))) if v.isdigit() else d
+    return {"on": blacklist_on(s) and sget(s, "autoban_on", "0") == "1",
+            "n": num("autoban_n", 5, 3, 50), "min": num("autoban_min", 10, 1, 120), "h": num("autoban_h", 1, 1, 168)}
+
+
+def _list_networks(s, kind):
+    out = []
+    for w in s.scalars(select(Whitelist).where(Whitelist.kind == kind, Whitelist.active == True)):  # noqa: E712
+        try:
+            out.append(ipaddress.ip_network(w.ip, strict=False))
+        except ValueError:  # domena
+            continue
+    return out
+
+
+def autoban_check(rows):
+    """Dodaje do blacklisty (na czas z ustawień) adresy publiczne, z których było >= N nieudanych logowań w oknie M minut."""
+    cand = []
+    for ts, msg in rows:  # rows: krotki (czas, treść)
+        m = _FAIL_RX.search(msg or "")
+        if m and is_public(m.group("ip")):
+            cand.append((ts, m.group("ip")))
+    if not cand:
+        return
+    with Session(engine) as s:
+        cfg = autoban_cfg(s)
+        if not cfg["on"]:
+            _AB_HITS.clear()
+            return
+        window = dt.timedelta(minutes=cfg["min"])
+        hit = []
+        for ts, ip in cand:
+            lst = _AB_HITS.setdefault(ip, [])
+            lst.append(ts)
+            lst[:] = [t for t in lst if ts - t <= window]
+            if len(lst) >= cfg["n"] and ip not in hit:
+                hit.append(ip)
+        for ip in [k for k, v in _AB_HITS.items() if not v or now() - v[-1] > window]:
+            del _AB_HITS[ip]
+        if not hit:
+            return
+        mine = [os.getenv("SYSLOG_HOST", "")] + [r.log_ip for r in s.scalars(select(Router)) if r.log_ip]
+        mine += [ip for ip, t in _PANEL_IPS.items() if time.time() - t < 86400]  # adresy, z których ostatnio korzystano z panelu
+        white = _list_networks(s, "white")
+        active = s.scalars(select(Whitelist).where(Whitelist.kind == "black", Whitelist.active == True)).all()  # noqa: E712
+        banned = {w.ip for w in active if not (w.expires and w.expires < now())}
+        auto_n = sum(1 for w in active if (w.comment or "").startswith("auto-ban"))
+        for ip in hit:
+            n_hits = len(_AB_HITS.get(ip, []))
+            _AB_HITS.pop(ip, None)
+            try:
+                net = parse_ip(ip)
+                a = ipaddress.ip_address(ip)
+            except ValueError:
+                continue
+            if net in banned or any(a in n for n in white) or netguard.check_ban(net, mine, ""):
+                continue
+            if auto_n >= AUTOBAN_MAX_ACTIVE:
+                break
+            auto_n += 1
+            s.add(Whitelist(kind="black", ip=net, comment=cmt("auto-ban %d failed logins" % n_hits),
+                            expires=now() + dt.timedelta(hours=cfg["h"]), router_id=None))
+            log(s, "blacklist+ (auto)", "%s: %d nieudanych logowan w %d min, ban na %d h" % (net, n_hits, cfg["min"], cfg["h"]))
+        s.commit()
 
 
 def purge_logs():
@@ -1767,8 +1964,10 @@ def logs_api(request: Request, rid: int, sev: str = "", topic: str = "", q: str 
                                                          LogEntry.ts > now() - dt.timedelta(days=7))
                            .distinct().limit(1000)).all():
         words.update(w for w in (tp or "").split(",") if w and w not in SEV_WORDS)
+    mset = muted_set() if request.state.user.is_admin else set()
     return {"items": [{"t": x.ts.isoformat(timespec="seconds"), "cls": sev_cls(x.sev), "label": tr(SEV_LABEL[sev_cls(x.sev)]),
-                       "topics": [w for w in x.topics.split(",") if w and w not in SEV_WORDS], "msg": x.msg}
+                       "topics": [w for w in x.topics.split(",") if w and w not in SEV_WORDS], "msg": x.msg,
+                       "muted": x.sev >= 4 and (rid, _mute_norm(x.msg)) in mset}
                       for x in rows],
             "counts": counts, "topics": sorted(words),
             "ack": (log_ack_time(request.state.user, rid) or dt.datetime(2000, 1, 1)).isoformat(timespec="seconds"),
@@ -3282,6 +3481,151 @@ def bl_rsc(t: str, list: str = "blacklist", s: Session = Depends(db)):
     return list_rsc(t, list, "black", s)
 
 
+_STARTED = time.time()
+
+
+def _age(sec):
+    sec = int(max(0, sec))
+    if sec < 90:
+        return "%d s" % sec
+    if sec < 5400:
+        return "%d min" % (sec // 60)
+    if sec < 172800:
+        return "%d h" % (sec // 3600)
+    return "%d d" % (sec // 86400)
+
+
+def _read_text(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
+
+def _diag_env(s):
+    mem = {}
+    for line in _read_text("/proc/meminfo").splitlines():
+        k, _, v = line.partition(":")
+        if k in ("MemTotal", "MemAvailable") and v.split():
+            mem[k] = int(v.split()[0]) * 1024
+    lim = _read_text("/sys/fs/cgroup/memory.max")
+    out = ["- Application version: %s" % appver.current(),
+           "- Image channel: %s" % (os.getenv("APP_CHANNEL", "").strip() or "-"),
+           "- Platform: %s, Python %s" % (platform.machine() or "?", platform.python_version()),
+           "- OS: %s %s" % (platform.system(), platform.release()),
+           "- Time zone: %s (UTC%s), TZ=%s" % (time.strftime("%Z"), time.strftime("%z"), os.getenv("TZ", "-")),
+           "- Application uptime: %s" % _age(time.time() - _STARTED)]
+    if mem.get("MemTotal"):
+        out.append("- Server memory: %s available of %s" % (bytes_h(mem.get("MemAvailable", 0)), bytes_h(mem["MemTotal"])))
+    if lim.isdigit():
+        out.append("- Container memory limit: %s" % bytes_h(int(lim)))
+    return out
+
+
+def _diag_db(s):
+    out = []
+    if engine.dialect.name == "postgresql":
+        out.append("- Database: PostgreSQL %s, size %s" % (s.scalar(text("show server_version")),
+                                                          bytes_h(s.scalar(text("select pg_database_size(current_database())")))))
+        for n, est, sz in s.execute(text(
+                "select relname, reltuples::bigint, pg_total_relation_size(oid) from pg_class where relkind = 'r' "
+                "and relname in ('iface_metrics', 'metrics', 'logs', 'client_stats', 'audit') order by 3 desc")).all():
+            out.append("  - table %s: ~%d rows, %s" % (n, max(est, 0), bytes_h(sz)))
+    else:
+        out.append("- Database: %s" % engine.dialect.name)
+    out.append("- Retention (days): measurements %d, interface samples %d, logs %d" % (RETENTION, IFACE_RETENTION, LOG_DAYS))
+    out.append("- Monitoring interval: %d s" % interval(s))
+    return out
+
+
+def _diag_routers(s):
+    rs = ordered_routers(s)
+    hour = dict(s.execute(select(LogEntry.router_id, func.count()).where(LogEntry.ts > now() - dt.timedelta(hours=1))
+                          .group_by(LogEntry.router_id)).all())
+    out = ["- Monitored routers: %d (%d online)" % (len(rs), sum(1 for r in rs if r.online))]
+    for i, r in enumerate(rs, 1):
+        si = sys_info(s, r)
+        p = [si["model"] or "?", "RouterOS " + (r.ver or "?")]
+        if si["fw"]:
+            p.append("firmware " + si["fw"])
+        p.append("online" if r.online else "offline")
+        p.append("last contact %s ago" % _age((now() - r.last_seen).total_seconds()) if r.last_seen else "never contacted")
+        if r.edge:
+            p.append("edge")
+        if si["manager"]:
+            p.append("CAPsMAN manager")
+        p.append("script %s" % ("outdated (v%s, current v%d)" % (_ROUTER_CV.get(r.id), SCRIPT_VERSION) if script_stale(r) else "ok" if r.id in _ROUTER_CV else "version not reported yet"))
+        p.append("syslog %s, %d log entries in the last hour" % ("source set" if r.log_ip else "source not set", hour.get(r.id, 0)))
+        out.append("  - Router %d: %s" % (i, ", ".join(p)))
+    out.append("- Syslog packets rejected (unknown source): %d from %d sources" % (
+        sum(c[0] for c in _log_rejected.values()), len(_log_rejected)))
+    return out
+
+
+def _diag_backups(s):
+    b = backups_view(s)
+    if not b.get("available"):
+        return ["- Backups: directory not available"]
+    if b["files"]:
+        n = b["files"][0]
+        out = ["- Backups: %d files, total %s, newest %s ago (%s)" % (len(b["files"]), b["total"],
+                                                                      _age((now() - n["ts"]).total_seconds()), n["size"])]
+    else:
+        out = ["- Backups: none"]
+    out.append("- Backup settings: size limit %s, keep %s days, chart history in backups %s, free disk %s" % (
+        b.get("limit_h") or "none", b["keep"], "yes" if os.getenv("BACKUP_INCLUDE_METRICS", "0") == "1" else "no", b.get("free") or "?"))
+    if b.get("error"):
+        out.append("- Last backup error: %s" % " ".join(b["error"].split())[:120])
+    return out
+
+
+def _diag_features(s):
+    cnt = dict(s.execute(select(Whitelist.kind, func.count()).where(Whitelist.active == True)  # noqa: E712
+                         .group_by(Whitelist.kind)).all())
+    out = ["- Modules: whitelist %s (%d entries), blacklist %s (%d entries)" % (
+        "on" if whitelist_on(s) else "off", cnt.get("white", 0), "on" if blacklist_on(s) else "off", cnt.get("black", 0)),
+        "- Update check: %s" % appver.status(),
+        "- Speed test engine: %s (Ookla %s, LibreSpeed %s)" % (sget(s, "speed_engine", "") or default_engine(),
+                                                              "installed" if OOKLA_BIN else "not installed",
+                                                              "installed" if LS_BIN else "not installed")]
+    for i, r in enumerate(ordered_routers(s), 1):
+        t = s.scalars(select(SpeedTest).where(SpeedTest.router_id == r.id).order_by(SpeedTest.ts.desc()).limit(1)).first() if r.edge else None
+        if t:
+            out.append("- Last speed test (router %d): %s via %s, %s ago" % (
+                i, "ok" if t.ok else "failed", t.source or "?", _age((now() - t.ts).total_seconds())))
+    return out
+
+
+def report_data(s):
+    """Dane diagnostyczne do zgłoszenia błędu. Celowo bez haseł, tokenów, adresów IP, nazw i identyfikatorów routerów."""
+    parts = []
+    for title, fn in (("Environment", _diag_env), ("Database", _diag_db), ("Routers", _diag_routers),
+                      ("Backups", _diag_backups), ("Features", _diag_features)):
+        try:
+            lines = fn(s)
+        except Exception as e:  # jedna sekcja nie może zepsuć całej strony
+            s.rollback()
+            lines = ["- (unavailable: %s)" % type(e).__name__]
+        parts.append("## " + title + "\n" + "\n".join(lines))
+    routers = []
+    for r in ordered_routers(s):
+        item = ", ".join(x for x in (sys_info(s, r)["model"], ("RouterOS " + r.ver) if r.ver else "") if x)
+        if item:
+            routers.append(item)
+    ros = "; ".join(dict.fromkeys(routers))[:300]
+    d = {"version": appver.current(), "platform": "%s, Python %s" % (platform.machine() or "?", platform.python_version()),
+         "routeros": ros}
+    qs = urlencode({"template": "bug.yml", "version": d["version"], "platform": d["platform"], "routeros": ros})
+    return d, "\n\n".join(parts), "https://github.com/%s/issues/new?%s" % (appver.REPO, qs)
+
+
+@app.get("/report", dependencies=[Depends(admin)])
+def report_page(request: Request, s: Session = Depends(db)):
+    d, text, url = report_data(s)
+    return templates.TemplateResponse(request, "report.html", {"d": d, "text": text, "issue_url": url})
+
+
 @app.get("/log", dependencies=[Depends(admin)])
 def log_page(request: Request, s: Session = Depends(db)):
     rows = s.scalars(select(AuditLog).order_by(AuditLog.id.desc()).limit(300)).all()
@@ -3516,7 +3860,10 @@ def settings_view(request, s, msg="", ok=True):
     return templates.TemplateResponse(request, "settings.html", {
         "domain": sget(s, "domain"), "email": sget(s, "email"), "msg": msg, "ok": ok,
         "interval": interval(s), "intervals": INTERVALS, "routers": ordered_routers(s), "bk": backups_view(s),
-        "wl_enabled": whitelist_on(s), "bl_enabled": blacklist_on(s), "speed_router": sget(s, "speed_router"), "speed_time": SPEED_TIME[:5],
+        "wl_enabled": whitelist_on(s), "bl_enabled": blacklist_on(s), "ab": autoban_cfg(s), "ab_hours": AUTOBAN_HOURS,
+        "mutes": [{"pat": m["pat"], "rid": m.get("rid"), "ts": m.get("ts", ""),
+                   "router": next((r.name for r in ordered_routers(s) if r.id == m.get("rid")), "?")} for m in mutes_get(s)],
+        "speed_router": sget(s, "speed_router"), "speed_time": SPEED_TIME[:5],
         "speed_engine": sget(s, "speed_engine", "") or default_engine(),
         "speed_server": server_setting(s, sget(s, "speed_engine", "") or default_engine()),
         "ookla": bool(OOKLA_BIN), "librespeed": bool(LS_BIN), "ls_best": best_result(s)})
@@ -3538,6 +3885,24 @@ def settings_blacklist(request: Request, on: str = Form(""), s: Session = Depend
     s.commit()
     _BL_ON[1] = 0
     return settings_view(request, s, (tr("msg.bl_on") if on == "1" else tr("msg.bl_off")) + " " + tr("msg.wl_paste"), True)
+
+
+@app.post("/settings/autoban", dependencies=[Depends(admin)])
+def settings_autoban(request: Request, on: str = Form(""), n: str = Form("5"), minutes: str = Form("10"), hours: str = Form("1"),
+                     s: Session = Depends(db)):
+    cfg = autoban_cfg(s)
+    n = int(n) if n.isdigit() else cfg["n"]
+    minutes = int(minutes) if minutes.isdigit() else cfg["min"]
+    hours = int(hours) if hours.isdigit() and int(hours) in AUTOBAN_HOURS else 1
+    sset(s, "autoban_on", "1" if on == "1" else "0")
+    sset(s, "autoban_n", str(min(50, max(3, n))))
+    sset(s, "autoban_min", str(min(120, max(1, minutes))))
+    sset(s, "autoban_h", str(hours))
+    log(s, "auto-ban", ("włączony" if on == "1" else "wyłączony") + ": %d prób / %d min, ban na %d h" % (
+        min(50, max(3, n)), min(120, max(1, minutes)), hours))
+    s.commit()
+    _AB_HITS.clear()
+    return settings_view(request, s, tr("msg.ab_saved"), True)
 
 
 @app.post("/settings/backup-now", dependencies=[Depends(admin)])
