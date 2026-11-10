@@ -20,6 +20,9 @@ Prace w toku na gałęzi `develop` (wersja 1.4.0).
 - Przycisk wyciszania (🔇) nie jest już pokazywany przy wpisach z nieudanymi logowaniami i innych, których nie da się wyciszyć.
 - `README.pl.md` linkuje polski dziennik zmian.
 
+### Naprawiono
+- Powiadomienia mogły przychodzić z opóźnieniem rzędu minut: były sprawdzane w tej samej pętli w tle co ciężkie zadania porządkowe (czyszczenie starych danych, statystyki WAN, kopie), która na dużej bazie potrafi się zablokować na długo. Powiadomienia mają teraz własną pętlę (sprawdzanie co 15 s), a zadania w tle trwające dłużej niż 10 s są zapisywane w logu aplikacji (widać je w „Zgłoś problem” jako `slow background task`).
+
 ## [1.3.0] - 2026-11-10
 ### Dodano
 - **Wskaźnik nieaktualnego skryptu routera**: router podaje teraz wersję swojego skryptu przy każdym pomiarze. Gdy skrypt na routerze jest starszy niż ten, którego oczekuje aplikacja, administrator widzi plakietkę „skrypt na routerze nieaktualny” na liście routerów i na stronie routera, a strona „Zgłoś problem” też to pokazuje. **Routery**: wklej jeszcze raz komendę konfiguracyjną na każdym routerze (skrypty ze starszych wersji nie wysyłają wersji, więc do tego czasu są pokazywane jako nieaktualne). Od tej chwili panel sam powie, kiedy nowa wersja wymaga ponownego wklejenia.

@@ -19,6 +19,9 @@ Work in progress on `develop` (version 1.4.0).
 - The mute button (🔇) is no longer shown on login-failure entries and other entries that can never be muted.
 - `README.pl.md` links the Polish changelog.
 
+### Fixed
+- Notifications could arrive minutes late: they were checked in the same background loop as the heavy maintenance tasks (cleaning old data, WAN statistics, backups), which on a large database can block that loop for a long time. Notifications now have their own loop (checked every 15 s), and background tasks that take longer than 10 s are written to the application log (visible in "Report a problem" as `slow background task`).
+
 ## [1.3.0] - 2026-11-10
 ### Added
 - **Outdated router script indicator**: the router now reports the version of its script with every measurement. When the script on a router is older than the one the application expects, administrators see a badge "router script outdated" on the router list and on the router page, and the "Report a problem" page lists it. **Routers**: paste the configuration command once more on every router (the scripts of earlier versions send no version, so they are shown as outdated until then). From then on the panel tells you whenever a new version needs a re-paste.

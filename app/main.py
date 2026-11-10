@@ -1643,6 +1643,7 @@ _log_buf = []
 _log_ipmap = {}
 _log_rejected = {}
 _log_task = None
+_notify_task = None
 
 
 def is_topics(tok):
@@ -2081,32 +2082,52 @@ def update_traffic():
         s.commit()
 
 
+async def _run_timed(fn, *args):
+    """Uruchamia zadanie w puli wątków i zapisuje w logu aplikacji te, które trwają dłużej niż 10 s (blokują pętlę zadań w tle)."""
+    t0 = time.monotonic()
+    try:
+        return await run_in_threadpool(fn, *args)
+    finally:
+        d = time.monotonic() - t0
+        if d > 10:
+            print("slow background task: %s took %.0f s" % (fn.__name__, d), flush=True)
+
+
+async def notify_loop():
+    """Powiadomienia mają własną pętlę, żeby ciężkie zadania (czyszczenie, statystyki) nie opóźniały alertów."""
+    await asyncio.sleep(10)
+    while True:
+        try:
+            await _run_timed(notify_check)
+        except Exception as e:
+            print("notify loop error: %s" % e, flush=True)
+        await asyncio.sleep(15)
+
+
 async def log_loop():
     n = 0
     while True:
         try:
             if n % 15 == 0:
-                await run_in_threadpool(refresh_ipmap)
+                await _run_timed(refresh_ipmap)
             if _log_buf:
                 batch = _log_buf[:]
                 del _log_buf[:len(batch)]
-                await run_in_threadpool(flush_logs, batch)
+                await _run_timed(flush_logs, batch)
             if n % 1800 == 0:
-                await run_in_threadpool(purge_logs)
+                await _run_timed(purge_logs)
             if n % 30 == 5:
-                await run_in_threadpool(record_clients)
+                await _run_timed(record_clients)
             if n % 300 == 10:
-                await run_in_threadpool(update_traffic)
+                await _run_timed(update_traffic)
             if n % 150 == 20:
-                await run_in_threadpool(enforce_backup_limit)
+                await _run_timed(enforce_backup_limit)
             if n % 150 == 30:
-                await run_in_threadpool(purge_iface_metrics)
+                await _run_timed(purge_iface_metrics)
             if n % 30 == 0:
-                await run_in_threadpool(refresh_interval_cache)
-            if n % 15 == 3:
-                await run_in_threadpool(notify_check)
+                await _run_timed(refresh_interval_cache)
             if n % 15 == 7:
-                rid = await run_in_threadpool(speed_due)
+                rid = await _run_timed(speed_due)
                 if rid:
                     asyncio.create_task(server_speedtest(rid))
         except Exception as e:
@@ -2137,12 +2158,13 @@ async def start_caddy_cfg():
 
 @app.on_event("startup")
 async def start_syslog():
-    global _log_task
+    global _log_task, _notify_task
     try:
         await asyncio.get_running_loop().create_datagram_endpoint(SyslogProto, local_addr=("0.0.0.0", SYSLOG_LISTEN))
     except OSError as e:
         print("syslog: nie można nasłuchiwać na UDP %d: %s" % (SYSLOG_LISTEN, e), flush=True)
     _log_task = asyncio.create_task(log_loop())
+    _notify_task = asyncio.create_task(notify_loop())
 
 
 LOG_CATS = {"error": (0, 1, 2, 3), "warning": (4,), "info": (5, 6), "debug": (7,)}
