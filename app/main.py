@@ -4796,8 +4796,12 @@ def topology_graph(s, root, orphans):
                 up = d.get("disabled") != "true" and ms is not None and ms <= 180_000
                 key = tuple(sorted((x.router_id, oid)))
                 pairs[key] = pairs.get(key, False) or up
+    segs = {}  # tunel biegnie przez Internet: każdy router z tunelem dostaje zieloną linię do węzła Internet
     for (a, b), up in pairs.items():
-        links.append({"s": "r%d" % a, "t": "r%d" % b, "vpn": True, "up": up})
+        for rid in (a, b):
+            segs[rid] = segs.get(rid, False) or up
+    for rid, up in segs.items():
+        links.append({"s": "r%d" % rid, "t": "inet", "vpn": True, "up": up})
     return {"nodes": nodes, "links": links}
 
 

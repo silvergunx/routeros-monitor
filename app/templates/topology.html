@@ -54,6 +54,7 @@ let G={nodes:[],links:[],byId:{},parent:{}},S={k:1,x:0,y:0},sig='',pins={},hint=
 try{pins=JSON.parse(localStorage.getItem('topoPins')||'{}')}catch(e){pins={}}
 const R=n=>n.type==='inet'?30:n.type==='router'?28:n.type==='nbr'?21:13;
 function el(tag,at,par){const e=document.createElementNS(NS,tag);for(const k in at)e.setAttribute(k,at[k]);if(par)par.appendChild(e);return e}
+function wl(c,ap){const s=c.signal==null?-70:c.signal,w=Math.max(0,Math.min(1,(-s-45)/45));return 58+w*82+Math.min(22,(ap.nc||0)*1.1)}
 function layout(iters,a0){const N=G.nodes;let a=a0;
  for(let it=0;it<iters;it++){a=Math.max(0.03,a*0.985);
   for(let i=0;i<N.length;i++){const p=N[i];for(let j=i+1;j<N.length;j++){const q=N[j];
@@ -62,8 +63,8 @@ function layout(iters,a0){const N=G.nodes;let a=a0;
    let f=0;if(d<rr)f=(rr-d)*.5;if(d<420)f+=(cc?340:5400)*a/d;
    const fx=dx/d*f,fy=dy/d*f;p.vx-=fx;p.vy-=fy;q.vx+=fx;q.vy+=fy}}
   for(const l of G.links){const p=G.byId[l.s],q=G.byId[l.t];let dx=q.x-p.x,dy=q.y-p.y,d=Math.sqrt(dx*dx+dy*dy)||.01;
-   const L=l.vpn?300:(l.wifi?52+Math.min(50,(p.nc||0)*1.8):(q.type==='nbr'?112:(p.type==='inet'?125:150)));
-   const f=(d-L)*(l.vpn?.012:.1)*Math.max(a,.15),fx=dx/d*f,fy=dy/d*f;p.vx+=fx;p.vy+=fy;q.vx-=fx;q.vy-=fy}
+   if(l.vpn)continue;const L=l.wifi?wl(q,p):(q.type==='nbr'?112:(p.type==='inet'?125:150));
+   const f=(d-L)*.1*Math.max(a,.15),fx=dx/d*f,fy=dy/d*f;p.vx+=fx;p.vy+=fy;q.vx-=fx;q.vy-=fy}
   for(const l of G.links){if(l.vpn)continue;const p=G.byId[l.s],q=G.byId[l.t],ex=q.x-p.x,ey=q.y-p.y,e2=ex*ex+ey*ey||1;
    for(const n of N){if(n===p||n===q||n.pin)continue;let u=((n.x-p.x)*ex+(n.y-p.y)*ey)/e2;if(u<-.05||u>1.05)continue;u=Math.max(0,Math.min(1,u));
     const cx=p.x+ex*u,cy=p.y+ey*u;let dx=n.x-cx,dy=n.y-cy,d=Math.sqrt(dx*dx+dy*dy)||.01;const m=R(n)+(n.type==='client'?12:30);
@@ -78,7 +79,7 @@ function initPos(old){const rows={};G.nodes.forEach(n=>{if(n.type!=='client'&&n.
   const par=G.byId[G.parent[n.id]];
   if(n.type==='client'||n.type==='nbr'||!par){
    if(par&&n.type!=='router'){const sib=G.nodes.filter(m=>G.parent[m.id]===par.id),i=sib.indexOf(n),ang=(i/Math.max(1,sib.length))*6.283+(par.x>0?.3:1.2);
-    n.x=par.x+Math.cos(ang)*70;n.y=par.y+Math.sin(ang)*70}
+    const rr=n.type==='client'?wl(n,par):70;n.x=par.x+Math.cos(ang)*rr;n.y=par.y+Math.sin(ang)*rr}
    else{const r=rows[n.depth]||[n],i=r.indexOf(n);n.x=(i-(r.length-1)/2)*170;n.y=n.depth*160}}
   else{const r=rows[n.depth]||[n],i=r.indexOf(n);n.x=(i-(r.length-1)/2)*170+(Math.random()-.5)*10;n.y=n.depth*160}}}
 function fit(){const w=wrap.clientWidth,h=wrap.clientHeight;if(!w||!G.nodes.length)return;
@@ -86,7 +87,7 @@ function fit(){const w=wrap.clientWidth,h=wrap.clientHeight;if(!w||!G.nodes.leng
  const k=Math.min(w/(x1-x0),h/(y1-y0),1.5);S={k,x:w/2-k*(x0+x1)/2,y:h/2-k*(y0+y1)/2};applyT()}
 function applyT(){const g=document.getElementById('tg');if(g)g.setAttribute('transform','translate('+S.x+','+S.y+') scale('+S.k+')')}
 function path(l){const p=G.byId[l.s],q=G.byId[l.t];if(l.wifi)return'M'+p.x+' '+p.y+'L'+q.x+' '+q.y;
- const mx=(p.x+q.x)/2,my=(p.y+q.y)/2,dx=q.x-p.x,dy=q.y-p.y,o=l.vpn?-.3:.1;return'M'+p.x+' '+p.y+'Q'+(mx-dy*o)+' '+(my+dx*o)+' '+q.x+' '+q.y}
+ const mx=(p.x+q.x)/2,my=(p.y+q.y)/2,dx=q.x-p.x,dy=q.y-p.y,o=l.vpn?.22:.1;return'M'+p.x+' '+p.y+'Q'+(mx-dy*o)+' '+(my+dx*o)+' '+q.x+' '+q.y}
 function place(){G.links.forEach(l=>{if(l.el)l.el.setAttribute('d',path(l))});G.nodes.forEach(n=>{if(n.el)n.el.setAttribute('transform','translate('+n.x+','+n.y+')')})}
 function icon(n){return n.type==='inet'?'ic-globe':n.type==='nbr'?'ic-box':n.type==='client'?'ic-'+(n.kind||'other'):(n.ap?'ic-ap':'ic-router')}
 function draw(){svg.textContent='';const d=el('defs',{},svg);
@@ -150,7 +151,7 @@ function apply(g,reset){const old=reset?{}:G.byId,first=!Object.keys(old).length
  const nodes=g.nodes,byId={},parent={};nodes.forEach(n=>byId[n.id]=n);g.links.forEach(l=>{if(!(l.t in parent))parent[l.t]=l.s});
  const s2=nodes.map(n=>n.id).join(',')+'|'+g.links.map(l=>l.s+'>'+l.t).join(',');
  G={nodes,links:g.links,byId,parent};const same=s2===sig&&!reset;sig=s2;
- if(same){nodes.forEach(n=>{const o=old[n.id];if(o){n.x=o.x;n.y=o.y;n.pin=o.pin}})}
+ if(same){nodes.forEach(n=>{const o=old[n.id];if(o){n.x=o.x;n.y=o.y;n.pin=o.pin;n.vx=n.vy=0}});layout(40,.12)}
  else{initPos(old);layout(first?460:140,first?1:.4)}
  draw();if(first||reset)fit()}
 function load(){let g;try{g=JSON.parse(document.getElementById('tgraph').textContent)}catch(e){return}apply(g,false)}
