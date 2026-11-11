@@ -96,12 +96,12 @@ o.querySelector('summary').addEventListener('click',e=>{if(o.classList.contains(
 
 <div class="rp rp-dev card"><div class="row" style="justify-content:flex-end;margin-bottom:8px"><input class="q" placeholder="{{ t('rp.search') }}" oninput="invFilter(this)" style="width:240px"></div><div id="live-dev" data-live>{% if inv.stale %}<p class="warn small">{{ t('rp.stale_a') }}<span class="t" data-t="{{inv.updated|iso}}Z"></span>{{ t('rp.stale_b') }}</p>{% elif not inv.updated %}<p class="mut small">{{ t('rp.nodata_inv') }}</p>{% endif %}<div class="scroll"><table class="mob"><tr><th>Status</th><th>{{ t('lv.name') }}</th><th>IP</th><th class="hm">MAC</th><th>Wi-Fi</th><th class="hm">{{ t('rp.lease') }}</th><th class="hm">{{ t('rp.last_dhcp') }}</th></tr>
 {% for d in inv.devices %}<tr><td data-l="Status"><span class="st {{d.state}}">{{ {'online':t('rt.online'),'idle':t('rp.idle'),'offline':t('rt.offline')}[d.state] }}</span></td>
-<td data-l="{{ t('lv.name') }}"><b>{{d.name}}</b>{% if d.host %}<div class="mut small">{{d.host}}</div>{% endif %}</td><td data-l="IP">{{d.ip}}</td><td data-l="MAC" class="hm small">{{d.mac}}</td>
-<td data-l="Wi-Fi">{{ sig(d.signal, d.sc) if d.signal is not none else '-' }}</td><td data-l="{{ t('rp.lease') }}" class="hm small">{{ t('rp.static') if d.static else t('rp.dynamic') }}</td><td data-l="{{ t('rp.last_dhcp') }}" class="hm small">{{d.last}}</td></tr>
+<td data-l="{{ t('lv.name') }}"><b{% if d.nomac %} class="warn"{% endif %}>{{d.name}}</b>{% if me.is_admin and not d.nomac %} <button type="button" class="ico" data-mac="{{d.mac}}" data-name="{{d.name if d.custom else ''}}" onclick="devName(this)" title="{{ t('rp.rename') }}" aria-label="{{ t('rp.rename') }}">✎</button>{% endif %}{% if d.host %}<div class="mut small">{{d.host}}</div>{% endif %}</td><td data-l="IP">{{d.ip}}</td><td data-l="MAC" class="hm small">{{d.mac}}</td>
+<td data-l="Wi-Fi">{{ sig(d.signal, d.sc) if d.signal is not none else '-' }}</td><td data-l="{{ t('rp.lease') }}" class="hm small">{{ t('rp.no_dhcp') if d.nodhcp else (t('rp.static') if d.static else t('rp.dynamic')) }}</td><td data-l="{{ t('rp.last_dhcp') }}" class="hm small">{{d.last}}</td></tr>
 {% else %}<tr><td colspan="7" class="mut">{{ t('rp.no_leases') }}</td></tr>{% endfor %}</table>
 <p class="mut small">{{ t('rp.dev_help') }}</p></div></div></div>
 <div class="rp rp-wifi card"><div class="row" style="justify-content:flex-end;margin-bottom:8px"><input class="q" placeholder="{{ t('rp.search') }}" oninput="invFilter(this)" style="width:240px"></div><div id="live-wifi" data-live>{% if inv.stale %}<p class="warn small">{{ t('rp.stale_a') }}<span class="t" data-t="{{inv.updated|iso}}Z"></span>{{ t('rp.stale_b') }}</p>{% elif not inv.updated %}<p class="mut small">{{ t('rp.nodata_inv') }}</p>{% endif %}<div class="scroll"><table class="mob"><tr><th>{{ t('lv.name') }}</th><th>{{ t('lv.q_short') }}</th><th>{{ t('lv.signal') }}</th><th>IP</th><th class="hm">MAC</th><th class="hm">{{ t('rp.interface') }}</th><th class="hm">{{ t('lv.link') }}</th><th class="hm">TX / RX</th><th>{{ t('rp.connected') }}</th></tr>
-{% for w in inv.wifi %}<tr><td data-l="{{ t('lv.name') }}"><b>{{w.name}}</b></td>
+{% for w in inv.wifi %}<tr><td data-l="{{ t('lv.name') }}"><b>{{w.name}}</b>{% if me.is_admin %} <button type="button" class="ico" data-mac="{{w.mac}}" data-name="{{w.name if w.custom else ''}}" onclick="devName(this)" title="{{ t('rp.rename') }}" aria-label="{{ t('rp.rename') }}">✎</button>{% endif %}{% if w.sub %}<div class="mut small">{{w.sub}}</div>{% endif %}</td>
 <td data-l="{{ t('lv.q_short') }}"><span class="qbadge {{w.qc}}">{{w.qlabel}}</span>{% if w.pct is not none %} <span class="mut small">{{ t('rp.pct_max', n=w.pct) }}</span>{% endif %}</td>
 <td data-l="{{ t('lv.signal') }}" class="{{w.sc}}">{{ sig(w.signal, w.sc) }}{% if w.snr is not none %} <span class="mut small">SNR {{w.snr|int}}</span>{% endif %}</td><td data-l="IP">{{w.ip}}</td><td data-l="MAC" class="hm small">{{w.mac}}</td><td data-l="{{ t('rp.interface') }}" class="hm">{{w.iface}}</td>
 <td data-l="{{ t('lv.link') }}" class="hm small">{{ [w.band, w.std, (w.width ~ ' MHz') if w.width else '', (w.streams ~ 'x' ~ w.streams) if w.streams else '']|select|join(' · ') or '-' }}</td>
@@ -183,6 +183,9 @@ inp.closest('.rp').querySelectorAll('tr').forEach(tr=>{if(tr.querySelector('th')
 window.afterLive=()=>document.querySelectorAll('#rtabs input.q').forEach(invFilter);
 let t0=location.hash.slice(1);if(!t0){try{t0=localStorage.getItem('rtab')||''}catch(e){}}rTab(t0||'charts');
 </script>
+<script>async function devName(b){const v=prompt({{ t('rp.rename_q')|tojson }}+' '+b.dataset.mac,b.dataset.name);if(v===null)return;
+const f=new FormData();f.append('mac',b.dataset.mac);f.append('name',v);let r;try{r=await fetch('/api/devices/name',{method:'POST',body:f})}catch(e){return}
+if(r.ok)location.reload();else{try{alert((await r.json()).msg)}catch(e){}}}</script>
 <script>const RID={{r.id}};const REFRESH={{refresh*1000}};const ISADMIN={{ 'true' if me.is_admin else 'false' }};</script>
 <script>
 const LF={sev:''};let ltimer=null;

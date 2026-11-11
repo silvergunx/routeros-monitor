@@ -152,6 +152,7 @@ Jeśli zmiana dotyczy skryptów na routerach, w opisie wersji będzie informacja
 | `SECRET_KEY` | – | klucz sesji, min. 16 znaków (`openssl rand -hex 32`) |
 | `RETENTION_DAYS` | `30` | ile dni trzymać pomiary (CPU, RAM, jakość łącza itd.) |
 | `IFACE_RETENTION_DAYS` | `7` | ile dni trzymać próbki ruchu interfejsów (największa tabela); starsze są usuwane w tle |
+| `HTTP_PORT` / `HTTPS_PORT` | `80` / `443` | porty panelu na serwerze, gdy 80 lub 443 zajmuje inna usługa (wtedy otwórz `http://ADRES:PORT`). Automatyczny certyfikat Let's Encrypt wymaga dostępu do serwera z internetu na portach 80 i 443 |
 | `SYSLOG_PORT` | `514` | port UDP na serwerze dla logów z routerów |
 | `LOG_RETENTION_DAYS` | `14` | ile dni trzymać logi |
 | `TZ` | `Europe/Warsaw` | strefa czasu |

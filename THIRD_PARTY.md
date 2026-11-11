@@ -20,6 +20,13 @@ Not part of this repository and **not included in the ready-made images**. When 
 (`docker compose up -d --build`), it is downloaded from Ookla and is subject to Ookla's licence and privacy policy
 (personal, non-commercial use). You can use the LibreSpeed or Cloudflare engine instead.
 
+## IEEE OUI registry (not bundled)
+
+Device vendors are shown based on the public IEEE MA-L registry (`https://standards-oui.ieee.org/oui/oui.csv`). It is **not part of this
+repository or the images**: your own server downloads it (about 4 MB, at most once every 30 days, or with the button in Settings) and
+keeps it in its database. MAC addresses are looked up locally and never sent anywhere. Set `OUI_DOWNLOAD=0` to turn the automatic
+download off. The registry data belongs to the IEEE.
+
 ## Python and other packages
 
 The packages listed in `app/requirements.txt` are installed from PyPI under their own licences. The charts use
