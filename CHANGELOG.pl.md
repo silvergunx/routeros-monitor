@@ -10,6 +10,9 @@ Uwagi oznaczone **Routery** oznaczają, że trzeba ponownie wkleić komendę kon
 
 Prace w toku na gałęzi `develop` (wersja 1.5.0).
 
+### Dodano
+- **Producent urządzenia z adresu MAC i własne nazwy urządzeń** (sugestia z forum). Zakładki Urządzenia i Wi-Fi pokazują pod nazwą producenta (także gdy jest nazwa hosta), na podstawie publicznego rejestru IEEE, który pobiera Twój własny serwer (Ustawienia → Ogólne, ok. 4 MB, odświeżanie co 30 dni, przycisk „Pobierz teraz”; `OUI_DOWNLOAD=0` wyłącza automatyczne pobieranie). Urządzenia z losowym, prywatnym adresem MAC (telefony) są tak oznaczone. Administrator może nadać dowolnemu urządzeniu własną nazwę przyciskiem ✎; nazwa jest zapisana dla adresu MAC i obowiązuje na wszystkich routerach. Analiza logów pokazuje nazwę i producenta przy adresach MAC, a gdy to samo urządzenie ciągle odpada na uwierzytelnianiu, dopisuje podpowiedź, że najpewniej ma zapisane błędne hasło Wi-Fi. Bez zmian w skryptach routera, nie trzeba ponownie wklejać komendy.
+
 ## [1.4.0] - 2026-11-11
 
 ### Dodano

@@ -11,6 +11,7 @@ import netguard
 import backups as backuplib
 import applog
 import notify
+import oui
 import httpx
 from fastapi import FastAPI, Request, Form, Depends, HTTPException, Body
 from fastapi.responses import JSONResponse, RedirectResponse, PlainTextResponse, Response, FileResponse, StreamingResponse
@@ -18,7 +19,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.concurrency import run_in_threadpool
 from sqlalchemy.engine import URL
-from sqlalchemy import inspect as sa_inspect, extract, create_engine, Date, Text, UniqueConstraint, String, Float, DateTime, Integer, Boolean, BigInteger, ForeignKey, Index, select, delete, func, or_, text
+from sqlalchemy import insert, inspect as sa_inspect, extract, create_engine, Date, Text, UniqueConstraint, String, Float, DateTime, Integer, Boolean, BigInteger, ForeignKey, Index, select, delete, func, or_, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
 
 applog.install()  # bufor ostatnich ostrzeżeń i błędów (raport „Zgłoś problem”)
@@ -393,6 +394,21 @@ class Setting(Base):
     __tablename__ = "settings"
     key: Mapped[str] = mapped_column(String(50), primary_key=True)
     value: Mapped[str] = mapped_column(Text, default="")  # TEXT: np. wynik wyboru serwera LibreSpeed ma kilkaset znaków
+
+
+class DeviceName(Base):
+    """Własna nazwa urządzenia nadana w panelu: jedna na adres MAC, wspólna dla wszystkich routerów."""
+    __tablename__ = "device_names"
+    mac: Mapped[str] = mapped_column(String(17), primary_key=True)  # AA:BB:CC:DD:EE:FF
+    name: Mapped[str] = mapped_column(String(60))
+    updated: Mapped[dt.datetime] = mapped_column(DateTime, default=lambda: dt.datetime.now(dt.timezone.utc).replace(tzinfo=None))
+
+
+class OuiVendor(Base):
+    """Rejestr producentów (przedrostki MAC, IEEE MA-L), pobierany przez serwer użytkownika; nie jest częścią projektu."""
+    __tablename__ = "oui_vendors"
+    prefix: Mapped[str] = mapped_column(String(6), primary_key=True)
+    vendor: Mapped[str] = mapped_column(String(200))
 
 
 MIGRATIONS = [
@@ -1638,7 +1654,75 @@ def bl_on():
 templates.env.globals["bl_on"] = bl_on
 
 
+OUI = oui.Registry()  # producenci z adresów MAC (w pamięci; źródło: tabela oui_vendors)
+OUI_DAYS = 30  # co ile dni odświeżać rejestr
+OUI_AUTO = os.getenv("OUI_DOWNLOAD", "1") != "0"  # OUI_DOWNLOAD=0 wyłącza automatyczne pobieranie (zostaje przycisk w Ustawieniach)
+
+
+def oui_load(s):
+    """Wczytuje rejestr z bazy do pamięci."""
+    OUI.set({p: v for p, v in s.execute(select(OuiVendor.prefix, OuiVendor.vendor))})
+
+
+def oui_refresh(force=False):
+    """Zadanie w tle: wczytuje rejestr z bazy, a gdy go brak lub jest starszy niż OUI_DAYS dni, pobiera go ze strony IEEE.
+    Zwraca (liczba wpisów, błąd lub None). Błąd sieci nie psuje niczego: zostaje poprzednia kopia."""
+    with Session(engine) as s:
+        if not len(OUI):
+            oui_load(s)
+        last = sget(s, "oui_updated")
+        try:
+            age = (now() - dt.datetime.fromisoformat(last)).days if last else None
+        except ValueError:
+            age = None
+        if not force and (not OUI_AUTO or (age is not None and age < OUI_DAYS)):
+            return len(OUI), None
+        try:
+            data = oui.parse_ieee_csv(oui.download())
+            if len(data) < 1000:
+                raise ValueError("registry looks incomplete (%d entries)" % len(data))
+        except Exception as e:
+            sset(s, "oui_error", (str(e) or e.__class__.__name__)[:200])
+            if age is None:
+                sset(s, "oui_updated", "")
+            s.commit()
+            return len(OUI), str(e) or e.__class__.__name__
+        s.execute(delete(OuiVendor))
+        items = list(data.items())
+        for k in range(0, len(items), 5000):
+            s.execute(insert(OuiVendor), [{"prefix": p, "vendor": v[:200]} for p, v in items[k:k + 5000]])
+        sset(s, "oui_updated", now().isoformat(timespec="seconds"))
+        sset(s, "oui_error", "")
+        log(s, "rejestr producentów MAC", "pobrano %d wpisów" % len(data))
+        s.commit()
+        oui_load(s)
+        return len(OUI), None
+
+
+def device_names(s):
+    """Własne nazwy urządzeń: {MAC: nazwa}."""
+    return {n.mac: n.name for n in s.scalars(select(DeviceName))}
+
+
+def device_label(mac, comment, host, custom):
+    """Nazwa do wyświetlenia i dopisek pod nią: własna nazwa > komentarz DHCP > nazwa hosta > "-".
+    Dopisek: pierwotna nazwa/host oraz producent z adresu MAC (albo informacja, że to losowy adres prywatny)."""
+    name = custom or comment or host or "-"
+    sub = []
+    if custom and (comment or host):
+        sub.append(comment or host)
+    elif comment and host:
+        sub.append(host)
+    vendor = OUI.lookup(mac)
+    if vendor:
+        sub.append(vendor)
+    elif oui.is_private(mac):
+        sub.append(tr("dev.private_mac"))
+    return name, " · ".join(sub)
+
+
 def inventory_view(s, r):
+    names = device_names(s)
     # adresy monitorowanych routerów/AP, które są online - jeśli występują w DHCP tego routera, to na pewno są aktywne
     online_ips = {x.log_ip for x in s.scalars(select(Router)).all() if x.log_ip and x.online}
     rows = s.scalars(select(Inv).where(Inv.router_id == r.id)).all()
@@ -1659,7 +1743,8 @@ def inventory_view(s, r):
         mac = d.get("key", "").upper()
         l = leases.get(mac, {})
         wq = wifi_quality(d)
-        wifi.append({"mac": mac, "name": l.get("comment") or l.get("host") or "-",
+        wname, wsub = device_label(mac, l.get("comment"), l.get("host"), names.get(oui.normalize(mac)))
+        wifi.append({"mac": mac, "name": wname, "sub": wsub, "custom": oui.normalize(mac) in names,
                      "ip": l.get("ip") or d.get("last-ip") or d.get("lastip") or "-",
                      "iface": d.get("interface") or d.get("iface", ""), "uptime": d.get("uptime") or "-", **wq})
     wifi.sort(key=lambda w: (-(w["q"] if w["q"] is not None else -1), -(w["signal"] if w["signal"] is not None else -999)))
@@ -1676,8 +1761,8 @@ def inventory_view(s, r):
         else:
             state = "offline"
         w = wmacs.get(mac)
-        devices.append({"state": state, "name": d.get("comment") or d.get("host") or "-",
-                        "host": d.get("host") if d.get("comment") else "", "ip": d.get("ip") or "-", "mac": mac,
+        dname, dsub = device_label(mac, d.get("comment"), d.get("host"), names.get(oui.normalize(mac)))
+        devices.append({"state": state, "name": dname, "host": dsub, "custom": oui.normalize(mac) in names, "ip": d.get("ip") or "-", "mac": mac,
                         "static": d.get("dyn") == "false", "last": d.get("last") or "-",
                         "signal": w["signal"] if w else None, "sc": w["sc"] if w else ""})
     order = {"online": 0, "idle": 1, "offline": 2}
@@ -2317,6 +2402,7 @@ def start_background_tasks():
         ("enforce_backup_limit", enforce_backup_limit, 300, 40, True),
         ("purge_iface_metrics", purge_iface_metrics, 300, 60, True),
         ("purge_logs", purge_logs, 3600, 90, True),
+        ("oui_refresh", oui_refresh, 86400, 30, True),
     ]
     tasks = [asyncio.create_task(_periodic(*j[:4], heavy=j[4])) for j in jobs]
     tasks += [asyncio.create_task(_ingest_loop()), asyncio.create_task(_speed_loop()), asyncio.create_task(notify_loop())]
@@ -3291,6 +3377,7 @@ def _wifi_disc(m, tp):
             "title": tr("an.061") + why.split(":")[0],
             "explain": tr("an.062") % why,
             "advice": (tr("an.063")) if bad else "",
+            "hs": m.group("mac") if "handshake" in reason else "",  # uwierzytelnienie nie powiodło się: patrz podpowiedź o haśle w logs_analysis
             "det": {tr("an.051"): m.group("iface"), tr("an.038"): m.group("mac")}}
 
 
@@ -3611,6 +3698,44 @@ def logs_analysis(request: Request, rid: int, hours: int = 24, s: Session = Depe
                 d[v] = d.get(v, 0) + 1
         if len(g["examples"]) < 3:
             g["examples"].append(msg)
+        if res.get("hs"):
+            hs = g.setdefault("_hs", {})
+            k = oui.normalize(res["hs"]) or res["hs"]
+            hs[k] = hs.get(k, 0) + 1
+    # urządzenia w analizie: adres MAC z dopiskiem (własna nazwa / DHCP / producent)
+    names, leases = device_names(s), {}
+    for (data,) in s.execute(select(Inv.data).where(Inv.router_id == rid, Inv.kind == "dhcp")):
+        try:
+            d = json.loads(data)
+        except ValueError:
+            continue
+        if oui.normalize(d.get("key", "")):
+            leases[oui.normalize(d["key"])] = d
+
+    def mac_text(mac):
+        k = oui.normalize(mac)
+        if not k:
+            return mac
+        d = leases.get(k, {})
+        name = names.get(k) or d.get("comment") or d.get("host") or ""
+        parts = [name] if name else []
+        vendor = OUI.lookup(k)
+        if vendor:
+            parts.append(vendor)
+        elif oui.is_private(k):
+            parts.append(tr("dev.private_mac"))
+        return "%s (%s)" % (mac, " · ".join(parts)) if parts else mac
+
+    wd = groups.get("wifi_disc_bad")
+    if wd and wd.get("_hs"):  # to samo urządzenie wielokrotnie odpada na uwierzytelnianiu: zwykle zapisane błędne hasło Wi-Fi
+        mac, n = max(wd["_hs"].items(), key=lambda x: x[1])
+        if n >= 5:
+            wd["advice"] = (wd["advice"] + " " if wd["advice"] else "") + tr("an.203") % (mac_text(mac), n)
+    for g in groups.values():
+        g.pop("_hs", None)
+        k = tr("an.038")
+        if k in g["det"]:
+            g["det"][k] = {mac_text(v): c for v, c in g["det"][k].items()}
     # brute force: wiele nieudanych logowań z jednego publicznego adresu
     lf = groups.get("login_fail_wan")
     if lf:
@@ -4359,7 +4484,8 @@ def settings_view(request, s, msg="", ok=True):
         "speed_router": sget(s, "speed_router"), "speed_time": SPEED_TIME[:5],
         "speed_engine": sget(s, "speed_engine", "") or default_engine(),
         "speed_server": server_setting(s, sget(s, "speed_engine", "") or default_engine()),
-        "ookla": bool(OOKLA_BIN), "librespeed": bool(LS_BIN), "ls_best": best_result(s)})
+        "ookla": bool(OOKLA_BIN), "librespeed": bool(LS_BIN), "ls_best": best_result(s),
+        "oui_n": len(OUI), "oui_updated": sget(s, "oui_updated"), "oui_error": sget(s, "oui_error"), "oui_auto": OUI_AUTO})
 
 
 @app.post("/settings/whitelist", dependencies=[Depends(admin)])
@@ -4440,6 +4566,32 @@ def settings_autoban(request: Request, on: str = Form(""), n: str = Form("5"), m
     s.commit()
     _AB_HITS.clear()
     return settings_view(request, s, tr("msg.ab_saved"), True)
+
+
+@app.post("/api/devices/name", dependencies=[Depends(admin)])
+def device_set_name(mac: str = Form(), name: str = Form(""), s: Session = Depends(db)):
+    m = oui.normalize(mac)
+    if not m:
+        return JSONResponse({"ok": False, "msg": tr("msg.dn_bad_mac")}, 400)
+    name = " ".join(name.split())[:60]
+    row = s.get(DeviceName, m)
+    if not name:
+        if row:
+            s.delete(row)
+    elif row:
+        row.name, row.updated = name, now()
+    else:
+        s.add(DeviceName(mac=m, name=name))
+    log(s, "nazwa urządzenia", "%s: %s" % (m, name or "(usunięta)"))
+    s.commit()
+    return {"ok": True, "mac": m, "name": name}
+
+
+@app.post("/settings/oui/update", dependencies=[Depends(admin)])
+async def settings_oui_update(request: Request):
+    n, err = await run_in_threadpool(oui_refresh, True)
+    with Session(engine) as s:
+        return settings_view(request, s, (tr("msg.oui_ok") % n) if not err else tr("msg.oui_err") + " " + err, not err)
 
 
 @app.post("/settings/backup-now", dependencies=[Depends(admin)])

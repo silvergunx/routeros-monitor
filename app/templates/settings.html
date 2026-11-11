@@ -43,6 +43,11 @@ document.getElementById('ivno').onclick=()=>{s.value=cur;d.close()};})();</scrip
 <form class="i" method="post" action="/routers/{{x.id}}/move"><input type="hidden" name="dir" value="down"><button {{'disabled' if loop.last}} title="{{ t('set.order.down') }}">▼</button></form></td></tr>
 {% else %}<tr><td class="mut">{{ t('rt.none') }}</td></tr>{% endfor %}</table>
 <p><small class="mut">{{ t('set.order.help') }}</small></p></div>
+<div class="card" id="ouiset"><h2>{{ t('set.oui.title') }}</h2>
+<p>{% if oui_n %}{{ t('set.oui.state', n=oui_n) }}{% if oui_updated %} {{ t('set.oui.when', d=oui_updated[:10]) }}{% endif %}{% else %}{{ t('set.oui.none') }}{% endif %}</p>
+{% if oui_error %}<p class="err small">{{ t('set.oui.err') }} {{ oui_error }}</p>{% endif %}
+<form method="post" action="/settings/oui/update"><button class="p">{{ t('set.oui.update') }}</button></form>
+<p><small class="mut">{{ t('set.oui.help') }}{% if not oui_auto %} {{ t('set.oui.auto_off') }}{% endif %}</small></p></div>
 </div>
 <div class="sp sp-sec">
 <div class="card" id="wlset"><h2>{{ t('set.wl.title') }}</h2>
