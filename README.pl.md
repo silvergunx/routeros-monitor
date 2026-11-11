@@ -219,6 +219,7 @@ Interfejs działa po polsku i angielsku (przełącznik PL / EN w menu i na ekran
 |---|---|
 | [Releases](https://github.com/silvergunx/routeros-monitor/releases) i [CHANGELOG.pl.md](CHANGELOG.pl.md) | co zmieniło się w każdej wersji i co trzeba zrobić na routerach lub serwerze po aktualizacji |
 | [docs/ROUTERY.md](docs/ROUTERY.md) | co instaluje komenda konfiguracyjna na routerze, reguły firewalla dla whitelisty i blacklisty, routery poza siecią lokalną |
+| [docs/NTFY.md](docs/NTFY.md) | powiadomienia przez własny serwer ntfy: jak to działa, przetestowane wersje i minima, instalacja, konta, telefon (Android, iPhone), dostęp spoza domu, rozwiązywanie problemów |
 | [docs/BEZPIECZENSTWO.md](docs/BEZPIECZENSTWO.md) i [SECURITY.md](SECURITY.md) | zalecenia bezpieczeństwa i zgłaszanie błędów bezpieczeństwa |
 | [docs/TRANSLATING.md](docs/TRANSLATING.md) | jak dodać język |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | gałęzie (`main` stabilna, `develop` beta), testy, wydawanie wersji |
