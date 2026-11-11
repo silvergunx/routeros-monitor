@@ -4729,15 +4729,38 @@ def topology_view(s):
                 if len(k) >= 3:
                     ap_keys.append((len(k), k, r.id))
 
-    def real_ap(rid, d):
+    # AP, który ma klienta w swojej tabeli hostów bridge na interfejsie Wi-Fi, jest tym, z którym klient jest połączony (działa też, gdy
+    # CAPsMAN nazywa interfejsy "cap-wifi1", "cap-wifi2"... bez nazwy AP)
+    wifi_host = {}
+    for r in routers:
+        if not info[r.id]["manager"]:
+            for mac, d in inv[r.id]["brh"].items():
+                if (d.get("if") or "").lower().startswith(("wifi", "wlan", "cap")):
+                    wifi_host.setdefault(mac, r.id)
+
+    def base_if(d):
+        return re.sub(r"-virtual\d+$", "", d.get("interface") or d.get("iface") or "")
+
+    votes = {}  # interfejs kontrolera -> ile jego klientów potwierdziło dany AP (wspólny interfejs = to samo radio = ten sam AP)
+    for mac, (_, rid, d) in pick.items():
+        if info[rid]["manager"] and mac in wifi_host and base_if(d):
+            c = votes.setdefault(base_if(d), {})
+            c[wifi_host[mac]] = c.get(wifi_host[mac], 0) + 1
+    iface_ap = {i: max(c, key=c.get) for i, c in votes.items()}
+
+    def real_ap(mac, rid, d):
         if not info[rid]["manager"]:
             return rid
+        if mac in wifi_host:
+            return wifi_host[mac]
         iface = _nk(d.get("interface") or d.get("iface"))
         hits = [(n, aid) for n, k, aid in ap_keys if k in iface]
-        return max(hits)[1] if hits else rid
+        if hits:
+            return max(hits)[1]
+        return iface_ap.get(base_if(d), rid)
 
     for mac, (_, rid, d) in pick.items():
-        rid = real_ap(rid, d)
+        rid = real_ap(mac, rid, d)
         l = leases.get(mac, {})
         name, sub = device_label(mac, l.get("comment"), l.get("host"), names.get(oui.normalize(mac)))
         wq = wifi_quality(d)
