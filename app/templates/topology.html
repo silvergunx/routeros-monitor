@@ -56,11 +56,12 @@ let G={nodes:[],links:[],byId:{},parent:{}},S={k:1,x:0,y:0},sig='',pins={},hint=
 try{pins=JSON.parse(localStorage.getItem('topoPins')||'{}')}catch(e){pins={}}
 const R=n=>n.type==='inet'?48:n.type==='router'?28:n.type==='nbr'?21:13;
 function el(tag,at,par){const e=document.createElementNS(NS,tag);for(const k in at)e.setAttribute(k,at[k]);if(par)par.appendChild(e);return e}
+let seed=12345;function rnd(){seed=(seed+0x6D2B79F5)|0;let x=Math.imul(seed^seed>>>15,1|seed);x=x+Math.imul(x^x>>>7,61|x)^x;return((x^x>>>14)>>>0)/4294967296}  // deterministyczny układ: ten sam wynik przy każdym wczytaniu
 function wl(c,ap){if(c.failed)return 165;const s=c.signal==null?-70:c.signal,w=Math.max(0,Math.min(1,(-s-45)/45));return 58+w*82+Math.min(22,(ap.nc||0)*1.1)}
 function layout(iters,a0){const N=G.nodes;let a=a0;
  for(let it=0;it<iters;it++){a=Math.max(0.03,a*0.985);
   for(let i=0;i<N.length;i++){const p=N[i];for(let j=i+1;j<N.length;j++){const q=N[j];
-   let dx=q.x-p.x,dy=q.y-p.y,d2=dx*dx+dy*dy;if(d2<0.01){dx=Math.random()-.5;dy=Math.random()-.5;d2=dx*dx+dy*dy+.01}
+   let dx=q.x-p.x,dy=q.y-p.y,d2=dx*dx+dy*dy;if(d2<0.01){dx=rnd()-.5;dy=rnd()-.5;d2=dx*dx+dy*dy+.01}
    const d=Math.sqrt(d2),cc=p.type==='client'||q.type==='client',rr=R(p)+R(q)+(p.type==='client'&&q.type==='client'?7:(cc?16:36));
    let f=0;if(d<rr)f=(rr-d)*.5;if(d<420)f+=(cc?340:5400)*a/d;
    const fx=dx/d*f,fy=dy/d*f;p.vx-=fx;p.vy-=fy;q.vx+=fx;q.vy+=fy}}
@@ -83,18 +84,22 @@ function initPos(old){const rows={};G.nodes.forEach(n=>{if(n.type!=='client'&&n.
    if(par&&n.type!=='router'){const sib=G.nodes.filter(m=>G.parent[m.id]===par.id),i=sib.indexOf(n),ang=(i/Math.max(1,sib.length))*6.283+(par.x>0?.3:1.2);
     const rr=n.type==='client'?wl(n,par):70;n.x=par.x+Math.cos(ang)*rr;n.y=par.y+Math.sin(ang)*rr}
    else{const r=rows[n.depth]||[n],i=r.indexOf(n);n.x=(i-(r.length-1)/2)*170;n.y=n.depth*170}}
-  else{const r=rows[n.depth]||[n],i=r.indexOf(n);n.x=(i-(r.length-1)/2)*170+(Math.random()-.5)*10;n.y=n.depth*170}}}
+  else{const r=rows[n.depth]||[n],i=r.indexOf(n);n.x=(i-(r.length-1)/2)*170+(rnd()-.5)*10;n.y=n.depth*170}}}
 function fit(){const w=wrap.clientWidth,h=wrap.clientHeight;if(!w||!G.nodes.length)return;
  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;G.nodes.forEach(n=>{const r=R(n)+30;x0=Math.min(x0,n.x-r);x1=Math.max(x1,n.x+r);y0=Math.min(y0,n.y-r);y1=Math.max(y1,n.y+r+14)});
  const k=Math.min(w/(x1-x0),h/(y1-y0),1.5);S={k,x:w/2-k*(x0+x1)/2,y:h/2-k*(y0+y1)/2};applyT()}
 function applyT(){const g=document.getElementById('tg');if(g)g.setAttribute('transform','translate('+S.x+','+S.y+') scale('+S.k+')')}
 function vpath(p,q){const i=G.byId.inet;if(!i)return'M'+p.x+' '+p.y+'L'+q.x+' '+q.y;
- const L=(a,b)=>Math.hypot(b.x-a.x,b.y-a.y)||1,tx=(q.x-p.x)/L(p,q),ty=(q.y-p.y)/L(p,q),k1=L(p,i)*.4,k2=L(i,q)*.4,
- oa={x:(p.y-i.y)*.18,y:-(p.x-i.x)*.18},ob={x:(q.y-i.y)*.18,y:-(q.x-i.x)*.18};
- return'M'+p.x+' '+p.y+'C'+(p.x+(i.x-p.x)*.33+oa.x)+' '+(p.y+(i.y-p.y)*.33+oa.y)+' '+(i.x-tx*k1)+' '+(i.y-ty*k1)+' '+i.x+' '+i.y+
-  'C'+(i.x+tx*k2)+' '+(i.y+ty*k2)+' '+(q.x+(i.x-q.x)*.33+ob.x)+' '+(q.y+(i.y-q.y)*.33+ob.y)+' '+q.x+' '+q.y}
+ const L=(a,b)=>Math.hypot(b.x-a.x,b.y-a.y)||1,la=L(p,i),lb=L(i,q),ua={x:(i.x-p.x)/la,y:(i.y-p.y)/la},ub={x:(q.x-i.x)/lb,y:(q.y-i.y)/lb};
+ let tx=ua.x+ub.x,ty=ua.y+ub.y;const tl=Math.hypot(tx,ty);if(tl<.2){tx=-ua.y;ty=ua.x}else{tx/=tl;ty/=tl}
+ const k1=la*.4,k2=lb*.4,ra=la*.2,rb=lb*.2;  // zielona trasa po prawej stronie (patrząc od routera do Internetu), niebieska po lewej
+ const a1={x:p.x+(i.x-p.x)*.33-ua.y*ra,y:p.y+(i.y-p.y)*.33+ua.x*ra},b1={x:q.x+(i.x-q.x)*.33+ub.y*rb,y:q.y+(i.y-q.y)*.33-ub.x*rb};
+ return'M'+p.x+' '+p.y+'C'+a1.x+' '+a1.y+' '+(i.x-tx*k1)+' '+(i.y-ty*k1)+' '+i.x+' '+i.y+'C'+(i.x+tx*k2)+' '+(i.y+ty*k2)+' '+b1.x+' '+b1.y+' '+q.x+' '+q.y}
 function path(l){const p=G.byId[l.s],q=G.byId[l.t];if(l.wifi)return'M'+p.x+' '+p.y+'L'+q.x+' '+q.y;if(l.vpn)return vpath(p,q);
- const mx=(p.x+q.x)/2,my=(p.y+q.y)/2,dx=q.x-p.x,dy=q.y-p.y,o=l.vpn?.22:.1;return'M'+p.x+' '+p.y+'Q'+(mx-dy*o)+' '+(my+dx*o)+' '+q.x+' '+q.y}
+ const dx=q.x-p.x,dy=q.y-p.y,mx=(p.x+q.x)/2,my=(p.y+q.y)/2;
+ if(p.type==='inet'||q.type==='inet'){const r=p.type==='inet'?q:p,e=p.type==='inet'?p:q,len=Math.hypot(e.x-r.x,e.y-r.y)||1,ux=(e.x-r.x)/len,uy=(e.y-r.y)/len,o=len*.12;  // niebieska: po lewej stronie kierunku router -> Internet
+  return'M'+p.x+' '+p.y+'Q'+(mx+uy*o)+' '+(my-ux*o)+' '+q.x+' '+q.y}
+ const o=.1;return'M'+p.x+' '+p.y+'Q'+(mx-dy*o)+' '+(my+dx*o)+' '+q.x+' '+q.y}
 function place(){G.links.forEach(l=>{if(l.el)l.el.setAttribute('d',path(l))});G.nodes.forEach(n=>{if(n.el)n.el.setAttribute('transform','translate('+n.x+','+n.y+')')})}
 function icon(n){return n.type==='inet'?'ic-globe':n.type==='nbr'?'ic-box':n.type==='client'?'ic-'+(n.kind||'other'):(n.ap?'ic-ap':'ic-router')}
 function draw(){svg.textContent='';const d=el('defs',{},svg);
@@ -160,7 +165,7 @@ function apply(g,reset){const old=reset?{}:G.byId,first=!Object.keys(old).length
  const s2=nodes.map(n=>n.id).join(',')+'|'+g.links.map(l=>l.s+'>'+l.t).join(',');
  G={nodes,links:g.links,byId,parent};const same=s2===sig&&!reset;sig=s2;
  if(same){nodes.forEach(n=>{const o=old[n.id];if(o){n.x=o.x;n.y=o.y;n.pin=o.pin;n.vx=n.vy=0}});layout(40,.12)}
- else{initPos(old);layout(first?460:140,first?1:.4)}
+ else{seed=12345;initPos(old);layout(first?460:140,first?1:.4)}
  draw();if(first||reset)fit()}
 function load(){let g;try{g=JSON.parse(document.getElementById('tgraph').textContent)}catch(e){return}apply(g,false)}
 window.topoView=function(v){document.getElementById('tview').dataset.v=v;try{localStorage.setItem('topoView',v)}catch(e){}if(v==='map')setTimeout(fit,0)};
