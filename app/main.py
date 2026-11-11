@@ -677,13 +677,25 @@ def q(text):
 
 # Wersja skryptów na routerze. Zwiększ ją TYLKO wtedy, gdy zmiana skryptów wymaga ponownego wklejenia komendy konfiguracyjnej:
 # panel pokazuje wtedy administratorowi, że skrypt routera jest nieaktualny. Router podaje swoją wersję w każdym zapytaniu (cv).
-SCRIPT_VERSION = 4
+SCRIPT_VERSION = 5
 _ROUTER_CV = {}  # id routera -> wersja skryptu zgłoszona w ostatnim zapytaniu (0 = skrypt bez znacznika wersji); po restarcie pusto do pierwszego pomiaru
 
 
+_ROUTER_MODS = {}  # id routera -> moduły, z którymi wygenerowano jego skrypt (np. "xwt"); None = skrypt nie podaje
+
+
+def expected_mods():
+    """Moduły, które powinien zawierać skrypt na routerze przy obecnych ustawieniach: w = whitelista, b = blacklista, t = topologia."""
+    return "x" + ("w" if wl_on() else "") + ("b" if bl_on() else "") + ("t" if topo_enabled() else "")
+
+
 def script_stale(r):
+    """Skrypt na routerze jest nieaktualny: starsza wersja albo włączono/wyłączono moduł, odkąd wklejono komendę."""
     cv = _ROUTER_CV.get(r.id)
-    return cv is not None and cv < SCRIPT_VERSION
+    if cv is None:
+        return False
+    mods = _ROUTER_MODS.get(r.id)
+    return cv < SCRIPT_VERSION or (mods is not None and mods != expected_mods())
 
 
 MON = r'''
@@ -740,9 +752,9 @@ MON = r'''
   } on-error={}
   :local j "{\"id\":\"$id\",\"ver\":\"$ver\",\"up\":\"$up\",\"cpu\":$cpu,\"tm\":$tm,\"fm\":$fm,\"temp\":$temp,\"conns\":$conns,\"dhcp\":$dhcp,\"nw\":\5B$nw\5D,\"ifs\":\5B$ifs\5D}"
   :local resp ""
-  :do {:set resp ([/tool fetch url="@URL@/api/metrics?t=@TOKEN@&cv=@CV@" http-method=post http-data=$j http-header-field="Content-Type: application/json" output=user as-value]->"data")} on-error={
+  :do {:set resp ([/tool fetch url="@URL@/api/metrics?t=@TOKEN@&cv=@CV@&m=@MODS@" http-method=post http-data=$j http-header-field="Content-Type: application/json" output=user as-value]->"data")} on-error={
     :delay 3s
-    :do {:set resp ([/tool fetch url="@URL@/api/metrics?t=@TOKEN@&cv=@CV@" http-method=post http-data=$j http-header-field="Content-Type: application/json" output=user as-value]->"data")} on-error={:log warning "app-monitor: brak polaczenia z serwerem aplikacji"}
+    :do {:set resp ([/tool fetch url="@URL@/api/metrics?t=@TOKEN@&cv=@CV@&m=@MODS@" http-method=post http-data=$j http-header-field="Content-Type: application/json" output=user as-value]->"data")} on-error={:log warning "app-monitor: brak polaczenia z serwerem aplikacji"}
   }
   :if ($resp ~ "\"live\":1") do={
     :if ([:len [/system script job find where script="app-live"]] = 0) do={:execute script="/system script run app-live"}
@@ -941,7 +953,7 @@ def setup_rsc(request: Request, t: str, iface: str = "ether1", list: str = "whit
     topo = 1 if topo_on(s) else 0
     base = str(request.base_url).rstrip("/")
     rep = {"@URL@": base, "@TOKEN@": t, "@IFACE@": clean(iface, "ether1"), "@LIST@": clean(list, "whitelist"),
-           "@CV@": str(SCRIPT_VERSION), "@SPEEDURL@": SPEED_URL, "@SPEEDBYTES@": str(SPEED_BYTES), "@SPEEDN@": str(SPEED_STREAMS_ROUTER)}
+           "@CV@": str(SCRIPT_VERSION), "@MODS@": "x" + "w" * wl + "b" * bl + "t" * topo, "@SPEEDURL@": SPEED_URL, "@SPEEDBYTES@": str(SPEED_BYTES), "@SPEEDN@": str(SPEED_STREAMS_ROUTER)}
 
     def fill(x):
         for k, v in rep.items():
@@ -1233,14 +1245,14 @@ async def upgrade_report(request: Request, t: str):
 
 
 @app.post("/api/metrics")
-async def metrics(request: Request, t: str, cv: str = ""):
+async def metrics(request: Request, t: str, cv: str = "", m: str = ""):
     raw = (await request.body()).decode("utf-8", "replace")
-    return await run_in_threadpool(store_metrics, t, raw, request.client.host if request.client else None, int(cv) if cv.isdigit() else 0)
+    return await run_in_threadpool(store_metrics, t, raw, request.client.host if request.client else None, int(cv) if cv.isdigit() else 0, m[:10])
 
 
-def store_metrics(t, raw, ip=None, cv=0):
+def store_metrics(t, raw, ip=None, cv=0, mods=""):
     with Session(engine) as s:
-        return _store_metrics(s, t, raw, ip, cv)
+        return _store_metrics(s, t, raw, ip, cv, mods)
 
 
 def _median(v):
@@ -1309,9 +1321,10 @@ def nw_metrics(r, d):
     return out
 
 
-def _store_metrics(s, t, raw, ip=None, cv=0):
+def _store_metrics(s, t, raw, ip=None, cv=0, mods=""):
     r = get_router(s, t)
     _ROUTER_CV[r.id] = cv
+    _ROUTER_MODS[r.id] = mods or None
     if ip and not r.log_ip_fixed and r.log_ip != ip:
         r.log_ip = ip
     try:
