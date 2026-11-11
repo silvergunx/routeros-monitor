@@ -90,10 +90,11 @@ function fit(){const w=wrap.clientWidth,h=wrap.clientHeight;if(!w||!G.nodes.leng
  const k=Math.min(w/(x1-x0),h/(y1-y0),1.5);S={k,x:w/2-k*(x0+x1)/2,y:h/2-k*(y0+y1)/2};applyT()}
 function applyT(){const g=document.getElementById('tg');if(g)g.setAttribute('transform','translate('+S.x+','+S.y+') scale('+S.k+')')}
 function vpath(p,q){const i=G.byId.inet;if(!i)return'M'+p.x+' '+p.y+'L'+q.x+' '+q.y;
- const rr=R(i)+4,D=35*Math.PI/180;  // tunel dotyka węzła Internet po łuku z prawej strony (patrząc od routera), a niebieskie linie idą prosto do jego środka
- const side=(x)=>{const th=Math.atan2(x.y-i.y,x.x-i.x),a=th-D;return{a:a,x:i.x+Math.cos(a)*rr,y:i.y+Math.sin(a)*rr,rx:Math.sin(th),ry:-Math.cos(th)}};
+ const rr=R(i)+4,D=35*Math.PI/180;  // tunel obchodzi węzeł Internet łukiem po jednej stronie (niżej / z prawej), a niebieskie linie idą prosto do jego środka
+ let sx=-(q.y-p.y),sy=q.x-p.x;if(sy<-1e-6||(Math.abs(sy)<=1e-6&&sx<0)){sx=-sx;sy=-sy}const sl=Math.hypot(sx,sy)||1;sx/=sl;sy/=sl;
+ const side=(x)=>{const th=Math.atan2(x.y-i.y,x.x-i.x),a1=th-D,a2=th+D,d1=Math.cos(a1)*sx+Math.sin(a1)*sy,d2=Math.cos(a2)*sx+Math.sin(a2)*sy,a=d1>=d2?a1:a2;return{a:a,x:i.x+Math.cos(a)*rr,y:i.y+Math.sin(a)*rr}};
  const ea=side(p),eb=side(q);let dl=eb.a-ea.a;while(dl>Math.PI)dl-=2*Math.PI;while(dl<=-Math.PI)dl+=2*Math.PI;
- const cu=(x,e)=>{const mx=(x.x+e.x)/2,my=(x.y+e.y)/2,l=Math.hypot(e.x-x.x,e.y-x.y);return(mx+e.rx*l*.07)+' '+(my+e.ry*l*.07)};
+ const cu=(x,e)=>{const mx=(x.x+e.x)/2,my=(x.y+e.y)/2,l=Math.hypot(e.x-x.x,e.y-x.y);return(mx+sx*l*.07)+' '+(my+sy*l*.07)};
  return'M'+p.x+' '+p.y+'Q'+cu(p,ea)+' '+ea.x+' '+ea.y+'A'+rr+' '+rr+' 0 0 '+(dl>=0?1:0)+' '+eb.x+' '+eb.y+'Q'+cu(q,eb)+' '+q.x+' '+q.y}
 function path(l){const p=G.byId[l.s],q=G.byId[l.t];if(l.wifi)return'M'+p.x+' '+p.y+'L'+q.x+' '+q.y;if(l.vpn)return vpath(p,q);
  if(p.type==='inet'||q.type==='inet')return'M'+p.x+' '+p.y+'L'+q.x+' '+q.y;
