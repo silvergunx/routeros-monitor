@@ -4650,6 +4650,14 @@ def device_kind(name, vendor=""):
     return "other"
 
 
+def _port_rank(d):
+    """Którego wpisu o tym samym sąsiedzie użyć: fizyczny port (LLDP: 'ether5,bridge') > interfejs VLAN (MNDP/CDP) > bridge."""
+    parts = [x for x in (d.get("if") or "").split(",") if x] or [""]
+    if any(x.startswith(("ether", "sfp", "qsfp", "combo")) for x in parts):
+        return 0
+    return 2 if all(x.startswith("bridge") for x in parts) else 1
+
+
 def _nbr_port(d):
     """Port lokalny, na którym widać sąsiada (RouterOS podaje też bridge: bierzemy fizyczny port)."""
     parts = [x for x in (d.get("if") or "").split(",") if x]
@@ -4676,7 +4684,7 @@ def topology_view(s):
         if x.kind == "nbr":
             mac = (d.get("mac") or "").upper()
             old = slot["nbr"].get(mac)
-            if mac and (not old or old["if"].startswith("bridge")):  # ten sam sąsiad bywa widoczny też na bridge: wolimy port
+            if mac and (not old or _port_rank(d) < _port_rank(old)):  # ten sam sąsiad jest widoczny na wielu interfejsach (port, VLAN-y, bridge): wolimy fizyczny port
                 slot["nbr"][mac] = d
         elif x.kind == "dhcp":
             if d.get("src") != "arp":
