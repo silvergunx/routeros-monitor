@@ -4716,7 +4716,26 @@ def topology_view(s):
             if mac and (mac not in pick or rank < pick[mac][0]):
                 pick[mac] = (rank, r.id, d)
     clients = {r.id: [] for r in routers}
+
+    def _nk(x):
+        return re.sub(r"[^a-z0-9]", "", (x or "").lower())
+
+    ap_keys = []  # CAPsMAN widzi wszystkich klientów pod nazwami interfejsów typu "cap-garage-5g": nazwa AP w interfejsie wskazuje, gdzie klient jest naprawdę
+    for r in routers:
+        if not info[r.id]["manager"]:
+            for k in {_nk(r.name), _nk(re.sub(r"AP", "", r.name or "", flags=re.I)), _nk(r.ident)}:
+                if len(k) >= 3:
+                    ap_keys.append((len(k), k, r.id))
+
+    def real_ap(rid, d):
+        if not info[rid]["manager"]:
+            return rid
+        iface = _nk(d.get("interface") or d.get("iface"))
+        hits = [(n, aid) for n, k, aid in ap_keys if k in iface]
+        return max(hits)[1] if hits else rid
+
     for mac, (_, rid, d) in pick.items():
+        rid = real_ap(rid, d)
         l = leases.get(mac, {})
         name, sub = device_label(mac, l.get("comment"), l.get("host"), names.get(oui.normalize(mac)))
         wq = wifi_quality(d)
@@ -4750,10 +4769,10 @@ def topology_view(s):
 
     def node(r, up_port="", parent_port=""):
         visited.add(r.id)
-        kids = []
-        for b_id, port in sorted(adj[r.id].items(), key=lambda kv: by_name[kv[0]].pos or 0):
-            if b_id not in visited:
-                kids.append(node(by_name[b_id], adj[b_id].get(r.id, ""), port))
+        # dzieci to wszyscy jeszcze nieodwiedzeni sąsiedzi (wszerz, nie w głąb): AP widziane też nawzajem nie tworzą łańcucha
+        nxt = [(b, port) for b, port in sorted(adj[r.id].items(), key=lambda kv: by_name[kv[0]].pos or 0) if b not in visited]
+        visited.update(b for b, _ in nxt)
+        kids = [node(by_name[b], adj[b].get(r.id, ""), port) for b, port in nxt]
         nb = []
         for d in other[r.id]:
             mac = (d.get("mac") or "").upper()
