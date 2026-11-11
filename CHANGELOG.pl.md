@@ -8,7 +8,7 @@ Uwagi oznaczone **Routery** oznaczają, że trzeba ponownie wkleić komendę kon
 
 ## [Unreleased]
 
-Prace w toku na gałęzi `develop` (wersja 1.4.0).
+## [1.4.0] - 2026-11-11
 
 ### Dodano
 - Rozdział dokumentacji [docs/NTFY.md](docs/NTFY.md) o powiadomieniach przez własny serwer ntfy: jak to działa, przetestowane wersje i minima (z zapasem 10 %), instalacja, konta z najmniejszymi uprawnieniami, konfiguracja monitora i telefonu (Android, iPhone), dostęp spoza sieci domowej i rozwiązywanie problemów.

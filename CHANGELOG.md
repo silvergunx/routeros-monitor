@@ -7,7 +7,7 @@ Notes marked **Routers** mean the configuration command has to be pasted again o
 
 ## [Unreleased]
 
-Work in progress on `develop` (version 1.4.0).
+## [1.4.0] - 2026-11-11
 
 ### Added
 - Documentation chapter [docs/NTFY.md](docs/NTFY.md) (Polish) about notifications through your own ntfy server: how it works, tested versions and minimum requirements (with a 10 % margin), installation, accounts with the least privileges, setting up the monitor and the phone (Android, iPhone), access from outside the home network and troubleshooting.
