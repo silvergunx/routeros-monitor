@@ -26,11 +26,11 @@
 .tnode text{fill:var(--fg);font-size:12px;text-anchor:middle;pointer-events:none;paint-order:stroke;stroke:var(--bg);stroke-width:3px}.tnode text.sub{fill:var(--mut);font-size:10px}
 .tnode .badge{fill:var(--acc);stroke:var(--card);stroke-width:2}.tnode text.bt{fill:#fff;font-size:10px;font-weight:700;stroke:none}
 .tnode.client circle.bg{stroke-width:2.2;stroke:var(--mut)}.tnode.client.ok circle.bg{stroke:var(--ok)}.tnode.client.warn circle.bg{stroke:var(--warn)}.tnode.client.bad circle.bg{stroke:var(--bad)}.tnode.client:hover circle.bg{fill:color-mix(in srgb,var(--acc) 18%,var(--card))}
-.tlink{fill:none;stroke:color-mix(in srgb,var(--mut) 55%,transparent);stroke-linecap:round}.tlink.wifi{stroke-width:1;opacity:.6}
+.tlink{fill:none;stroke:color-mix(in srgb,var(--mut) 55%,transparent);stroke-linecap:round}.tlink.wifi{stroke:var(--acc);stroke-width:1.5;stroke-dasharray:2 6;opacity:.85;animation:tflow 1.8s linear infinite}
 .tlink.flow{stroke:color-mix(in srgb,var(--acc) 80%,var(--mut));stroke-dasharray:7 9;animation:tflow 1.4s linear infinite}.tlink.down{stroke:var(--bad);stroke-dasharray:3 7}.tnode.failed circle.bg{stroke:var(--bad);stroke-dasharray:3 3;animation:tpulse 1.6s ease-in-out infinite}.tnode .fb{fill:var(--bad);stroke:var(--card);stroke-width:2}.tnode text.fbt{fill:#fff;font-size:10px;font-weight:700;stroke:none}
 .tlink.failed{stroke:var(--bad);stroke-dasharray:2 6;opacity:.85;animation:tflow 1.8s linear infinite}@keyframes tpulse{50%{opacity:.45}}
 .tlink.vpn{stroke:var(--ok);stroke-width:5px;stroke-dasharray:16 7;animation:tflow 1.3s linear infinite;filter:drop-shadow(0 0 5px color-mix(in srgb,var(--ok) 65%,transparent))}.tlink.vpn.down{stroke:var(--mut);stroke-width:2px;stroke-dasharray:3 7;animation:none;filter:none;opacity:.6}
-@keyframes tflow{to{stroke-dashoffset:-32}}@media(prefers-reduced-motion:reduce){.tlink.flow,.tlink.vpn,.tlink.failed,.tnode.failed circle.bg{animation:none}}
+@keyframes tflow{to{stroke-dashoffset:-32}}@media(prefers-reduced-motion:reduce){.tlink.flow,.tlink.vpn,.tlink.wifi,.tlink.failed,.tnode.failed circle.bg{animation:none}}
 #tmap.hl .tnode:not(.on){opacity:.22}#tmap.hl .tlink:not(.on){opacity:.07}
 .tmleg{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-size:12px;color:var(--mut);align-items:center}
 </style>
@@ -44,7 +44,7 @@
 <div class="ttreeview"><div class="tree"><ul>{{ tree(topo.root) }}</ul></div>
 {% if topo.orphans %}<h3 style="margin:18px 0 6px">{{ t('topo.orphans') }}</h3><div class="tree"><ul>{% for o in topo.orphans %}{{ tree(o) }}{% endfor %}</ul></div>{% endif %}</div>
 <script type="application/json" id="tgraph">{{ topo.graph|tojson }}</script>
-<div class="tmleg"><span><svg width="26" height="8"><path d="M1 4h24" class="tlink flow" stroke-width="3"/></svg> {{ t('topo.leg_flow') }}</span><span><svg width="30" height="10"><path d="M1 5h28" class="tlink vpn" /></svg> {{ t('topo.leg_vpn') }}</span><span><span class="qd ok"></span> {{ t('topo.leg_good') }}</span><span><span class="qd bad" style="outline:2px dotted var(--bad);outline-offset:1px;background:none"></span> {{ t('topo.leg_failed') }}</span><span><span class="qd warn"></span> {{ t('topo.leg_mid') }}</span><span><span class="qd bad"></span> {{ t('topo.leg_bad') }}</span></div>
+<div class="tmleg"><span><svg width="26" height="8"><path d="M1 4h24" class="tlink flow" stroke-width="3"/></svg> {{ t('topo.leg_flow') }}</span><span><svg width="26" height="8"><path d="M1 4h24" class="tlink wifi"/></svg> {{ t('topo.leg_wifi') }}</span><span><svg width="30" height="10"><path d="M1 5h28" class="tlink vpn" /></svg> {{ t('topo.leg_vpn') }}</span><span><span class="qd ok"></span> {{ t('topo.leg_good') }}</span><span><span class="qd bad" style="outline:2px dotted var(--bad);outline-offset:1px;background:none"></span> {{ t('topo.leg_failed') }}</span><span><span class="qd warn"></span> {{ t('topo.leg_mid') }}</span><span><span class="qd bad"></span> {{ t('topo.leg_bad') }}</span></div>
 {% endif %}</div>
 <p class="mut small" style="margin-top:12px">{{ t('topo.help') }}</p></div>
 {% if has %}<script>
