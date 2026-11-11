@@ -166,6 +166,20 @@ def build(s):
         s.add(main.Inv(router_id=r.id, kind=kind, key=key, data=json.dumps(dict(data, key=key)), seq="1", updated=now))
     for r, spec in zip(rs, ROUTERS):
         inv(r, "sys", "sys", spec["sys"])
+    # porty Ethernet (zakładka Porty): nazwa -> (running, disabled, rate, full-duplex, bridge, komentarz)
+    PORTS = {
+        0: [("ether1", "true", "false", "1Gbps", "true", "", "ISP"), ("ether2", "true", "false", "1Gbps", "true", "bridge", "Office switch"),
+            ("ether3", "true", "false", "100Mbps", "true", "bridge", "Printer (bad cable?)"), ("ether4", "false", "false", "", "", "bridge", ""),
+            ("ether5", "true", "false", "1Gbps", "true", "bridge", "NAS"), ("ether6", "true", "false", "2.5Gbps", "true", "bridge", "Workstation"),
+            ("ether7", "false", "true", "", "", "", "unused"), ("ether8", "false", "false", "", "", "bridge", ""),
+            ("sfp-sfpplus1", "true", "false", "10Gbps", "true", "bridge", "Uplink to rack")],
+        1: [("ether1", "true", "false", "1Gbps", "true", "bridge", "")],
+        2: [("ether1", "true", "false", "1Gbps", "true", "bridge", "")],
+        3: [("ether1", "true", "false", "1Gbps", "true", "", ""), ("ether2", "true", "false", "100Mbps", "false", "bridge", "Old phone"),
+            ("ether3", "false", "false", "", "", "bridge", "")]}
+    for ri, plist in PORTS.items():
+        for n, run, dis, rate, dup, br, cm in plist:
+            inv(rs[ri], "eth", n, dict(run=run, dis=dis, rate=rate, dup=dup, ld="0", br=br, cm=cm))
     LEASES = {}
     for i, (comment, host, last, wifi, static) in enumerate(DEVICES):
         ip = "192.168.88.%d" % last

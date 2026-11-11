@@ -824,5 +824,13 @@
   "an.203": "Urządzenie %s odpadło %d razy na uwierzytelnianiu. Jeśli ciągle się łączy i odpada, najpewniej ma zapisane błędne lub stare hasło Wi-Fi: na urządzeniu zapomnij tę sieć i połącz się ponownie z aktualnym hasłem.",
   "rp.no_dhcp": "bez DHCP",
   "dev.unknown": "nieznane urządzenie",
-  "dev.no_mac": "adres IP w ARP bez adresu MAC"
+  "dev.no_mac": "adres IP w ARP bez adresu MAC",
+  "rp.tab_ports": "🔌 Porty",
+  "rp.ports_none": "Brak danych o portach Ethernet. Wklej ponownie komendę konfiguracyjną na routerze (skrypt w wersji 3 lub nowszej), a po minucie odśwież stronę.",
+  "rp.p_up": "link działa",
+  "rp.p_slow": "link zdegradowany",
+  "rp.p_down": "brak linku",
+  "rp.p_off": "wyłączony",
+  "rp.p_half": "half-duplex",
+  "rp.p_slow_help": "Żółty port: link działa wolniej (10/100 Mb/s) niż inne porty tego routera albo w half-duplex. Zwykle winny jest kabel, wtyk lub urządzenie po drugiej stronie."
 }

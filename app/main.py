@@ -677,7 +677,7 @@ def q(text):
 
 # Wersja skryptów na routerze. Zwiększ ją TYLKO wtedy, gdy zmiana skryptów wymaga ponownego wklejenia komendy konfiguracyjnej:
 # panel pokazuje wtedy administratorowi, że skrypt routera jest nieaktualny. Router podaje swoją wersję w każdym zapytaniu (cv).
-SCRIPT_VERSION = 3
+SCRIPT_VERSION = 4
 _ROUTER_CV = {}  # id routera -> wersja skryptu zgłoszona w ostatnim zapytaniu (0 = skrypt bez znacznika wersji); po restarcie pusto do pierwszego pomiaru
 
 
@@ -755,7 +755,10 @@ INV_WIFI = '\n:local url "@URL@/api/inventory?t=@TOKEN@"\n:local seq [:tostr [:r
 INV_WIRELESS = '\n:local url "@URL@/api/inventory?t=@TOKEN@"\n:local seq [:tostr [:rndnum from=100000 to=999999999]]\n:local esc do={\n  :local o ""\n  :if ([:len $s] > 0) do={\n    :for k from=0 to=([:len $s] - 1) do={\n      :local ch [:pick $s $k]\n      :if ($ch = "\\"" || $ch = "\\\\") do={:set o ($o . "\\\\" . $ch)} else={\n        :if ($ch = "\\n" || $ch = "\\r" || $ch = "\\t") do={:set o ($o . " ")} else={:set o ($o . $ch)}\n      }\n    }\n  }\n  :return $o\n}\n:local send do={\n  :do {/tool fetch url=$u http-method=post http-data=$d http-header-field="Content-Type: application/json" output=none} on-error={\n    :delay 5s\n    /tool fetch url=$u http-method=post http-data=$d http-header-field="Content-Type: application/json" output=none\n  }\n}\n\n:local buf ""\n:foreach i in=[/interface wireless registration-table find] do={\n  :do {\n    :local a [/interface wireless registration-table get $i]\n    :local o ""\n    :foreach k,v in=$a do={\n      :if ($k ~ "^(interface|ssid|signal|band|uptime|last-ip|tx-ccq|signal-to-noise)\\$" || $k ~ "(rate|snr|noise|mcs|width|stream|strength)") do={\n        :local vs [$esc s=[:tostr $v]]\n        :set o ($o . ",\\"" . $k . "\\":\\"" . $vs . "\\"")\n      }\n    }\n    :local mac [/interface wireless registration-table get $i mac-address]\n    :if ([:len $buf] > 0) do={:set buf ($buf . ",")}\n    :set buf ($buf . "{\\"key\\":\\"" . $mac . "\\"" . $o . "}")\n  } on-error={}\n  :if ([:len $buf] > 3000) do={\n    $send u=$url d=("{\\"k\\":\\"wireless\\",\\"seq\\":\\"$seq\\",\\"done\\":false,\\"items\\":\\5B" . $buf . "\\5D}")\n    :set buf ""\n  }\n}\n$send u=$url d=("{\\"k\\":\\"wireless\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B" . $buf . "\\5D}")'
 INV_VPN = '\n:local url "@URL@/api/inventory?t=@TOKEN@"\n:local seq [:tostr [:rndnum from=100000 to=999999999]]\n:local esc do={\n  :local o ""\n  :if ([:len $s] > 0) do={\n    :for k from=0 to=([:len $s] - 1) do={\n      :local ch [:pick $s $k]\n      :if ($ch = "\\"" || $ch = "\\\\") do={:set o ($o . "\\\\" . $ch)} else={\n        :if ($ch = "\\n" || $ch = "\\r" || $ch = "\\t") do={:set o ($o . " ")} else={:set o ($o . $ch)}\n      }\n    }\n  }\n  :return $o\n}\n:local send do={\n  :do {/tool fetch url=$u http-method=post http-data=$d http-header-field="Content-Type: application/json" output=none} on-error={\n    :delay 5s\n    /tool fetch url=$u http-method=post http-data=$d http-header-field="Content-Type: application/json" output=none\n  }\n}\n\n:local buf ""\n:foreach i in=[/interface wireguard peers find] do={\n  :do {\n    :local pk [/interface wireguard peers get $i public-key]\n    :local ifn [/interface wireguard peers get $i interface]\n    :local nm ""\n    :do {:set nm [/interface wireguard peers get $i name]} on-error={}\n    :local nme [$esc s=$nm]\n    :local cm ""\n    :do {:set cm [/interface wireguard peers get $i comment]} on-error={}\n    :local cme [$esc s=$cm]\n    :local ep ""\n    :do {:set ep [/interface wireguard peers get $i current-endpoint-address]} on-error={}\n    :local hs ""\n    :do {:set hs [/interface wireguard peers get $i last-handshake]} on-error={}\n    :local rx ""\n    :local tx ""\n    :do {:set rx [/interface wireguard peers get $i rx]; :set tx [/interface wireguard peers get $i tx]} on-error={}\n    :local dis [/interface wireguard peers get $i disabled]\n    :if ([:len $buf] > 0) do={:set buf ($buf . ",")}\n    :set buf ($buf . "{\\"key\\":\\"$pk\\",\\"iface\\":\\"$ifn\\",\\"name\\":\\"$nme\\",\\"comment\\":\\"$cme\\",\\"endpoint\\":\\"$ep\\",\\"hs\\":\\"$hs\\",\\"rx\\":\\"$rx\\",\\"tx\\":\\"$tx\\",\\"disabled\\":\\"$dis\\"}")\n  } on-error={}\n  :if ([:len $buf] > 3000) do={\n    $send u=$url d=("{\\"k\\":\\"wg\\",\\"seq\\":\\"$seq\\",\\"done\\":false,\\"items\\":\\5B" . $buf . "\\5D}")\n    :set buf ""\n  }\n}\n$send u=$url d=("{\\"k\\":\\"wg\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B" . $buf . "\\5D}")\n:set buf ""\n:set seq [:tostr [:rndnum from=100000 to=999999999]]\n:foreach i in=[/ppp active find] do={\n  :do {\n    :local nmr [/ppp active get $i name]\n    :local nm [$esc s=$nmr]\n    :local sv [/ppp active get $i service]\n    :local ad [/ppp active get $i address]\n    :local up [/ppp active get $i uptime]\n    :local cir ""\n    :do {:set cir [/ppp active get $i caller-id]} on-error={}\n    :local ci [$esc s=$cir]\n    :if ([:len $buf] > 0) do={:set buf ($buf . ",")}\n    :local ky ($nm . "/" . $sv)\n    :set buf ($buf . "{\\"key\\":\\"$ky\\",\\"name\\":\\"$nm\\",\\"service\\":\\"$sv\\",\\"address\\":\\"$ad\\",\\"uptime\\":\\"$up\\",\\"caller\\":\\"$ci\\"}")\n  } on-error={}\n  :if ([:len $buf] > 3000) do={\n    $send u=$url d=("{\\"k\\":\\"ppp\\",\\"seq\\":\\"$seq\\",\\"done\\":false,\\"items\\":\\5B" . $buf . "\\5D}")\n    :set buf ""\n  }\n}\n$send u=$url d=("{\\"k\\":\\"ppp\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B" . $buf . "\\5D}")'
 INV_SYS = '\n:local url "@URL@/api/inventory?t=@TOKEN@"\n:local seq [:tostr [:rndnum from=100000 to=999999999]]\n:local send do={\n  :do {/tool fetch url=$u http-method=post http-data=$d http-header-field="Content-Type: application/json" output=none} on-error={\n    :delay 5s\n    /tool fetch url=$u http-method=post http-data=$d http-header-field="Content-Type: application/json" output=none\n  }\n}\n:global appCaps ""\n:set appCaps ""\n:do {:local f [:parse ":global appCaps; :if (\\5B:tostr \\5B/interface wifi capsman get enabled\\5D\\5D ~ \\"^(true|yes)\\") do={:set appCaps (\\$appCaps . \\"manager,\\")}"]; $f} on-error={}\n:do {:local f [:parse ":global appCaps; :if (\\5B:tostr \\5B/interface wifi cap get enabled\\5D\\5D ~ \\"^(true|yes)\\") do={:set appCaps (\\$appCaps . \\"cap,\\")}"]; $f} on-error={}\n:do {:local f [:parse ":global appCaps; :if (\\5B:tostr \\5B/caps-man manager get enabled\\5D\\5D ~ \\"^(true|yes)\\") do={:set appCaps (\\$appCaps . \\"manager,\\")}"]; $f} on-error={}\n:do {:local f [:parse ":global appCaps; :if (\\5B:tostr \\5B/interface wireless cap get enabled\\5D\\5D ~ \\"^(true|yes)\\") do={:set appCaps (\\$appCaps . \\"cap,\\")}"]; $f} on-error={}\n:global appCapsN ""\n:set appCapsN ""\n:do {:local f [:parse ":global appCapsN; :set appCapsN \\5B:len \\5B/interface wifi capsman remote-cap find\\5D\\5D"]; $f} on-error={}\n:if ([:len [:tostr $appCapsN]] = 0) do={:do {:local f [:parse ":global appCapsN; :set appCapsN \\5B:len \\5B/caps-man remote-cap find\\5D\\5D"]; $f} on-error={}}\n:local model ""\n:local fwc ""\n:local fwu ""\n:do {:set model [/system routerboard get model]} on-error={}\n:do {:set fwc [/system routerboard get current-firmware]} on-error={}\n:do {:set fwu [/system routerboard get upgrade-firmware]} on-error={}\n:local wq [:len [/system package find where name~"^wifi-qcom" and disabled=no]]\n:local tm [/system resource get total-memory]\n:global appHasWifi\n:global appHasWl\n:set appHasWifi 0\n:set appHasWl 0\n:do {:local f [:parse ":global appHasWifi; :set appHasWifi [:len [/interface wifi find]]"]; $f} on-error={}\n:do {:local f [:parse ":global appHasWl; :set appHasWl [:len [/interface wireless find]]"]; $f} on-error={}\n:local dhs [:len [/ip dhcp-server find]]\n:local wgs 0\n:do {:set wgs [:len [/interface wireguard find]]} on-error={}\n:local mdl ""\n:for k from=0 to=([:len $model] - 1) do={:local ch [:pick $model $k]; :if ($ch != "\\"" && $ch != "\\\\") do={:set mdl ($mdl . $ch)}}\n$send u=$url d=("{\\"k\\":\\"sys\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B{\\"key\\":\\"sys\\",\\"caps\\":\\"$appCaps\\",\\"capsn\\":\\"$appCapsN\\",\\"model\\":\\"$mdl\\",\\"fwc\\":\\"$fwc\\",\\"fwu\\":\\"$fwu\\",\\"wq\\":\\"$wq\\",\\"tm\\":\\"$tm\\",\\"wifi\\":\\"$appHasWifi\\",\\"wl\\":\\"$appHasWl\\",\\"dhs\\":\\"$dhs\\",\\"wgs\\":\\"$wgs\\"}\\5D}")\n'
-INV_MAIN = '\n:if ([:len [/system script find where name="app-inv-dhcp"]] > 0) do={:do {/system script run app-inv-dhcp} on-error={}}\n:global appHasWifi\n:global appHasWl\n:set appHasWifi 0\n:set appHasWl 0\n:do {:local f [:parse ":global appHasWifi; :set appHasWifi [:len [/interface wifi find]]"]; $f} on-error={}\n:do {:local f [:parse ":global appHasWl; :set appHasWl [:len [/interface wireless find]]"]; $f} on-error={}\n:if ($appHasWifi > 0) do={:do {/system script run app-inv-wifi} on-error={}}\n:if ($appHasWl > 0) do={:do {/system script run app-inv-wireless} on-error={}}\n:do {/system script run app-inv-vpn} on-error={}\n:do {/system script run app-inv-sys} on-error={}\n'
+INV_MAIN = '\n:if ([:len [/system script find where name="app-inv-dhcp"]] > 0) do={:do {/system script run app-inv-dhcp} on-error={}}\n:global appHasWifi\n:global appHasWl\n:set appHasWifi 0\n:set appHasWl 0\n:do {:local f [:parse ":global appHasWifi; :set appHasWifi [:len [/interface wifi find]]"]; $f} on-error={}\n:do {:local f [:parse ":global appHasWl; :set appHasWl [:len [/interface wireless find]]"]; $f} on-error={}\n:if ($appHasWifi > 0) do={:do {/system script run app-inv-wifi} on-error={}}\n:if ($appHasWl > 0) do={:do {/system script run app-inv-wireless} on-error={}}\n:do {/system script run app-inv-vpn} on-error={}\n:do {/system script run app-inv-sys} on-error={}\n:do {/system script run app-inv-eth} on-error={}\n'
+
+INV_ETH = INV_DHCP[:INV_DHCP.index(':local buf ""')].rstrip('\n') + '\n' + '\n:local buf ""\n:foreach i in=[/interface ethernet find] do={\n  :do {\n    :local n [/interface ethernet get $i name]\n    :local dis [/interface ethernet get $i disabled]\n    :local run [/interface ethernet get $i running]\n    :local cm ""\n    :do {:set cm [/interface ethernet get $i comment]} on-error={}\n    :local ce [$esc s=$cm]\n    :local rate ""\n    :local dup ""\n    :do {\n      :local mo [/interface ethernet monitor $i once as-value]\n      :set rate ($mo->"rate")\n      :set dup ($mo->"full-duplex")\n    } on-error={}\n    :local ld ""\n    :do {:set ld [/interface ethernet get $i link-downs]} on-error={}\n    :local br ""\n    :do {:set br [/interface bridge port get [find where interface=$n] bridge]} on-error={}\n    :if ([:len $buf] > 0) do={:set buf ($buf . ",")}\n    :set buf ($buf . "{\\"key\\":\\"$n\\",\\"run\\":\\"$run\\",\\"dis\\":\\"$dis\\",\\"rate\\":\\"$rate\\",\\"dup\\":\\"$dup\\",\\"ld\\":\\"$ld\\",\\"br\\":\\"$br\\",\\"cm\\":\\"$ce\\"}")\n  } on-error={}\n  :if ([:len $buf] > 3000) do={\n    $send u=$url d=("{\\"k\\":\\"eth\\",\\"seq\\":\\"$seq\\",\\"done\\":false,\\"items\\":\\5B" . $buf . "\\5D}")\n    :set buf ""\n  }\n}\n$send u=$url d=("{\\"k\\":\\"eth\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B" . $buf . "\\5D}")'
+
 
 LIVE = r'''
 :local gw ""
@@ -956,6 +959,7 @@ def setup_rsc(request: Request, t: str, iface: str = "ether1", list: str = "whit
         ':if ($appHasWl > 0) do={/system script add name=app-inv-wireless source="%s"}' % q(fill(INV_WIRELESS)),
         '/system script add name=app-inv-vpn source="%s"' % q(fill(INV_VPN)),
         '/system script add name=app-inv-sys source="%s"' % q(fill(INV_SYS)),
+        '/system script add name=app-inv-eth source="%s"' % q(fill(INV_ETH)),
         '/system script add name=app-inventory source="%s"' % q(fill(INV_MAIN)),
         '/system script add name=app-upgrade source="%s"' % q(fill(UPG)),
         '/system script add name=app-speed source="%s"' % q(fill(SPEED)),
@@ -1371,7 +1375,7 @@ def _store_metrics(s, t, raw, ip=None, cv=0):
 
 
 # ---------- inventory (DHCP / Wi-Fi / VPN) ----------
-INV_KINDS = {"dhcp", "wifi", "wireless", "wg", "ppp", "sys"}
+INV_KINDS = {"dhcp", "wifi", "wireless", "wg", "ppp", "sys", "eth"}
 
 
 def parse_body(raw, rname):
@@ -1721,6 +1725,79 @@ def device_label(mac, comment, host, custom):
     return name, " · ".join(sub)
 
 
+def rate_mbps(v):
+    """'1Gbps' / '2.5Gbps' / '100Mbps' / '10Mbps' -> Mb/s (liczba) albo None."""
+    m = re.match(r"^\s*([\d.]+)\s*([GMK]?)", v or "", re.I)
+    if not m:
+        return None
+    try:
+        return float(m.group(1)) * {"G": 1000, "M": 1, "K": 0.001, "": 1}[m.group(2).upper()]
+    except ValueError:
+        return None
+
+
+def rate_label(mb):
+    if mb is None:
+        return ""
+    return ("%g" % (mb / 1000)) + "G" if mb >= 1000 else ("%g" % mb) + "M"
+
+
+def port_short(name):
+    """Krótka nazwa na kafelku: ether3 -> 3, sfp-sfpplus1 -> SFP+1, sfp2 -> SFP2, qsfpplus1-1 -> QSFP+1-1."""
+    if name.startswith("ether"):
+        return name[5:] or name
+    m = re.match(r"^(q?sfp)(?:-sfp)?(plus|28)?-?(.*)$", name, re.I)
+    if m:
+        return m.group(1).upper() + ("+" if m.group(2) == "plus" else "") + m.group(3)
+    return name[:10]
+
+
+def bps_h(v):
+    """Bity na sekundę -> '12,4 Mb/s' / '830 kb/s' (pusty tekst, gdy brak danych)."""
+    if v is None:
+        return ""
+    for div, u in ((1e9, "Gb/s"), (1e6, "Mb/s"), (1e3, "kb/s")):
+        if v >= div:
+            return ("%.1f %s" % (v / div, u)).replace(".", ",")
+    return "0 kb/s"
+
+
+def _port_key(name):
+    m = re.match(r"^(\D*?)(\d+)(?:\D.*)?$", name)
+    return (0 if name.startswith("ether") else 1, m.group(1) if m else name, int(m.group(2)) if m else 0, name)
+
+
+def ports_view(s, r, rows, wan):
+    """Porty Ethernet routera do rysunku panelu: stan (up/slow/down/off), prędkość łącza, dupleks, rola i bieżący ruch."""
+    if not rows:
+        return []
+    last = s.scalar(select(func.max(IfaceMetric.ts)).where(IfaceMetric.router_id == r.id))
+    bps = {x.name: (x.rx_bps, x.tx_bps) for x in s.scalars(
+        select(IfaceMetric).where(IfaceMetric.router_id == r.id, IfaceMetric.ts == last))} if last else {}
+    rates = [rate_mbps(d.get("rate")) for d in rows if d.get("run") == "true"]
+    top = max([x for x in rates if x] or [0])  # najszybszy aktywny port: wskazuje, co ten router potrafi
+    out = []
+    for d in sorted(rows, key=lambda d: _port_key(d.get("key", ""))):
+        name = d.get("key", "")
+        mb = rate_mbps(d.get("rate"))
+        half = d.get("dup") == "false"
+        if d.get("dis") == "true":
+            state = "off"
+        elif d.get("run") != "true":
+            state = "down"
+        elif half or (mb is not None and mb <= 100 and top >= 1000):
+            state = "slow"
+        else:
+            state = "up"
+        rx, tx = bps.get(name, (None, None))
+        out.append({"name": name, "short": port_short(name),
+                    "state": state, "rate": rate_label(mb) if state in ("up", "slow") else "", "half": half and state in ("up", "slow"),
+                    "bridge": d.get("br", ""), "wan": bool(wan and name == wan), "comment": d.get("cm", ""),
+                    "link_downs": num(d.get("ld")),
+                    "rx": bps_h(rx) if state in ("up", "slow") else "", "tx": bps_h(tx) if state in ("up", "slow") else ""})
+    return out
+
+
 def inventory_view(s, r):
     names = device_names(s)
     # adresy monitorowanych routerów/AP, które są online - jeśli występują w DHCP tego routera, to na pewno są aktywne
@@ -1729,7 +1806,7 @@ def inventory_view(s, r):
     by = {k: [] for k in INV_KINDS}
     upd = None
     for x in rows:
-        if x.kind in ("wifi", "wireless") and (now() - x.updated).total_seconds() > 300:
+        if x.kind in ("wifi", "wireless", "eth") and (now() - x.updated).total_seconds() > 300:
             continue  # klient nie zgłaszany od 5 min - nie pokazuj "zamrożonego" odczytu
         try:
             d = json.loads(x.data)
@@ -1791,7 +1868,7 @@ def inventory_view(s, r):
                     "remote": d.get("caller") or "-", "state": "online", "info": "uptime " + (d.get("uptime") or "-"),
                     "rx": d.get("address") or "-", "tx": ""})
     vpn.sort(key=lambda v: ({"online": 0, "offline": 1, "disabled": 2}[v["state"]], v["name"].lower()))
-    return {"devices": devices, "wifi": wifi, "vpn": vpn, "updated": upd,
+    return {"devices": devices, "wifi": wifi, "vpn": vpn, "updated": upd, "ports": ports_view(s, r, by["eth"], wan),
             "dev_on": sum(1 for x in devices if x["state"] == "online"),
             "vpn_on": sum(1 for x in vpn if x["state"] == "online"),
             "stale": bool(upd and (now() - upd).total_seconds() > 600)}

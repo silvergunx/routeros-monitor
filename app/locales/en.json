@@ -823,5 +823,13 @@
   "an.203": "Device %s dropped %d times on authentication. If it keeps connecting and dropping, it most likely has a wrong or outdated Wi-Fi password saved: forget the network on the device and reconnect with the current password.",
   "rp.no_dhcp": "no DHCP",
   "dev.unknown": "unknown device",
-  "dev.no_mac": "IP address in ARP without a MAC address"
+  "dev.no_mac": "IP address in ARP without a MAC address",
+  "rp.tab_ports": "🔌 Ports",
+  "rp.ports_none": "No Ethernet port data. Paste the configuration command on the router again (script version 3 or newer), then reload the page after a minute.",
+  "rp.p_up": "link up",
+  "rp.p_slow": "degraded link",
+  "rp.p_down": "no link",
+  "rp.p_off": "disabled",
+  "rp.p_half": "half duplex",
+  "rp.p_slow_help": "Yellow port: the link runs slower (10/100 Mb/s) than the other ports of this router or in half duplex. Usually a bad cable, connector or the device on the other end."
 }
