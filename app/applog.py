@@ -47,6 +47,22 @@ class _Tee:
         return getattr(self._s, name)
 
 
+class MaskTokens(logging.Filter):
+    """Filtr logów dostępu uvicorn: wartość parametru t= (token routera w adresie, np. /api/metrics?t=...) zamienia na ***.
+    Token pozwala wysyłać dane w imieniu routera, więc nie powinien trafiać do logów kontenera ani do wklejanych logów."""
+
+    def _mask(self, value):
+        return _TOKEN_RX.sub(r"\1***", value) if isinstance(value, str) else value
+
+    def filter(self, record):
+        if isinstance(record.args, tuple):
+            record.args = tuple(self._mask(a) for a in record.args)
+        elif isinstance(record.args, dict):
+            record.args = {k: self._mask(v) for k, v in record.args.items()}
+        record.msg = self._mask(record.msg)
+        return True
+
+
 class _Handler(logging.Handler):
     def emit(self, record):
         try:
@@ -67,6 +83,7 @@ def install():
     handler.setFormatter(logging.Formatter("%(message)s"))
     for name in ("", "uvicorn"):  # uvicorn.error propaguje do "uvicorn", a "uvicorn" nie propaguje do root
         logging.getLogger(name).addHandler(handler)
+    logging.getLogger("uvicorn.access").addFilter(MaskTokens())  # tokeny routerów w adresach zapytań nie trafiają do logów
 
 
 def recent(n=40, max_chars=6000):
@@ -82,6 +99,7 @@ def recent(n=40, max_chars=6000):
 
 
 # ---------- wycinanie danych wrażliwych ----------
+_TOKEN_RX = re.compile(r"([?&]t=)[^&\s\"']+", re.I)
 _RULES = [
     (re.compile(r"([?&]t=)[^&\s\"']+", re.I), r"\1***"),                                    # token routera w adresie
     (re.compile(r"\b(\w*(?:password|passwd|secret|token|api[_-]?key|authorization)\w*)(\s*[=:]\s*)\S+", re.I), r"\1\2***"),

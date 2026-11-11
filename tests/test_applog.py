@@ -65,4 +65,35 @@ assert len(A.recent(10, max_chars=250)) == 2  # 2 wpisy po 100 znaków mieszczą
 A.add("y" * 5000)
 assert len(A._buf[-1][1]) == A.MAX_ENTRY_CHARS  # pojedynczy wpis jest przycinany
 
+# --- filtr logów dostępu uvicorn maskuje token routera (t=...) w adresie
+acc = logging.getLogger("test.access")
+acc.propagate = False
+acc.setLevel(logging.INFO)
+seen = []
+
+
+class Cap(logging.Handler):
+    def emit(self, record):
+        seen.append(self.format(record))
+
+
+cap = Cap()
+cap.setFormatter(logging.Formatter("%(message)s"))
+acc.addHandler(cap)
+acc.addFilter(A.MaskTokens())
+FMT = '%s - "%s %s HTTP/%s" %d'
+acc.info(FMT, "10.0.10.1:0", "POST", "/api/metrics?t=xNWb3nAHXI2bg9SwySFrJvvYzKikdF5W&cv=2", "1.1", 200)
+acc.info(FMT, "10.0.10.1:0", "POST", "/api/inventory?t=U7mPabV25OivKZKqhb1ODaK0MW_CJ2LO", "1.1", 200)
+acc.info(FMT, "10.0.10.19:0", "GET", "/api/blacklist.rsc?list=blacklist&t=SECRETtoken123", "1.1", 200)
+acc.info(FMT, "10.0.10.19:0", "GET", "/routers/1?tab=logs", "1.1", 200)   # parametr "tab" to nie token
+acc.info(FMT, "10.0.10.19:0", "GET", "/login", "1.1", 200)
+acc.info("plain message with ?t=ABC123 inside")
+assert seen[0] == '10.0.10.1:0 - "POST /api/metrics?t=***&cv=2 HTTP/1.1" 200', seen[0]
+assert seen[1] == '10.0.10.1:0 - "POST /api/inventory?t=*** HTTP/1.1" 200', seen[1]
+assert seen[2] == '10.0.10.19:0 - "GET /api/blacklist.rsc?list=blacklist&t=*** HTTP/1.1" 200', seen[2]
+assert seen[3] == '10.0.10.19:0 - "GET /routers/1?tab=logs HTTP/1.1" 200', seen[3]
+assert seen[4] == '10.0.10.19:0 - "GET /login HTTP/1.1" 200', seen[4]
+assert seen[5] == "plain message with ?t=*** inside", seen[5]
+assert not any("xNWb3" in s or "U7mPab" in s or "SECRETtoken" in s for s in seen)
+
 print("test_applog: OK")
