@@ -8,6 +8,8 @@ Uwagi oznaczone **Routery** oznaczają, że trzeba ponownie wkleić komendę kon
 
 ## [Unreleased]
 
+Prace w toku na gałęzi `develop` (wersja 1.6.0).
+
 ## [1.5.0] - 2026-11-11
 
 ### Dodano
