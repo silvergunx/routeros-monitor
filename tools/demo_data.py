@@ -216,7 +216,8 @@ def build(s):
     inv(rs[0], "wg", "k1" + "A" * 20, dict(name="phone-anna", iface="wireguard1", endpoint="100.64.12.8:51820", hs="34s", rx="184532991", tx="92311034", disabled="false"))
     inv(rs[0], "wg", "k2" + "B" * 20, dict(name="laptop-work", iface="wireguard1", endpoint="100.64.40.17:51820", hs="1m12s", rx="9845321", tx="5134213", disabled="false"))
     inv(rs[0], "wg", "k3" + "C" * 20, dict(name="tom-tablet", iface="wireguard1", endpoint="", hs="", rx="0", tx="0", disabled="true"))
-    inv(rs[3], "wg", "k4" + "D" * 20, dict(name="hq-tunnel", iface="wireguard1", endpoint="100.64.1.1:51820", hs="19s", rx="3421091845", tx="1209384112", disabled="false"))
+    inv(rs[0], "wg", "k5" + "E" * 20, dict(name="branch-hex-tunnel", iface="wireguard1", endpoint="100.64.20.9:51820", hs="19s", rx="1209384112", tx="3421091845", disabled="false"))
+    inv(rs[3], "wg", "k4" + "D" * 20, dict(name="master-tunnel", iface="wireguard1", endpoint="100.64.1.1:51820", hs="19s", rx="3421091845", tx="1209384112", disabled="false"))
 
     # ---------------------------------------------------------------- logi z routerów (ostatnie 24 h)
     log_rows = []

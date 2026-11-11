@@ -858,5 +858,15 @@
   "topo.t_nbr": "Urządzenie w sieci (sąsiad)",
   "topo.t_client": "Klient Wi-Fi",
   "topo.open": "kliknij, aby otworzyć",
-  "topo.signal": "Sygnał"
+  "topo.signal": "Sygnał",
+  "topo.leg_flow": "ruch danych",
+  "topo.leg_vpn": "tunel VPN między routerami",
+  "topo.k_phone": "Telefon",
+  "topo.k_tablet": "Tablet",
+  "topo.k_laptop": "Komputer",
+  "topo.k_tv": "Telewizor",
+  "topo.k_printer": "Drukarka",
+  "topo.k_camera": "Kamera",
+  "topo.k_iot": "Urządzenie IoT",
+  "topo.k_server": "Serwer / NAS"
 }

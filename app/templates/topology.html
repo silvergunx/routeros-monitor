@@ -25,11 +25,10 @@
 .tnode use{color:var(--fg);pointer-events:none}.tnode.router.down use{color:var(--mut)}
 .tnode text{fill:var(--fg);font-size:12px;text-anchor:middle;pointer-events:none;paint-order:stroke;stroke:var(--bg);stroke-width:3px}.tnode text.sub{fill:var(--mut);font-size:10px}
 .tnode .badge{fill:var(--acc);stroke:var(--card);stroke-width:2}.tnode text.bt{fill:#fff;font-size:10px;font-weight:700;stroke:none}
-.tnode.client circle{fill:var(--mut);stroke:var(--card);stroke-width:2;transition:r .15s}.tnode.client.ok circle{fill:var(--ok)}.tnode.client.warn circle{fill:var(--warn)}.tnode.client.bad circle{fill:var(--bad)}
-.tnode.client:hover circle{r:10}
+.tnode.client circle.bg{stroke-width:2.2;stroke:var(--mut)}.tnode.client.ok circle.bg{stroke:var(--ok)}.tnode.client.warn circle.bg{stroke:var(--warn)}.tnode.client.bad circle.bg{stroke:var(--bad)}.tnode.client:hover circle.bg{fill:color-mix(in srgb,var(--acc) 18%,var(--card))}
 .tlink{fill:none;stroke:color-mix(in srgb,var(--mut) 55%,transparent);stroke-linecap:round}.tlink.wifi{stroke-width:1;opacity:.6}
-.tlink.flow{stroke:color-mix(in srgb,var(--acc) 80%,var(--mut));stroke-dasharray:7 9;animation:tflow 1.4s linear infinite}.tlink.down{stroke:var(--bad);stroke-dasharray:3 7}.tlink.weak{display:none}
-@keyframes tflow{to{stroke-dashoffset:-32}}@media(prefers-reduced-motion:reduce){.tlink.flow{animation:none}}
+.tlink.flow{stroke:color-mix(in srgb,var(--acc) 80%,var(--mut));stroke-dasharray:7 9;animation:tflow 1.4s linear infinite}.tlink.down{stroke:var(--bad);stroke-dasharray:3 7}.tlink.vpn{stroke:var(--ok);stroke-width:3;stroke-dasharray:3 8;animation:tflow 1.1s linear infinite reverse;filter:drop-shadow(0 0 4px color-mix(in srgb,var(--ok) 70%,transparent))}.tlink.vpn.down{stroke:var(--mut);animation:none;filter:none;opacity:.6}
+@keyframes tflow{to{stroke-dashoffset:-32}}@media(prefers-reduced-motion:reduce){.tlink.flow,.tlink.vpn{animation:none}}
 #tmap.hl .tnode:not(.on){opacity:.22}#tmap.hl .tlink:not(.on){opacity:.07}
 .tmleg{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-size:12px;color:var(--mut);align-items:center}
 </style>
@@ -43,17 +42,17 @@
 <div class="ttreeview"><div class="tree"><ul>{{ tree(topo.root) }}</ul></div>
 {% if topo.orphans %}<h3 style="margin:18px 0 6px">{{ t('topo.orphans') }}</h3><div class="tree"><ul>{% for o in topo.orphans %}{{ tree(o) }}{% endfor %}</ul></div>{% endif %}</div>
 <script type="application/json" id="tgraph">{{ topo.graph|tojson }}</script>
-<div class="tmleg"><span><span class="qd ok"></span> {{ t('topo.leg_good') }}</span><span><span class="qd warn"></span> {{ t('topo.leg_mid') }}</span><span><span class="qd bad"></span> {{ t('topo.leg_bad') }}</span></div>
+<div class="tmleg"><span><svg width="26" height="8"><path d="M1 4h24" class="tlink flow" stroke-width="3"/></svg> {{ t('topo.leg_flow') }}</span><span><svg width="26" height="8"><path d="M1 4h24" class="tlink vpn" /></svg> {{ t('topo.leg_vpn') }}</span><span><span class="qd ok"></span> {{ t('topo.leg_good') }}</span><span><span class="qd warn"></span> {{ t('topo.leg_mid') }}</span><span><span class="qd bad"></span> {{ t('topo.leg_bad') }}</span></div>
 {% endif %}</div>
 <p class="mut small" style="margin-top:12px">{{ t('topo.help') }}</p></div>
 {% if has %}<script>
 (function(){
 const NS='http://www.w3.org/2000/svg',svg=document.getElementById('tmap'),wrap=document.getElementById('tmapwrap'),tip=document.getElementById('ttip');
 const T={router:{{ t('topo.t_router')|tojson }},ap:{{ t('topo.t_ap')|tojson }},inet:{{ t('topo.internet')|tojson }},nbr:{{ t('topo.t_nbr')|tojson }},client:{{ t('topo.t_client')|tojson }},
- up:{{ t('rt.online')|tojson }},down:{{ t('rt.offline')|tojson }},upg:{{ t('rt.upgrading')|tojson }},open:{{ t('topo.open')|tojson }},sig:{{ t('topo.signal')|tojson }}};
+ up:{{ t('rt.online')|tojson }},down:{{ t('rt.offline')|tojson }},upg:{{ t('rt.upgrading')|tojson }},open:{{ t('topo.open')|tojson }},sig:{{ t('topo.signal')|tojson }},kind:{{ {'phone':t('topo.k_phone'),'tablet':t('topo.k_tablet'),'laptop':t('topo.k_laptop'),'tv':t('topo.k_tv'),'printer':t('topo.k_printer'),'camera':t('topo.k_camera'),'iot':t('topo.k_iot'),'server':t('topo.k_server'),'other':t('topo.t_client')}|tojson }}};
 let G={nodes:[],links:[],byId:{},parent:{}},S={k:1,x:0,y:0},sig='',pins={},hint='';
 try{pins=JSON.parse(localStorage.getItem('topoPins')||'{}')}catch(e){pins={}}
-const R=n=>n.type==='inet'?30:n.type==='router'?28:n.type==='nbr'?21:7;
+const R=n=>n.type==='inet'?30:n.type==='router'?28:n.type==='nbr'?21:13;
 function el(tag,at,par){const e=document.createElementNS(NS,tag);for(const k in at)e.setAttribute(k,at[k]);if(par)par.appendChild(e);return e}
 function layout(iters,a0){const N=G.nodes;let a=a0;
  for(let it=0;it<iters;it++){a=Math.max(0.03,a*0.985);
@@ -63,8 +62,12 @@ function layout(iters,a0){const N=G.nodes;let a=a0;
    let f=0;if(d<rr)f=(rr-d)*.5;if(d<420)f+=(cc?340:5400)*a/d;
    const fx=dx/d*f,fy=dy/d*f;p.vx-=fx;p.vy-=fy;q.vx+=fx;q.vy+=fy}}
   for(const l of G.links){const p=G.byId[l.s],q=G.byId[l.t];let dx=q.x-p.x,dy=q.y-p.y,d=Math.sqrt(dx*dx+dy*dy)||.01;
-   const L=l.weak?300:(l.wifi?44+Math.min(46,(p.nc||0)*1.6):(q.type==='nbr'?112:(p.type==='inet'?125:150)));
-   const f=(d-L)*(l.weak?.01:.1)*Math.max(a,.15),fx=dx/d*f,fy=dy/d*f;p.vx+=fx;p.vy+=fy;q.vx-=fx;q.vy-=fy}
+   const L=l.vpn?300:(l.wifi?52+Math.min(50,(p.nc||0)*1.8):(q.type==='nbr'?112:(p.type==='inet'?125:150)));
+   const f=(d-L)*(l.vpn?.012:.1)*Math.max(a,.15),fx=dx/d*f,fy=dy/d*f;p.vx+=fx;p.vy+=fy;q.vx-=fx;q.vy-=fy}
+  for(const l of G.links){if(l.vpn)continue;const p=G.byId[l.s],q=G.byId[l.t],ex=q.x-p.x,ey=q.y-p.y,e2=ex*ex+ey*ey||1;
+   for(const n of N){if(n===p||n===q||n.pin)continue;let u=((n.x-p.x)*ex+(n.y-p.y)*ey)/e2;if(u<-.05||u>1.05)continue;u=Math.max(0,Math.min(1,u));
+    const cx=p.x+ex*u,cy=p.y+ey*u;let dx=n.x-cx,dy=n.y-cy,d=Math.sqrt(dx*dx+dy*dy)||.01;const m=R(n)+(n.type==='client'?12:30);
+    if(d<m){const f=(m-d)*.45;n.vx+=dx/d*f;n.vy+=dy/d*f}}}
   for(const n of N){if(n.type!=='client'){n.vy+=(n.depth*160-n.y)*.11*a;n.vx-=n.x*.004*a}
    if(n.pin){n.vx=n.vy=0;continue}n.x+=n.vx;n.y+=n.vy;n.vx*=.55;n.vy*=.55}}}
 function initPos(old){const rows={};G.nodes.forEach(n=>{if(n.type!=='client'&&n.type!=='nbr'){(rows[n.depth]=rows[n.depth]||[]).push(n)}});
@@ -83,20 +86,29 @@ function fit(){const w=wrap.clientWidth,h=wrap.clientHeight;if(!w||!G.nodes.leng
  const k=Math.min(w/(x1-x0),h/(y1-y0),1.5);S={k,x:w/2-k*(x0+x1)/2,y:h/2-k*(y0+y1)/2};applyT()}
 function applyT(){const g=document.getElementById('tg');if(g)g.setAttribute('transform','translate('+S.x+','+S.y+') scale('+S.k+')')}
 function path(l){const p=G.byId[l.s],q=G.byId[l.t];if(l.wifi)return'M'+p.x+' '+p.y+'L'+q.x+' '+q.y;
- const mx=(p.x+q.x)/2,my=(p.y+q.y)/2,dx=q.x-p.x,dy=q.y-p.y,o=.1;return'M'+p.x+' '+p.y+'Q'+(mx-dy*o)+' '+(my+dx*o)+' '+q.x+' '+q.y}
+ const mx=(p.x+q.x)/2,my=(p.y+q.y)/2,dx=q.x-p.x,dy=q.y-p.y,o=l.vpn?-.3:.1;return'M'+p.x+' '+p.y+'Q'+(mx-dy*o)+' '+(my+dx*o)+' '+q.x+' '+q.y}
 function place(){G.links.forEach(l=>{if(l.el)l.el.setAttribute('d',path(l))});G.nodes.forEach(n=>{if(n.el)n.el.setAttribute('transform','translate('+n.x+','+n.y+')')})}
-function icon(n){return n.type==='inet'?'ic-globe':n.type==='nbr'?'ic-box':(n.ap?'ic-ap':'ic-router')}
+function icon(n){return n.type==='inet'?'ic-globe':n.type==='nbr'?'ic-box':n.type==='client'?'ic-'+(n.kind||'other'):(n.ap?'ic-ap':'ic-router')}
 function draw(){svg.textContent='';const d=el('defs',{},svg);
  d.innerHTML='<symbol id="ic-router" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="12" width="18" height="7" rx="2"/><path d="M7 15.5h.01M11 15.5h.01M8 12 6 5M16 12l2-7"/></symbol>'+
  '<symbol id="ic-ap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 9.5a10 10 0 0 1 15 0M7.5 12.8a6 6 0 0 1 9 0"/><circle cx="12" cy="17" r="1.4" fill="currentColor"/></symbol>'+
  '<symbol id="ic-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>'+
+ '<symbol id="ic-phone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2.2"/><path d="M11 18.5h2"/></symbol>'+
+ '<symbol id="ic-tablet" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="3" width="15" height="18" rx="2.2"/><path d="M11 18h2"/></symbol>'+
+ '<symbol id="ic-laptop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="10" rx="1.5"/><path d="M2.5 19h19"/></symbol>'+
+ '<symbol id="ic-tv" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M9 21h6"/></symbol>'+
+ '<symbol id="ic-printer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 9V3.5h10V9"/><rect x="3.5" y="9" width="17" height="8" rx="2"/><path d="M7.5 14h9v6.5h-9z"/></symbol>'+
+ '<symbol id="ic-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8h4l1.5-2.2h6L16.5 8h4v11h-17z"/><circle cx="12" cy="13" r="3.2"/></symbol>'+
+ '<symbol id="ic-iot" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18.5h6M10 21h4M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.4 1.1 2.2h5c0-.8.4-1.6 1.1-2.2A6 6 0 0 0 12 3z"/></symbol>'+
+ '<symbol id="ic-server" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3.5" width="16" height="7" rx="1.6"/><rect x="4" y="13.5" width="16" height="7" rx="1.6"/><path d="M8 7h.01M8 17h.01"/></symbol>'+
+ '<symbol id="ic-other" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="3"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/></symbol>'+
  '<symbol id="ic-box" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="8" rx="1.6"/><path d="M7 12h.01M11 12h.01M15 12h.01"/></symbol>';
  const root=el('g',{id:'tg'},svg),lg=el('g',{},root),ng=el('g',{},root);
  for(const l of G.links){const q=G.byId[l.t],cl=['tlink'];if(l.wifi)cl.push('wifi');if(l.weak)cl.push('weak');if(l.down)cl.push('down');
-  const w=l.wifi?1:2+Math.min(4,Math.log10((l.bps||0)/1e5+1)*1.7);if(!l.wifi&&!l.down&&l.bps>2e4)cl.push('flow');
+  const w=l.wifi?1:(l.vpn?3:2+Math.min(4,Math.log10((l.bps||0)/1e5+1)*1.7));if(!l.wifi&&!l.down&&!l.vpn&&l.bps>2e4)cl.push('flow');if(l.vpn){cl.push('vpn');if(!l.up)cl.push('down')}
   l.el=el('path',{class:cl.join(' '),'stroke-width':w},lg)}
  for(const n of G.nodes){const g=el('g',{class:'tnode '+n.type+(n.status?' '+n.status:'')+(n.qc?' '+n.qc:'')},ng);n.el=g;g.dataset.id=n.id;
-  if(n.type==='client'){el('circle',{r:7},g)}
+  if(n.type==='client'){const r=R(n);el('circle',{class:'bg',r:r},g);el('use',{href:'#'+icon(n),x:-r*.58,y:-r*.58,width:r*1.16,height:r*1.16},g)}
   else{const r=R(n);el('circle',{class:'bg',r:r},g);el('use',{href:'#'+icon(n),x:-r*.55,y:-r*.55,width:r*1.1,height:r*1.1},g);
    const t1=el('text',{y:r+15},g);t1.textContent=n.name;if(n.sub&&n.type!=='nbr'){const t2=el('text',{y:r+28,class:'sub'},g);t2.textContent=n.sub}
    if(n.nc){el('circle',{class:'badge',cx:r*.72,cy:-r*.72,r:9},g);const b=el('text',{class:'bt',x:r*.72,y:-r*.72+3.5},g);b.textContent=n.nc}}
@@ -106,7 +118,7 @@ function draw(){svg.textContent='';const d=el('defs',{},svg);
 function line(par,t,c){const d=document.createElement('div');if(c)d.style.cssText=c;d.textContent=t;par.appendChild(d)}
 function hover(n,e){tip.textContent='';const b=document.createElement('b');b.textContent=n.name;tip.appendChild(b);
  if(n.type==='router'){line(tip,(n.ap?T.ap:T.router)+(n.edge?' · WAN':''));if(n.sub)line(tip,n.sub);line(tip,T[n.status]);if(n.nc)line(tip,'Wi-Fi: '+n.nc);line(tip,'↗ '+T.open)}
- else if(n.type==='client'){if(n.sub)line(tip,n.sub);if(n.ip)line(tip,n.ip);line(tip,n.mac);line(tip,T.sig+': '+(n.signal==null?'-':n.signal+' dBm')+' · '+n.q);if(n.iface)line(tip,n.iface)}
+ else if(n.type==='client'){line(tip,T.kind[n.kind]||T.kind.other);if(n.sub)line(tip,n.sub);if(n.ip)line(tip,n.ip);line(tip,n.mac);line(tip,T.sig+': '+(n.signal==null?'-':n.signal+' dBm')+' · '+n.q);if(n.iface)line(tip,n.iface)}
  else if(n.type==='nbr'){line(tip,T.nbr);if(n.sub)line(tip,n.sub);if(n.ip)line(tip,n.ip)}else line(tip,T.inet);
  tip.style.display='block';moveTip(e);
  svg.classList.add('hl');const on=new Set([n.id]);G.links.forEach(l=>{if(l.s===n.id||l.t===n.id){on.add(l.s);on.add(l.t);l.el.classList.add('on')}});G.nodes.forEach(m=>{if(on.has(m.id))m.el.classList.add('on')})}

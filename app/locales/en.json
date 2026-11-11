@@ -857,5 +857,15 @@
   "topo.t_nbr": "Network device (neighbour)",
   "topo.t_client": "Wi-Fi client",
   "topo.open": "click to open",
-  "topo.signal": "Signal"
+  "topo.signal": "Signal",
+  "topo.leg_flow": "data flow",
+  "topo.leg_vpn": "VPN tunnel between routers",
+  "topo.k_phone": "Phone",
+  "topo.k_tablet": "Tablet",
+  "topo.k_laptop": "Computer",
+  "topo.k_tv": "TV",
+  "topo.k_printer": "Printer",
+  "topo.k_camera": "Camera",
+  "topo.k_iot": "IoT device",
+  "topo.k_server": "Server / NAS"
 }

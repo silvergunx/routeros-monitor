@@ -4611,6 +4611,28 @@ def settings_whitelist(request: Request, on: str = Form(""), s: Session = Depend
     return settings_view(request, s, (tr("msg.wl_on") if on == "1" else tr("msg.wl_off")) + " " + tr("msg.wl_paste"), True)
 
 
+_KIND_RULES = [
+    ("camera", r"(^|[^a-z])(cam|camera|doorbell|ipcam)([^a-z]|$)|hikvision|dahua|reolink|ezviz|wyze|tapo c"),
+    ("tv", r"(^|[^a-z])(tv|chromecast|roku|firetv|bravia|webos)([^a-z]|$)|vizio|hisense|tcl "),
+    ("printer", r"printer|(^|[^a-z])mfp([^a-z]|$)|canon|epson|brother|xerox|lexmark|kyocera|ricoh|konica|(^|[^a-z])hp([^a-z]|$)"),
+    ("iot", r"plug|bulb|lamp|light|thermostat|sensor|vacuum|robot|espressif|tuya|shelly|sonoff|yeelight|philips lighting|smart|nest|ewelink|zigbee"),
+    ("tablet", r"ipad|tablet|(^|[^a-z])tab([^a-z]|$)"),
+    ("phone", r"iphone|phone|android|galaxy|pixel|oneplus|xiaomi|redmi|huawei|oppo|vivo|motorola|realme|honor|(^|[^a-z])sm-"),
+    ("laptop", r"laptop|notebook|macbook|(^|[^a-z])pc([^a-z]|$)|desktop|thinkpad|dell|lenovo|asustek|microsoft|intel|liteon|surface"),
+    ("server", r"(^|[^a-z])nas([^a-z]|$)|server|synology|qnap|raspberry|proxmox|ubiquiti"),
+    ("phone", r"apple|samsung"),
+]
+
+
+def device_kind(name, vendor=""):
+    """Zgadywany typ urządzenia (ikona na mapie) z nazwy i producenta; 'other', gdy nic nie pasuje."""
+    s = ("%s %s" % (name or "", vendor or "")).lower()
+    for kind, rx in _KIND_RULES:
+        if re.search(rx, s):
+            return kind
+    return "other"
+
+
 def _nbr_port(d):
     """Port lokalny, na którym widać sąsiada (RouterOS podaje też bridge: bierzemy fizyczny port)."""
     parts = [x for x in (d.get("if") or "").split(",") if x]
@@ -4675,6 +4697,7 @@ def topology_view(s):
         wq = wifi_quality(d)
         clients[rid].append({"mac": mac, "name": name if name != "-" else mac, "sub": sub, "ip": l.get("ip") or d.get("last-ip") or "",
                              "iface": d.get("interface") or d.get("iface", ""), "q": wq["q"], "qc": wq["qc"], "qlabel": wq["qlabel"],
+                             "kind": device_kind(name, OUI.lookup(mac)),
                              "signal": wq["signal"], "sc": wq["sc"]})
     for lst in clients.values():
         lst.sort(key=lambda c: (-(c["q"] if c["q"] is not None else -1), c["name"].lower()))
@@ -4734,13 +4757,16 @@ def topology_graph(s, root, orphans):
             pid, pn = parent
             port = n.get("parent_port") if n["type"] == "router" else n.get("port")
             rate = bps.get((pn["id"], port)) if pn["type"] == "router" and port else None
+            if pn["type"] == "inet" and n["type"] == "router":  # połączenie z Internetem: ruch na interfejsie WAN tego routera
+                rt = s.get(Router, n["id"])
+                rate = bps.get((n["id"], wan_info(s, rt)[1]))
             links.append({"s": pid, "t": nid, "bps": rate, "ps": port or "", "pt": n.get("up_port", "") if n["type"] == "router" else "",
                           "down": n["type"] == "router" and not n["online"] and not n["upg"]})
         if n["type"] == "router":
             for c in n["clients"]:
                 cid = "c" + c["mac"]
                 nodes.append({"id": cid, "type": "client", "name": c["name"], "sub": c["sub"], "ip": c["ip"], "mac": c["mac"], "iface": c["iface"],
-                              "qc": c["qc"], "q": c["qlabel"], "signal": c["signal"], "depth": depth + 1})
+                              "qc": c["qc"], "q": c["qlabel"], "signal": c["signal"], "kind": c["kind"], "depth": depth + 1})
                 links.append({"s": nid, "t": cid, "wifi": True})
         for c in n.get("children", []):
             add(c, (nid, n), depth + 1)
@@ -4749,7 +4775,29 @@ def topology_graph(s, root, orphans):
     for o in orphans:
         k = len(links)
         add(o, ("inet", root), 1)
-        links[k]["weak"] = True
+        links[k]["inet"] = True
+    # VPN między monitorowanymi routerami: peer WireGuard nazwany (name/comment) jak drugi router albo wskazujący jego adres
+    rids = {n["rid"]: n for n in nodes if n["type"] == "router"}
+    routers = {r.id: r for r in s.scalars(select(Router)) if r.id in rids}
+    pairs = {}
+    for x in s.scalars(select(Inv).where(Inv.kind == "wg", Inv.router_id.in_(list(rids)))):
+        try:
+            d = json.loads(x.data)
+        except ValueError:
+            continue
+        txt = ("%s %s" % (d.get("name") or "", d.get("comment") or "")).lower()
+        ep = (d.get("endpoint") or "").rsplit(":", 1)[0]
+        for oid, o in routers.items():
+            if oid == x.router_id:
+                continue
+            keys = [k.lower() for k in (o.name, o.ident or "") if k and len(k) >= 3]
+            if any(k in txt for k in keys) or (ep and ep == o.log_ip):
+                ms = parse_rtt(d.get("hs"))
+                up = d.get("disabled") != "true" and ms is not None and ms <= 180_000
+                key = tuple(sorted((x.router_id, oid)))
+                pairs[key] = pairs.get(key, False) or up
+    for (a, b), up in pairs.items():
+        links.append({"s": "r%d" % a, "t": "r%d" % b, "vpn": True, "up": up})
     return {"nodes": nodes, "links": links}
 
 
