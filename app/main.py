@@ -4703,7 +4703,61 @@ def topology_view(s):
     trees = [node(r) for r in roots if r.id not in visited]
     orphans = [node(r) for r in routers if r.id not in visited]
     root = {"type": "inet", "children": trees}
-    return {"root": root, "orphans": orphans, "has_nbr": any(inv[r.id]["nbr"] for r in routers)}
+    return {"root": root, "orphans": orphans, "has_nbr": any(inv[r.id]["nbr"] for r in routers),
+            "graph": topology_graph(s, root, orphans)}
+
+
+def topology_graph(s, root, orphans):
+    """Płaska lista węzłów i połączeń do rysowania mapy w przeglądarce (układ liczy przeglądarka)."""
+    bps = {}
+    for rid in {n for n in _tree_router_ids(root) | _tree_router_ids({"children": orphans})}:
+        last = s.scalar(select(func.max(IfaceMetric.ts)).where(IfaceMetric.router_id == rid))
+        if last:
+            for x in s.scalars(select(IfaceMetric).where(IfaceMetric.router_id == rid, IfaceMetric.ts == last)):
+                bps[(rid, x.name)] = (x.rx_bps or 0) + (x.tx_bps or 0)
+    nodes, links, cnt = [], [], [0]
+
+    def add(n, parent, depth):
+        if n["type"] == "inet":
+            nid = "inet"
+            nodes.append({"id": nid, "type": "inet", "name": tr("topo.internet"), "depth": depth})
+        elif n["type"] == "router":
+            nid = "r%d" % n["id"]
+            nodes.append({"id": nid, "type": "router", "name": n["name"], "sub": n["model"], "depth": depth, "rid": n["id"],
+                          "status": "upg" if n["upg"] else ("up" if n["online"] else "down"), "edge": n["edge"],
+                          "ap": bool(n["clients"] or n["manager"]), "nc": len(n["clients"])})
+        else:
+            cnt[0] += 1
+            nid = "x%d" % cnt[0]
+            nodes.append({"id": nid, "type": "nbr", "name": n["name"], "sub": n["model"], "ip": n["ip"], "depth": depth})
+        if parent:
+            pid, pn = parent
+            port = n.get("parent_port") if n["type"] == "router" else n.get("port")
+            rate = bps.get((pn["id"], port)) if pn["type"] == "router" and port else None
+            links.append({"s": pid, "t": nid, "bps": rate, "ps": port or "", "pt": n.get("up_port", "") if n["type"] == "router" else "",
+                          "down": n["type"] == "router" and not n["online"] and not n["upg"]})
+        if n["type"] == "router":
+            for c in n["clients"]:
+                cid = "c" + c["mac"]
+                nodes.append({"id": cid, "type": "client", "name": c["name"], "sub": c["sub"], "ip": c["ip"], "mac": c["mac"], "iface": c["iface"],
+                              "qc": c["qc"], "q": c["qlabel"], "signal": c["signal"], "depth": depth + 1})
+                links.append({"s": nid, "t": cid, "wifi": True})
+        for c in n.get("children", []):
+            add(c, (nid, n), depth + 1)
+
+    add(root, None, 0)
+    for o in orphans:
+        k = len(links)
+        add(o, ("inet", root), 1)
+        links[k]["weak"] = True
+    return {"nodes": nodes, "links": links}
+
+
+def _tree_router_ids(n):
+    out = {n["id"]} if n.get("type") == "router" else set()
+    for c in n.get("children", []):
+        out |= _tree_router_ids(c)
+    return out
 
 
 @app.get("/topology", dependencies=[Depends(user)])

@@ -847,5 +847,15 @@
   "topo.leg_good": "good Wi-Fi link",
   "topo.leg_mid": "medium",
   "topo.leg_bad": "weak",
-  "topo.help": "Links come from the routers' neighbour lists (MNDP/LLDP), so unmanaged switches and devices without these protocols are not visible. A Wi-Fi client is shown under the AP it was connected to in the latest reading. Click a router to open it."
+  "topo.help": "Links come from the routers' neighbour lists (MNDP/LLDP), so unmanaged switches and devices without these protocols are not visible. A Wi-Fi client is shown under the AP it was connected to in the latest reading. Click a router to open it.",
+  "topo.v_map": "Map",
+  "topo.v_tree": "Tree",
+  "topo.fit": "Fit to view",
+  "topo.reset": "Recalculate layout",
+  "topo.t_router": "Router",
+  "topo.t_ap": "Router / AP",
+  "topo.t_nbr": "Network device (neighbour)",
+  "topo.t_client": "Wi-Fi client",
+  "topo.open": "click to open",
+  "topo.signal": "Signal"
 }

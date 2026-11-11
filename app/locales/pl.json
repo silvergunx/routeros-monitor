@@ -848,5 +848,15 @@
   "topo.leg_good": "dobre połączenie Wi-Fi",
   "topo.leg_mid": "średnie",
   "topo.leg_bad": "słabe",
-  "topo.help": "Połączenia pochodzą z listy sąsiadów routerów (MNDP/LLDP), więc switche niezarządzalne i sprzęt bez tych protokołów nie są widoczne. Klient Wi-Fi jest pokazany pod AP, do którego był podłączony w ostatnim odczycie. Kliknij router, aby go otworzyć."
+  "topo.help": "Połączenia pochodzą z listy sąsiadów routerów (MNDP/LLDP), więc switche niezarządzalne i sprzęt bez tych protokołów nie są widoczne. Klient Wi-Fi jest pokazany pod AP, do którego był podłączony w ostatnim odczycie. Kliknij router, aby go otworzyć.",
+  "topo.v_map": "Mapa",
+  "topo.v_tree": "Drzewo",
+  "topo.fit": "Dopasuj widok",
+  "topo.reset": "Przelicz układ od nowa",
+  "topo.t_router": "Router",
+  "topo.t_ap": "Router / AP",
+  "topo.t_nbr": "Urządzenie w sieci (sąsiad)",
+  "topo.t_client": "Klient Wi-Fi",
+  "topo.open": "kliknij, aby otworzyć",
+  "topo.signal": "Sygnał"
 }

@@ -7,13 +7,144 @@
 {% if n.up_port or n.parent_port %}<span class="mut small">{{ n.parent_port or '?' }} ⇄ {{ n.up_port or '?' }}</span>{% endif %}</a>{{ clients(n) }}
 {% else %}<div class="tn tnbr"><b>{{n.name}}</b><span class="mut small">{{n.model}}</span><span class="mut small">{{n.port}}{% if n.ip %} · {{n.ip}}{% endif %}</span></div>{% endif %}
 {% if n.children %}<ul>{% for c in n.children %}{{ tree(c) }}{% endfor %}</ul>{% endif %}</li>{% endmacro %}
-<div class="card"><h2>{{ t('topo.title') }}</h2>
+{% set has = topo.root and (topo.root.children or topo.orphans) %}
+<style>
+#tview[data-v=map] .ttreeview{display:none}#tview[data-v=tree] #tmapwrap{display:none}
+.vsw{display:flex;gap:6px}.vsw button{padding:5px 12px}#tview[data-v=map] .vsw [data-v=map],#tview[data-v=tree] .vsw [data-v=tree]{border-color:var(--acc);color:var(--acc)}
+#tmapwrap{position:relative;height:clamp(380px,68vh,660px);border:1px solid var(--bd);border-radius:12px;overflow:hidden;touch-action:none;
+ background-color:var(--bg);background-image:radial-gradient(color-mix(in srgb,var(--mut) 28%,transparent) 1px,transparent 1px);background-size:22px 22px}
+#tmap{width:100%;height:100%;display:block;cursor:grab;user-select:none;-webkit-user-select:none}#tmap.pan{cursor:grabbing}
+.tctl{position:absolute;top:10px;right:10px;display:flex;flex-direction:column;gap:6px}.tctl button{width:34px;height:34px;padding:0;font-size:18px;line-height:1}
+#ttip{position:absolute;display:none;pointer-events:none;max-width:260px;padding:8px 10px;border:1px solid var(--bd);border-radius:8px;background:var(--card);box-shadow:0 6px 24px rgba(0,0,0,.35);font-size:12px;z-index:3}
+#ttip b{display:block;font-size:13px;margin-bottom:2px}#ttip div{color:var(--mut)}
+.tnode{cursor:pointer;transition:opacity .15s}.tnode circle.bg{fill:var(--card);stroke:var(--bd);stroke-width:2.5}
+.tnode.router.up circle.bg{stroke:var(--ok);filter:drop-shadow(0 0 7px color-mix(in srgb,var(--ok) 65%,transparent))}
+.tnode.router.down circle.bg{stroke:var(--bad);filter:drop-shadow(0 0 7px color-mix(in srgb,var(--bad) 60%,transparent))}
+.tnode.router.upg circle.bg{stroke:var(--warn)}.tnode.inet circle.bg{stroke:var(--acc);filter:drop-shadow(0 0 8px color-mix(in srgb,var(--acc) 60%,transparent))}
+.tnode.nbr circle.bg{stroke-dasharray:4 3;opacity:.9}
+.tnode use{color:var(--fg);pointer-events:none}.tnode.router.down use{color:var(--mut)}
+.tnode text{fill:var(--fg);font-size:12px;text-anchor:middle;pointer-events:none;paint-order:stroke;stroke:var(--bg);stroke-width:3px}.tnode text.sub{fill:var(--mut);font-size:10px}
+.tnode .badge{fill:var(--acc);stroke:var(--card);stroke-width:2}.tnode text.bt{fill:#fff;font-size:10px;font-weight:700;stroke:none}
+.tnode.client circle{fill:var(--mut);stroke:var(--card);stroke-width:2;transition:r .15s}.tnode.client.ok circle{fill:var(--ok)}.tnode.client.warn circle{fill:var(--warn)}.tnode.client.bad circle{fill:var(--bad)}
+.tnode.client:hover circle{r:10}
+.tlink{fill:none;stroke:color-mix(in srgb,var(--mut) 55%,transparent);stroke-linecap:round}.tlink.wifi{stroke-width:1;opacity:.6}
+.tlink.flow{stroke:color-mix(in srgb,var(--acc) 80%,var(--mut));stroke-dasharray:7 9;animation:tflow 1.4s linear infinite}.tlink.down{stroke:var(--bad);stroke-dasharray:3 7}.tlink.weak{display:none}
+@keyframes tflow{to{stroke-dashoffset:-32}}@media(prefers-reduced-motion:reduce){.tlink.flow{animation:none}}
+#tmap.hl .tnode:not(.on){opacity:.22}#tmap.hl .tlink:not(.on){opacity:.07}
+.tmleg{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-size:12px;color:var(--mut);align-items:center}
+</style>
+<div class="card" id="tview" data-v="map"><div class="row" style="justify-content:space-between;margin-bottom:10px"><h2 style="margin:0">{{ t('topo.title') }}</h2>
+<div class="vsw"><button type="button" data-v="map" onclick="topoView('map')">{{ t('topo.v_map') }}</button><button type="button" data-v="tree" onclick="topoView('tree')">{{ t('topo.v_tree') }}</button></div></div>
+{% if has %}<div id="tmapwrap"><svg id="tmap" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="{{ t('topo.title') }}"></svg>
+<div class="tctl"><button type="button" id="tzin" aria-label="+">+</button><button type="button" id="tzout" aria-label="-">−</button><button type="button" id="tfit" title="{{ t('topo.fit') }}">⤢</button><button type="button" id="treset" title="{{ t('topo.reset') }}">⟲</button></div><div id="ttip"></div></div>{% endif %}
 <div id="live-topo" data-live>
-{% if not topo.root or (not topo.root.children and not topo.orphans) %}<p class="mut">{{ t('topo.none') }}</p>{% else %}
+{% if not has %}<p class="mut">{{ t('topo.none') }}</p>{% else %}
 {% if not topo.has_nbr %}<p class="warn small">{{ t('topo.no_nbr') }}</p>{% endif %}
-<div class="tree"><ul>{{ tree(topo.root) }}</ul></div>
-{% if topo.orphans %}<h3 style="margin:18px 0 6px">{{ t('topo.orphans') }}</h3><div class="tree"><ul>{% for o in topo.orphans %}{{ tree(o) }}{% endfor %}</ul></div>{% endif %}
-<div class="pleg"><span><span class="qd ok"></span> {{ t('topo.leg_good') }}</span><span><span class="qd warn"></span> {{ t('topo.leg_mid') }}</span><span><span class="qd bad"></span> {{ t('topo.leg_bad') }}</span></div>
+<div class="ttreeview"><div class="tree"><ul>{{ tree(topo.root) }}</ul></div>
+{% if topo.orphans %}<h3 style="margin:18px 0 6px">{{ t('topo.orphans') }}</h3><div class="tree"><ul>{% for o in topo.orphans %}{{ tree(o) }}{% endfor %}</ul></div>{% endif %}</div>
+<script type="application/json" id="tgraph">{{ topo.graph|tojson }}</script>
+<div class="tmleg"><span><span class="qd ok"></span> {{ t('topo.leg_good') }}</span><span><span class="qd warn"></span> {{ t('topo.leg_mid') }}</span><span><span class="qd bad"></span> {{ t('topo.leg_bad') }}</span></div>
 {% endif %}</div>
 <p class="mut small" style="margin-top:12px">{{ t('topo.help') }}</p></div>
+{% if has %}<script>
+(function(){
+const NS='http://www.w3.org/2000/svg',svg=document.getElementById('tmap'),wrap=document.getElementById('tmapwrap'),tip=document.getElementById('ttip');
+const T={router:{{ t('topo.t_router')|tojson }},ap:{{ t('topo.t_ap')|tojson }},inet:{{ t('topo.internet')|tojson }},nbr:{{ t('topo.t_nbr')|tojson }},client:{{ t('topo.t_client')|tojson }},
+ up:{{ t('rt.online')|tojson }},down:{{ t('rt.offline')|tojson }},upg:{{ t('rt.upgrading')|tojson }},open:{{ t('topo.open')|tojson }},sig:{{ t('topo.signal')|tojson }}};
+let G={nodes:[],links:[],byId:{},parent:{}},S={k:1,x:0,y:0},sig='',pins={},hint='';
+try{pins=JSON.parse(localStorage.getItem('topoPins')||'{}')}catch(e){pins={}}
+const R=n=>n.type==='inet'?30:n.type==='router'?28:n.type==='nbr'?21:7;
+function el(tag,at,par){const e=document.createElementNS(NS,tag);for(const k in at)e.setAttribute(k,at[k]);if(par)par.appendChild(e);return e}
+function layout(iters,a0){const N=G.nodes;let a=a0;
+ for(let it=0;it<iters;it++){a=Math.max(0.03,a*0.985);
+  for(let i=0;i<N.length;i++){const p=N[i];for(let j=i+1;j<N.length;j++){const q=N[j];
+   let dx=q.x-p.x,dy=q.y-p.y,d2=dx*dx+dy*dy;if(d2<0.01){dx=Math.random()-.5;dy=Math.random()-.5;d2=dx*dx+dy*dy+.01}
+   const d=Math.sqrt(d2),cc=p.type==='client'||q.type==='client',rr=R(p)+R(q)+(p.type==='client'&&q.type==='client'?7:(cc?16:36));
+   let f=0;if(d<rr)f=(rr-d)*.5;if(d<420)f+=(cc?340:5400)*a/d;
+   const fx=dx/d*f,fy=dy/d*f;p.vx-=fx;p.vy-=fy;q.vx+=fx;q.vy+=fy}}
+  for(const l of G.links){const p=G.byId[l.s],q=G.byId[l.t];let dx=q.x-p.x,dy=q.y-p.y,d=Math.sqrt(dx*dx+dy*dy)||.01;
+   const L=l.weak?300:(l.wifi?44+Math.min(46,(p.nc||0)*1.6):(q.type==='nbr'?112:(p.type==='inet'?125:150)));
+   const f=(d-L)*(l.weak?.01:.1)*Math.max(a,.15),fx=dx/d*f,fy=dy/d*f;p.vx+=fx;p.vy+=fy;q.vx-=fx;q.vy-=fy}
+  for(const n of N){if(n.type!=='client'){n.vy+=(n.depth*160-n.y)*.11*a;n.vx-=n.x*.004*a}
+   if(n.pin){n.vx=n.vy=0;continue}n.x+=n.vx;n.y+=n.vy;n.vx*=.55;n.vy*=.55}}}
+function initPos(old){const rows={};G.nodes.forEach(n=>{if(n.type!=='client'&&n.type!=='nbr'){(rows[n.depth]=rows[n.depth]||[]).push(n)}});
+ const order=G.nodes.slice().sort((a,b)=>a.depth-b.depth);
+ for(const n of order){n.vx=n.vy=0;const o=old[n.id];
+  if(pins[n.id]){n.x=pins[n.id].x;n.y=pins[n.id].y;n.pin=true;continue}
+  if(o){n.x=o.x;n.y=o.y;continue}
+  const par=G.byId[G.parent[n.id]];
+  if(n.type==='client'||n.type==='nbr'||!par){
+   if(par&&n.type!=='router'){const sib=G.nodes.filter(m=>G.parent[m.id]===par.id),i=sib.indexOf(n),ang=(i/Math.max(1,sib.length))*6.283+(par.x>0?.3:1.2);
+    n.x=par.x+Math.cos(ang)*70;n.y=par.y+Math.sin(ang)*70}
+   else{const r=rows[n.depth]||[n],i=r.indexOf(n);n.x=(i-(r.length-1)/2)*170;n.y=n.depth*160}}
+  else{const r=rows[n.depth]||[n],i=r.indexOf(n);n.x=(i-(r.length-1)/2)*170+(Math.random()-.5)*10;n.y=n.depth*160}}}
+function fit(){const w=wrap.clientWidth,h=wrap.clientHeight;if(!w||!G.nodes.length)return;
+ let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;G.nodes.forEach(n=>{const r=R(n)+30;x0=Math.min(x0,n.x-r);x1=Math.max(x1,n.x+r);y0=Math.min(y0,n.y-r);y1=Math.max(y1,n.y+r+14)});
+ const k=Math.min(w/(x1-x0),h/(y1-y0),1.5);S={k,x:w/2-k*(x0+x1)/2,y:h/2-k*(y0+y1)/2};applyT()}
+function applyT(){const g=document.getElementById('tg');if(g)g.setAttribute('transform','translate('+S.x+','+S.y+') scale('+S.k+')')}
+function path(l){const p=G.byId[l.s],q=G.byId[l.t];if(l.wifi)return'M'+p.x+' '+p.y+'L'+q.x+' '+q.y;
+ const mx=(p.x+q.x)/2,my=(p.y+q.y)/2,dx=q.x-p.x,dy=q.y-p.y,o=.1;return'M'+p.x+' '+p.y+'Q'+(mx-dy*o)+' '+(my+dx*o)+' '+q.x+' '+q.y}
+function place(){G.links.forEach(l=>{if(l.el)l.el.setAttribute('d',path(l))});G.nodes.forEach(n=>{if(n.el)n.el.setAttribute('transform','translate('+n.x+','+n.y+')')})}
+function icon(n){return n.type==='inet'?'ic-globe':n.type==='nbr'?'ic-box':(n.ap?'ic-ap':'ic-router')}
+function draw(){svg.textContent='';const d=el('defs',{},svg);
+ d.innerHTML='<symbol id="ic-router" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="12" width="18" height="7" rx="2"/><path d="M7 15.5h.01M11 15.5h.01M8 12 6 5M16 12l2-7"/></symbol>'+
+ '<symbol id="ic-ap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 9.5a10 10 0 0 1 15 0M7.5 12.8a6 6 0 0 1 9 0"/><circle cx="12" cy="17" r="1.4" fill="currentColor"/></symbol>'+
+ '<symbol id="ic-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>'+
+ '<symbol id="ic-box" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="8" rx="1.6"/><path d="M7 12h.01M11 12h.01M15 12h.01"/></symbol>';
+ const root=el('g',{id:'tg'},svg),lg=el('g',{},root),ng=el('g',{},root);
+ for(const l of G.links){const q=G.byId[l.t],cl=['tlink'];if(l.wifi)cl.push('wifi');if(l.weak)cl.push('weak');if(l.down)cl.push('down');
+  const w=l.wifi?1:2+Math.min(4,Math.log10((l.bps||0)/1e5+1)*1.7);if(!l.wifi&&!l.down&&l.bps>2e4)cl.push('flow');
+  l.el=el('path',{class:cl.join(' '),'stroke-width':w},lg)}
+ for(const n of G.nodes){const g=el('g',{class:'tnode '+n.type+(n.status?' '+n.status:'')+(n.qc?' '+n.qc:'')},ng);n.el=g;g.dataset.id=n.id;
+  if(n.type==='client'){el('circle',{r:7},g)}
+  else{const r=R(n);el('circle',{class:'bg',r:r},g);el('use',{href:'#'+icon(n),x:-r*.55,y:-r*.55,width:r*1.1,height:r*1.1},g);
+   const t1=el('text',{y:r+15},g);t1.textContent=n.name;if(n.sub&&n.type!=='nbr'){const t2=el('text',{y:r+28,class:'sub'},g);t2.textContent=n.sub}
+   if(n.nc){el('circle',{class:'badge',cx:r*.72,cy:-r*.72,r:9},g);const b=el('text',{class:'bt',x:r*.72,y:-r*.72+3.5},g);b.textContent=n.nc}}
+  g.addEventListener('pointerenter',e=>{if(e.pointerType==='mouse')hover(n,e)});g.addEventListener('pointermove',e=>{if(e.pointerType==='mouse'&&!drag)moveTip(e)});
+  g.addEventListener('pointerleave',()=>{if(!drag)unhover()});g.addEventListener('pointerdown',e=>startDrag(e,n))}
+ place();applyT()}
+function line(par,t,c){const d=document.createElement('div');if(c)d.style.cssText=c;d.textContent=t;par.appendChild(d)}
+function hover(n,e){tip.textContent='';const b=document.createElement('b');b.textContent=n.name;tip.appendChild(b);
+ if(n.type==='router'){line(tip,(n.ap?T.ap:T.router)+(n.edge?' · WAN':''));if(n.sub)line(tip,n.sub);line(tip,T[n.status]);if(n.nc)line(tip,'Wi-Fi: '+n.nc);line(tip,'↗ '+T.open)}
+ else if(n.type==='client'){if(n.sub)line(tip,n.sub);if(n.ip)line(tip,n.ip);line(tip,n.mac);line(tip,T.sig+': '+(n.signal==null?'-':n.signal+' dBm')+' · '+n.q);if(n.iface)line(tip,n.iface)}
+ else if(n.type==='nbr'){line(tip,T.nbr);if(n.sub)line(tip,n.sub);if(n.ip)line(tip,n.ip)}else line(tip,T.inet);
+ tip.style.display='block';moveTip(e);
+ svg.classList.add('hl');const on=new Set([n.id]);G.links.forEach(l=>{if(l.s===n.id||l.t===n.id){on.add(l.s);on.add(l.t);l.el.classList.add('on')}});G.nodes.forEach(m=>{if(on.has(m.id))m.el.classList.add('on')})}
+function moveTip(e){const r=wrap.getBoundingClientRect();let x=e.clientX-r.left+14,y=e.clientY-r.top+14;if(x+tip.offsetWidth>r.width)x=e.clientX-r.left-tip.offsetWidth-10;if(y+tip.offsetHeight>r.height)y=r.height-tip.offsetHeight-6;tip.style.left=x+'px';tip.style.top=y+'px'}
+function unhover(){tip.style.display='none';svg.classList.remove('hl');svg.querySelectorAll('.on').forEach(e=>e.classList.remove('on'))}
+let drag=null,pts=new Map(),pinch=0,tapId='';
+function world(e){const r=svg.getBoundingClientRect();return{x:(e.clientX-r.left-S.x)/S.k,y:(e.clientY-r.top-S.y)/S.k}}
+function startDrag(e,n){e.stopPropagation();pts.clear();drag={n,sx:e.clientX,sy:e.clientY,moved:false,touch:e.pointerType!=='mouse'};svg.setPointerCapture(e.pointerId)}
+svg.addEventListener('pointerdown',e=>{pts.set(e.pointerId,{x:e.clientX,y:e.clientY});if(!drag){svg.classList.add('pan');svg.setPointerCapture(e.pointerId);if(pts.size===2){const a=[...pts.values()];pinch=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y)}}});
+svg.addEventListener('pointermove',e=>{
+ if(drag){if(Math.hypot(e.clientX-drag.sx,e.clientY-drag.sy)>4)drag.moved=true;if(drag.moved){const w=world(e),n=drag.n;n.x=w.x;n.y=w.y;n.pin=true;unhover();layout(6,.12);place()}return}
+ const p=pts.get(e.pointerId);if(!p)return;
+ if(pts.size===2){pts.set(e.pointerId,{x:e.clientX,y:e.clientY});const a=[...pts.values()],d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);if(pinch){zoomAt((a[0].x+a[1].x)/2,(a[0].y+a[1].y)/2,d/pinch)}pinch=d;return}
+ S.x+=e.clientX-p.x;S.y+=e.clientY-p.y;pts.set(e.pointerId,{x:e.clientX,y:e.clientY});applyT()});
+function endPtr(e){pts.delete(e.pointerId);pinch=0;svg.classList.remove('pan');
+ if(drag){const n=drag.n;if(drag.moved){pins[n.id]={x:n.x,y:n.y};try{localStorage.setItem('topoPins',JSON.stringify(pins))}catch(x){}}
+  else if(n.type==='router'&&(!drag.touch||tapId===n.id)){location.href='/routers/'+n.rid}
+  else if(drag.touch){tapId=n.id;hover(n,e);setTimeout(()=>{if(tapId===n.id)tapId=''},3500)}
+  drag=null}}
+svg.addEventListener('pointerup',endPtr);svg.addEventListener('pointercancel',endPtr);
+svg.addEventListener('click',e=>{if(!e.target.closest('.tnode')){unhover();tapId=''}});
+function zoomAt(cx,cy,f){const r=svg.getBoundingClientRect(),px=cx-r.left,py=cy-r.top,k=Math.max(.25,Math.min(3,S.k*f)),r2=k/S.k;S.x=px-(px-S.x)*r2;S.y=py-(py-S.y)*r2;S.k=k;applyT()}
+svg.addEventListener('wheel',e=>{e.preventDefault();zoomAt(e.clientX,e.clientY,e.deltaY<0?1.12:1/1.12)},{passive:false});
+function ctr(){const r=svg.getBoundingClientRect();return[r.left+r.width/2,r.top+r.height/2]}
+document.getElementById('tzin').onclick=()=>{const c=ctr();zoomAt(c[0],c[1],1.25)};document.getElementById('tzout').onclick=()=>{const c=ctr();zoomAt(c[0],c[1],.8)};
+document.getElementById('tfit').onclick=fit;
+document.getElementById('treset').onclick=()=>{pins={};try{localStorage.removeItem('topoPins')}catch(e){}const g=G;sig='';apply({nodes:g.nodes.map(n=>{const c=Object.assign({},n);delete c.x;delete c.y;delete c.pin;delete c.el;return c}),links:g.links.map(l=>{const c=Object.assign({},l);delete c.el;return c})},true)};
+function apply(g,reset){const old=reset?{}:G.byId,first=!Object.keys(old).length;
+ const nodes=g.nodes,byId={},parent={};nodes.forEach(n=>byId[n.id]=n);g.links.forEach(l=>{if(!(l.t in parent))parent[l.t]=l.s});
+ const s2=nodes.map(n=>n.id).join(',')+'|'+g.links.map(l=>l.s+'>'+l.t).join(',');
+ G={nodes,links:g.links,byId,parent};const same=s2===sig&&!reset;sig=s2;
+ if(same){nodes.forEach(n=>{const o=old[n.id];if(o){n.x=o.x;n.y=o.y;n.pin=o.pin}})}
+ else{initPos(old);layout(first?460:140,first?1:.4)}
+ draw();if(first||reset)fit()}
+function load(){let g;try{g=JSON.parse(document.getElementById('tgraph').textContent)}catch(e){return}apply(g,false)}
+window.topoView=function(v){document.getElementById('tview').dataset.v=v;try{localStorage.setItem('topoView',v)}catch(e){}if(v==='map')setTimeout(fit,0)};
+const old=window.afterLive;window.afterLive=function(){if(old)old();load()};
+let v0='map';try{v0=localStorage.getItem('topoView')||'map'}catch(e){}document.getElementById('tview').dataset.v=v0;
+load();if(v0==='map')setTimeout(fit,0);window.addEventListener('resize',()=>{if(document.getElementById('tview').dataset.v==='map')fit()});
+})();</script>{% endif %}
 {% endblock %}
