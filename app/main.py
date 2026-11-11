@@ -105,6 +105,17 @@ _SEEN = set()          # id routerów, które przysłały pomiar od startu aplik
 _INTERVAL_S = [60]     # interwał monitoringu z ustawień (odświeżany w interval())
 _OFFLINE_MULT = [1.5]  # mnożnik czasu "brak odpowiedzi" dający próg offline (odświeżany w interval())
 _THR = {}              # id routera -> {"nr": własny próg "brak odpowiedzi" (s) albo None, "off": własny próg offline albo None}
+# Aktualizacja RouterOS: po stanie pobierania z postępem ("Downloaded 94%") router zaraz się zrestartuje. Przez UPG_WINDOW sekund taki
+# router, gdy zamilknie, ma status "trwa aktualizacja" (zamiast offline), a zamiast alertu "brak łączności" idzie jedno powiadomienie.
+UPG_WINDOW = 900
+_UPG_PENDING = {}      # id routera -> {"ts": czas ostatniego stanu pobierania, "to": wersja docelowa, "from": wersja przed}
+_VER_EVENTS = []       # zmiany wersji RouterOS wykryte przy zapisie pomiaru: {"rid", "name", "from", "to"} (czekają na powiadomienie)
+_UPG_RX = re.compile(r"^(Downloading|Installing)|^Downloaded\s+\d+\s*%", re.I)
+
+
+def upgrade_pending(rid):
+    p = _UPG_PENDING.get(rid)
+    return bool(p and time.time() - p["ts"] < UPG_WINDOW)
 
 
 def reporting_gap(rid):
@@ -185,6 +196,11 @@ class Router(Base):
     @property
     def online(self):
         return bool(self.last_seen) and (now() - self.last_seen).total_seconds() < online_after(self.id)
+
+    @property
+    def upgrading(self):
+        """Router milczy po tym, jak zgłosił pobieranie aktualizacji RouterOS (niebieski status „trwa aktualizacja”)."""
+        return bool(self.last_seen) and upgrade_pending(self.id) and (now() - self.last_seen).total_seconds() >= no_response_after(self.id)
 
     @property
     def no_response(self):
@@ -1178,6 +1194,10 @@ def store_upgrade(t, raw):
             raise HTTPException(400, "bad body")  # uszkodzone zapytanie nie nadpisuje ostatniego znanego stanu
         st, iv, lv = (str(d.get(k, ""))[:80] for k in ("st", "iv", "lv"))
         _UPG[r.id] = {"st": st, "iv": iv, "lv": lv, "ts": time.time()}
+        if _UPG_RX.search(st):
+            _UPG_PENDING[r.id] = {"ts": time.time(), "to": lv, "from": iv}
+        elif st.lower().startswith("system is already up to date") or "new version is available" in st.lower():
+            _UPG_PENDING.pop(r.id, None)
         print("router update status: %s: %r (installed %s, latest %s)" % (r.name, st, iv or "?", lv or "?"), flush=True)
         return {"ok": True}
 
@@ -1317,6 +1337,10 @@ def _store_metrics(s, t, raw, ip=None, cv=0):
                  conns=None if conns is None else int(conns), rx=None if w[0] is None else int(w[0]),
                  tx=None if w[1] is None else int(w[1]), rx_bps=w[2], tx_bps=w[3],
                  dhcp=None if dhcp is None else int(dhcp), **nw_metrics(r, d)))
+    old_v, new_v = (r.ver or "").split(" ")[0], str(d.get("ver", ""))[:40].split(" ")[0]
+    if old_v and new_v and old_v != new_v:  # zmiana wersji RouterOS (kanał w nawiasie, np. "(stable)", nie jest częścią wersji)
+        _VER_EVENTS.append({"rid": r.id, "name": r.name, "from": old_v, "to": new_v})
+        _UPG_PENDING.pop(r.id, None)
     r.ident, r.ver, r.uptime = str(d.get("id", ""))[:80], str(d.get("ver", ""))[:40], str(d.get("up", ""))[:40]
     _SEEN.add(r.id)
     if r.last_seen:  # zapamiętujemy rzeczywisty odstęp między pomiarami (dłuższe przerwy to awarie, nie rytm routera)
@@ -1813,6 +1837,25 @@ def _mins(a, b):
     return max(1, int((b - a).total_seconds() // 60))
 
 
+def _send_event(cfg, ek, ev):
+    """Wysyła jedno zdarzenie. Po błędzie ustawia przerwę (15, 30, 60, 120 s) tylko dla tego zdarzenia. Zwraca True, gdy wysłano."""
+    if time.time() < _NOTIF_NEXT.get(ek, 0):
+        return False  # to zdarzenie czeka na ponowienie po błędzie; pozostałe idą normalnie
+    errs = notify.dispatch(cfg, ev)
+    if errs:
+        fails = _NOTIF_FAILS[ek] = _NOTIF_FAILS.get(ek, 0) + 1
+        wait = min(120, 15 * 2 ** (fails - 1))
+        _NOTIF_NEXT[ek] = time.time() + wait
+        _NOTIF_STATS.update(error="; ".join(errs), error_ts=time.time())
+        print("notify: sending %s failed (%s), retry in %d s" % (ev["kind"], "; ".join(errs), wait), flush=True)
+        return False
+    _NOTIF_FAILS.pop(ek, None)
+    _NOTIF_NEXT.pop(ek, None)
+    _NOTIF_STATS["sent"] += 1
+    print("notify: sent %s: %s" % (ev["kind"], ev["message"]), flush=True)
+    return True
+
+
 def notify_check():
     """Co 15 s: sprawdza routery, internet i kopie i wysyła powiadomienie przy zmianie stanu (jedno na zdarzenie).
     Błąd wysyłki jednego zdarzenia nie wstrzymuje pozostałych: to zdarzenie jest ponawiane po krótkiej, rosnącej przerwie."""
@@ -1820,6 +1863,7 @@ def notify_check():
     with Session(engine) as s:
         cfg = notif_cfg(s)
         if not cfg["on"]:
+            _VER_EVENTS.clear()
             return
         state = _notif_state(s)
         before = json.dumps(state, sort_keys=True)
@@ -1832,12 +1876,24 @@ def notify_check():
                 continue
             gap = (now() - r.last_seen).total_seconds()
             k, st = "router:%d" % r.id, state.get("router:%d" % r.id)
-            if cfg["r_offline"] and (not warmup or r.id in _SEEN) and gap >= cfg["offline_min"] * 60 and not st:
+            upg = r.upgrading  # router zgłosił pobieranie aktualizacji RouterOS i zamilkł (restart po aktualizacji)
+            if cfg["r_offline"] and not st and upg:
+                to = _UPG_PENDING.get(r.id, {}).get("to") or "?"
+                events.append((k, {"t": r.last_seen.isoformat(timespec="seconds"), "upg": 1},
+                               notif_event(cfg, "router_upgrading", "info", "upgrading", r.name, name=r.name, to=to)))
+            elif cfg["r_offline"] and (not warmup or r.id in _SEEN) and gap >= cfg["offline_min"] * 60 and not st:
                 events.append((k, {"t": r.last_seen.isoformat(timespec="seconds")},
+                               notif_event(cfg, "router_offline", "critical", "offline", r.name, name=r.name, min=int(gap // 60))))
+            elif st and st.get("upg") and not r.online and not upg:
+                # aktualizacja trwa dłużej niż UPG_WINDOW: nie maskujemy awarii, wraca zwykły alert „brak łączności”
+                events.append((k, {"t": st.get("t") or r.last_seen.isoformat(timespec="seconds")},
                                notif_event(cfg, "router_offline", "critical", "offline", r.name, name=r.name, min=int(gap // 60))))
             elif r.online and st:
                 since = dt.datetime.fromisoformat(st["t"]) if st.get("t") else r.last_seen
-                events.append((k, None, notif_event(cfg, "router_online", "info", "online", r.name, name=r.name, min=_mins(since, now()))))
+                if st.get("upg") and any(v["rid"] == r.id for v in _VER_EVENTS):
+                    events.append((k, None, None))  # wróciła po aktualizacji: powiadomienie „zaktualizowany” wyśle zdarzenie zmiany wersji
+                else:
+                    events.append((k, None, notif_event(cfg, "router_online", "info", "online", r.name, name=r.name, min=_mins(since, now()))))
             if cfg["r_inet"] and r.edge and r.online:
                 ik = "inet:%d" % r.id
                 ist = state.get(ik)
@@ -1873,26 +1929,28 @@ def notify_check():
             events.append((None, None, notif_event(cfg, "auto_ban", "warning", "ban", n=_PENDING_BANS["n"], h=_PENDING_BANS["h"])))
         for key, new, ev in events:
             ek = key or "ban"
-            if time.time() < _NOTIF_NEXT.get(ek, 0):
-                continue  # to zdarzenie czeka na ponowienie po błędzie; pozostałe idą normalnie
-            errs = notify.dispatch(cfg, ev)
-            if errs:
-                fails = _NOTIF_FAILS[ek] = _NOTIF_FAILS.get(ek, 0) + 1
-                wait = min(120, 15 * 2 ** (fails - 1))
-                _NOTIF_NEXT[ek] = time.time() + wait
-                _NOTIF_STATS.update(error="; ".join(errs), error_ts=time.time())
-                print("notify: sending %s failed (%s), retry in %d s" % (ev["kind"], "; ".join(errs), wait), flush=True)
+            if ev is None:  # tylko zmiana stanu, bez powiadomienia
+                if new is None:
+                    state.pop(key, None)
+                else:
+                    state[key] = new
                 continue
-            _NOTIF_FAILS.pop(ek, None)
-            _NOTIF_NEXT.pop(ek, None)
-            _NOTIF_STATS["sent"] += 1
-            print("notify: sent %s: %s" % (ev["kind"], ev["message"]), flush=True)
+            if not _send_event(cfg, ek, ev):
+                continue
             if key is None:
                 _PENDING_BANS.update(n=0, sent=time.time())
             elif new is None:
                 state.pop(key, None)
             else:
                 state[key] = new
+        if cfg["r_offline"]:  # zmiany wersji RouterOS (aktualizacja albo downgrade): jedno powiadomienie na zdarzenie
+            for ve in list(_VER_EVENTS):
+                ev = notif_event(cfg, "router_updated", "info", "updated", ve["name"], name=ve["name"], a=ve["from"], b=ve["to"])
+                if _send_event(cfg, "ver:%d:%s" % (ve["rid"], ve["to"]), ev):
+                    _VER_EVENTS.remove(ve)
+        else:
+            _VER_EVENTS.clear()
+        del _VER_EVENTS[:-50]
         if json.dumps(state, sort_keys=True) != before:
             sset(s, "notif_state", json.dumps(state))
             s.commit()
@@ -3223,6 +3281,14 @@ def _reboot(m, tp):
             "advice": tr("an.074"), "det": {}}
 
 
+def _reboot_upgrade(m, tp):
+    return {"id": "reboot_upgrade", "level": "info", "title": tr("an.190"), "explain": tr("an.191"), "advice": tr("an.192"), "det": {}}
+
+
+def _pkg_channel(m, tp):
+    return {"id": "pkg_channel", "level": "info", "title": tr("an.197"), "explain": tr("an.198"), "advice": "", "det": {}}
+
+
 def _script_fail(m, tp):
     txt = m.group(0).lower()
     if "502" in txt or "bad gateway" in txt:
@@ -3424,6 +3490,7 @@ def _pkg(m, tp):
 
 LOG_RULES = [
     (_r(r"\\; ?\\n|\\5B|on-error=\{\}|\$send u=\$url|\$buf \.|\[:len \\?\$buf\]"), _script_fragment),
+    (_r(r"rebooted by .*upgrade"), _reboot_upgrade),  # przed ogólną regułą „zmiana przez klienta/użytkownika”, która by ją przechwyciła
     (_r(r"^(?P<what>.+?) by (?P<client>[^\s:]+):(?P<user>[^@\s]+)@(?P<addr>[0-9a-f:.]+?)/(?P<path>\S*)(?:\s+\((?P<cmd>.*)\))?\s*$"), _cfg_by),
     (_r(r"(?:download from|upload to) (?P<host>\S+) (?P<res>finished|failed)"), _fetch),
     (_r(r"bad command name (?P<cmd>\S+) \(line (?P<line>\d+) column (?P<col>\d+)\)"), _bad_cmd),
@@ -3439,6 +3506,7 @@ LOG_RULES = [
     (_r(r"user (?P<user>\S+) logged in from (?P<ip>[0-9a-f.:]+) via (?P<svc>[\w-]+)"), _login_ok),
     (_r(r"user (?P<user>\S+) logged out from (?P<ip>[0-9a-f.:]+) via (?P<svc>[\w-]+)"), _logout),
     (_r(r"rebooted without proper shutdown|unexpected (reboot|shutdown)|kernel failure|watchdog"), _reboot_bad),
+    (_r(r"package channel changed"), _pkg_channel),
     (_r(r"router rebooted|system rebooted|rebooted by"), _reboot),
     (_r(r"out of memory|memory (is )?low"), _memory),
     (_r(r"(?P<iface>\S+?):? excessive (broadcasts|multicasts)|loop detected|probably a loop"), _loop),
@@ -3886,6 +3954,8 @@ def _diag_routers(s):
             p.append("firmware " + si["fw"])
         p.append("online" if r.online else "offline")
         p.append("last contact %s ago" % _age((now() - r.last_seen).total_seconds()) if r.last_seen else "never contacted")
+        if upgrade_pending(r.id):
+            p.append("RouterOS update in progress (restart expected)")
         u = _UPG.get(r.id)
         if u:
             p.append("RouterOS update status %r (%s ago)" % (u["st"][:60], _age(time.time() - u["ts"])))
