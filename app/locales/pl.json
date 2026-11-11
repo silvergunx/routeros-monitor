@@ -874,5 +874,8 @@
   "topo.failed_known": "Urządzenie z DHCP: najpewniej ma zapisane błędne lub stare hasło Wi-Fi.",
   "topo.failed_unknown": "Nieznane urządzenie (nie ma go w DHCP): obca próba połączenia albo błędne hasło. Sprawdź, czyje to urządzenie.",
   "topo.leg_failed": "próbuje się połączyć, ale nie może",
-  "topo.leg_wifi": "połączenie Wi-Fi urządzenia"
+  "topo.leg_wifi": "połączenie Wi-Fi urządzenia",
+  "topo.wired_h": "Kabel: {n}",
+  "topo.port": "Port",
+  "topo.leg_wired": "połączenie kablowe"
 }

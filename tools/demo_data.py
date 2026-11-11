@@ -185,6 +185,12 @@ def build(s):
         for k, (port, ident, board, ip) in enumerate(nl_):
             m = "48:A9:8A:%02X:%02X:%02X" % (ri, k, 7)
             inv(rs[ri], "nbr", m + "|" + port, dict(mac=m, id=ident, ip=ip, pl="MikroTik" if board else "", bd=board, **{"if": port}))
+    # urządzenia na kablu (tabela hostów bridge): 7 na Masterze i jedno na AP
+    wired_idx = [i for i, d in enumerate(DEVICES) if not d[3]]
+    for k, i in enumerate(wired_idx[:7]):
+        inv(rs[0], "brh", mac(i + 1), {"if": "ether%d" % (3 + k % 4)})
+    if len(wired_idx) > 7:
+        inv(rs[1], "brh", mac(wired_idx[7] + 1), {"if": "ether2"})
     for ri, plist in PORTS.items():
         for n, run, dis, rate, dup, br, cm in plist:
             inv(rs[ri], "eth", n, dict(run=run, dis=dis, rate=rate, dup=dup, ld="0", br=br, cm=cm))

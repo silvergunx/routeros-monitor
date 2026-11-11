@@ -4,7 +4,7 @@
 {% macro tree(n) %}<li>{% if n.type == 'inet' %}<div class="tn tinet">🌐 {{ t('topo.internet') }}</div>
 {% elif n.type == 'router' %}<a class="tn trt {{ 'tdown' if not n.online and not n.upg }}" href="/routers/{{n.id}}"><b>{{n.name}}</b><span class="mut small">{{n.model or ''}}</span>
 <span class="small">{% if n.upg %}<span class="warn">{{ t('rt.upgrading') }}</span>{% elif n.online %}<span class="ok">{{ t('rt.online') }}</span>{% else %}<span class="bad">{{ t('rt.offline') }}</span>{% endif %}{% if n.manager %} · CAPsMAN{% endif %}</span>
-{% if n.up_port or n.parent_port %}<span class="mut small">{{ n.parent_port or '?' }} ⇄ {{ n.up_port or '?' }}</span>{% endif %}</a>{{ clients(n) }}{% if n.failed %}<div class="tcl tfail"><span class="bad">⚠ {{ t('topo.failed_h', n=n.failed|length) }}</span>{% for f in n.failed %}<div class="tc" title="{{f.mac}}"><span class="qd bad"></span><span class="tcn">{{f.name}}</span><span class="mut tcs">×{{f.tries}}</span></div>{% endfor %}</div>{% endif %}
+{% if n.up_port or n.parent_port %}<span class="mut small">{{ n.parent_port or '?' }} ⇄ {{ n.up_port or '?' }}</span>{% endif %}</a>{{ clients(n) }}{% if n.wired %}<details class="tcl" {{ 'open' if n.wired|length <= 8 }}><summary>{{ t('topo.wired_h', n=n.wired|length) }}</summary>{% for w in n.wired %}<div class="tc" title="{{w.mac}}{% if w.ip %} · {{w.ip}}{% endif %} · {{w.port}}"><span class="qd"></span><span class="tcn">{{w.name}}</span><span class="mut tcs">{{w.port}}</span></div>{% endfor %}</details>{% endif %}{% if n.failed %}<div class="tcl tfail"><span class="bad">⚠ {{ t('topo.failed_h', n=n.failed|length) }}</span>{% for f in n.failed %}<div class="tc" title="{{f.mac}}"><span class="qd bad"></span><span class="tcn">{{f.name}}</span><span class="mut tcs">×{{f.tries}}</span></div>{% endfor %}</div>{% endif %}
 {% else %}<div class="tn tnbr"><b>{{n.name}}</b><span class="mut small">{{n.model}}</span><span class="mut small">{{n.port}}{% if n.ip %} · {{n.ip}}{% endif %}</span></div>{% endif %}
 {% if n.children %}<ul>{% for c in n.children %}{{ tree(c) }}{% endfor %}</ul>{% endif %}</li>{% endmacro %}
 {% set has = topo.root and (topo.root.children or topo.orphans) %}
@@ -29,7 +29,7 @@
 .tlink{fill:none;stroke:color-mix(in srgb,var(--mut) 55%,transparent);stroke-linecap:round}.tlink.wifi{stroke:var(--acc);stroke-width:1.5;stroke-dasharray:2 6;opacity:.85;animation:tflow 1.8s linear infinite}
 .tlink.flow{stroke:color-mix(in srgb,var(--acc) 80%,var(--mut));stroke-dasharray:7 9;animation:tflow 1.4s linear infinite}.tlink.down{stroke:var(--bad);stroke-dasharray:3 7}.tnode.failed circle.bg{stroke:var(--bad);stroke-dasharray:3 3;animation:tpulse 1.6s ease-in-out infinite}.tnode .fb{fill:var(--bad);stroke:var(--card);stroke-width:2}.tnode text.fbt{fill:#fff;font-size:10px;font-weight:700;stroke:none}
 .tlink.failed{stroke:var(--bad);stroke-dasharray:2 6;opacity:.85;animation:tflow 1.8s linear infinite}@keyframes tpulse{50%{opacity:.45}}
-.tlink.weak{display:none}.tlink.vpn{stroke:var(--ok);stroke-width:5px;stroke-dasharray:16 7;animation:tflow 1.3s linear infinite;filter:drop-shadow(0 0 5px color-mix(in srgb,var(--ok) 65%,transparent))}.tlink.vpn.down{stroke:var(--mut);stroke-width:2px;stroke-dasharray:3 7;animation:none;filter:none;opacity:.6}
+.tlink.wired{stroke:color-mix(in srgb,var(--fg) 45%,transparent);stroke-width:1.7;opacity:.8}.tlink.weak{display:none}.tlink.vpn{stroke:var(--ok);stroke-width:5px;stroke-dasharray:16 7;animation:tflow 1.3s linear infinite;filter:drop-shadow(0 0 5px color-mix(in srgb,var(--ok) 65%,transparent))}.tlink.vpn.down{stroke:var(--mut);stroke-width:2px;stroke-dasharray:3 7;animation:none;filter:none;opacity:.6}
 @keyframes tflow{to{stroke-dashoffset:-32}}@media(prefers-reduced-motion:reduce){.tlink.flow,.tlink.vpn,.tlink.wifi,.tlink.failed,.tnode.failed circle.bg{animation:none}}
 #tmap.hl .tnode:not(.on){opacity:.22}#tmap.hl .tlink:not(.on){opacity:.07}
 .tmleg{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-size:12px;color:var(--mut);align-items:center}
@@ -44,14 +44,14 @@
 <div class="ttreeview"><div class="tree"><ul>{{ tree(topo.root) }}</ul></div>
 {% if topo.orphans %}<h3 style="margin:18px 0 6px">{{ t('topo.orphans') }}</h3><div class="tree"><ul>{% for o in topo.orphans %}{{ tree(o) }}{% endfor %}</ul></div>{% endif %}</div>
 <script type="application/json" id="tgraph">{{ topo.graph|tojson }}</script>
-<div class="tmleg"><span><svg width="26" height="8"><path d="M1 4h24" class="tlink flow" stroke-width="3"/></svg> {{ t('topo.leg_flow') }}</span><span><svg width="26" height="8"><path d="M1 4h24" class="tlink wifi"/></svg> {{ t('topo.leg_wifi') }}</span><span><svg width="30" height="10"><path d="M1 5h28" class="tlink vpn" /></svg> {{ t('topo.leg_vpn') }}</span><span><span class="qd ok"></span> {{ t('topo.leg_good') }}</span><span><span class="qd bad" style="outline:2px dotted var(--bad);outline-offset:1px;background:none"></span> {{ t('topo.leg_failed') }}</span><span><span class="qd warn"></span> {{ t('topo.leg_mid') }}</span><span><span class="qd bad"></span> {{ t('topo.leg_bad') }}</span></div>
+<div class="tmleg"><span><svg width="26" height="8"><path d="M1 4h24" class="tlink flow" stroke-width="3"/></svg> {{ t('topo.leg_flow') }}</span><span><svg width="26" height="8"><path d="M1 4h24" class="tlink wifi"/></svg> {{ t('topo.leg_wifi') }}</span><span><svg width="26" height="8"><path d="M1 4h24" class="tlink wired"/></svg> {{ t('topo.leg_wired') }}</span><span><svg width="30" height="10"><path d="M1 5h28" class="tlink vpn" /></svg> {{ t('topo.leg_vpn') }}</span><span><span class="qd ok"></span> {{ t('topo.leg_good') }}</span><span><span class="qd bad" style="outline:2px dotted var(--bad);outline-offset:1px;background:none"></span> {{ t('topo.leg_failed') }}</span><span><span class="qd warn"></span> {{ t('topo.leg_mid') }}</span><span><span class="qd bad"></span> {{ t('topo.leg_bad') }}</span></div>
 {% endif %}</div>
 <p class="mut small" style="margin-top:12px">{{ t('topo.help') }}</p></div>
 {% if has %}<script>
 (function(){
 const NS='http://www.w3.org/2000/svg',svg=document.getElementById('tmap'),wrap=document.getElementById('tmapwrap'),tip=document.getElementById('ttip');
 const T={router:{{ t('topo.t_router')|tojson }},ap:{{ t('topo.t_ap')|tojson }},inet:{{ t('topo.internet')|tojson }},nbr:{{ t('topo.t_nbr')|tojson }},client:{{ t('topo.t_client')|tojson }},
- up:{{ t('rt.online')|tojson }},down:{{ t('rt.offline')|tojson }},upg:{{ t('rt.upgrading')|tojson }},open:{{ t('topo.open')|tojson }},sig:{{ t('topo.signal')|tojson }},ftries:{{ t('topo.failed_tries')|tojson }},fknown:{{ t('topo.failed_known')|tojson }},funknown:{{ t('topo.failed_unknown')|tojson }},kind:{{ {'phone':t('topo.k_phone'),'tablet':t('topo.k_tablet'),'laptop':t('topo.k_laptop'),'tv':t('topo.k_tv'),'printer':t('topo.k_printer'),'camera':t('topo.k_camera'),'iot':t('topo.k_iot'),'server':t('topo.k_server'),'other':t('topo.t_client')}|tojson }}};
+ up:{{ t('rt.online')|tojson }},down:{{ t('rt.offline')|tojson }},upg:{{ t('rt.upgrading')|tojson }},open:{{ t('topo.open')|tojson }},sig:{{ t('topo.signal')|tojson }},port:{{ t('topo.port')|tojson }},ftries:{{ t('topo.failed_tries')|tojson }},fknown:{{ t('topo.failed_known')|tojson }},funknown:{{ t('topo.failed_unknown')|tojson }},kind:{{ {'phone':t('topo.k_phone'),'tablet':t('topo.k_tablet'),'laptop':t('topo.k_laptop'),'tv':t('topo.k_tv'),'printer':t('topo.k_printer'),'camera':t('topo.k_camera'),'iot':t('topo.k_iot'),'server':t('topo.k_server'),'other':t('topo.t_client')}|tojson }}};
 let G={nodes:[],links:[],byId:{},parent:{}},S={k:1,x:0,y:0},sig='',pins={},hint='';
 try{pins=JSON.parse(localStorage.getItem('topoPins')||'{}')}catch(e){pins={}}
 const R=n=>n.type==='inet'?52:n.type==='router'?28:n.type==='nbr'?21:13;
@@ -66,7 +66,7 @@ function layout(iters,a0){const N=G.nodes;let a=a0;
    let f=0;if(d<rr)f=(rr-d)*.5;if(d<420)f+=(cc?340:5400)*a/d;
    const fx=dx/d*f,fy=dy/d*f;p.vx-=fx;p.vy-=fy;q.vx+=fx;q.vy+=fy}}
   for(const l of G.links){const p=G.byId[l.s],q=G.byId[l.t];let dx=q.x-p.x,dy=q.y-p.y,d=Math.sqrt(dx*dx+dy*dy)||.01;
-   if(l.vpn)continue;const L=l.wifi?wl(q,p):(q.type==='nbr'?112:(p.type==='inet'?160:150));
+   if(l.vpn)continue;const L=l.wifi?wl(q,p):l.wired?(62+Math.min(26,(p.nw||0)*1.2)):(q.type==='nbr'?112:(p.type==='inet'?160:150));
    const f=(d-L)*.1*Math.max(a,.15),fx=dx/d*f,fy=dy/d*f;p.vx+=fx;p.vy+=fy;q.vx-=fx;q.vy-=fy}
   for(const l of G.links){if(l.vpn||l.weak)continue;const p=G.byId[l.s],q=G.byId[l.t],ex=q.x-p.x,ey=q.y-p.y,e2=ex*ex+ey*ey||1;
    for(const n of N){if(n===p||n===q||n.pin)continue;let u=((n.x-p.x)*ex+(n.y-p.y)*ey)/e2;if(u<-.05||u>1.05)continue;u=Math.max(0,Math.min(1,u));
@@ -96,7 +96,7 @@ function vpath(p,q){const i=G.byId.inet;if(!i)return'M'+p.x+' '+p.y+'L'+q.x+' '+
  const ea=side(p),eb=side(q);let dl=eb.a-ea.a;while(dl>Math.PI)dl-=2*Math.PI;while(dl<=-Math.PI)dl+=2*Math.PI;
  const cu=(x,e)=>{const mx=(x.x+e.x)/2,my=(x.y+e.y)/2,l=Math.hypot(e.x-x.x,e.y-x.y);return(mx+sx*l*.07)+' '+(my+sy*l*.07)};
  return'M'+p.x+' '+p.y+'Q'+cu(p,ea)+' '+ea.x+' '+ea.y+'A'+rr+' '+rr+' 0 0 '+(dl>=0?1:0)+' '+eb.x+' '+eb.y+'Q'+cu(q,eb)+' '+q.x+' '+q.y}
-function path(l){const p=G.byId[l.s],q=G.byId[l.t];if(l.wifi)return'M'+p.x+' '+p.y+'L'+q.x+' '+q.y;if(l.vpn)return vpath(p,q);
+function path(l){const p=G.byId[l.s],q=G.byId[l.t];if(l.wifi||l.wired)return'M'+p.x+' '+p.y+'L'+q.x+' '+q.y;if(l.vpn)return vpath(p,q);
  if(p.type==='inet'||q.type==='inet')return'M'+p.x+' '+p.y+'L'+q.x+' '+q.y;
  const dx=q.x-p.x,dy=q.y-p.y,mx=(p.x+q.x)/2,my=(p.y+q.y)/2,o=.1;return'M'+p.x+' '+p.y+'Q'+(mx-dy*o)+' '+(my+dx*o)+' '+q.x+' '+q.y}
 function place(){G.links.forEach(l=>{if(l.el)l.el.setAttribute('d',path(l))});G.nodes.forEach(n=>{if(n.el)n.el.setAttribute('transform','translate('+n.x+','+n.y+')')})}
@@ -132,9 +132,9 @@ function draw(){svg.textContent='';const d=el('defs',{},svg);
  '<symbol id="ic-box" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="8" rx="1.6"/><path d="M7 12h.01M11 12h.01M15 12h.01"/></symbol>';
  const root=el('g',{id:'tg'},svg),lg=el('g',{},root),ng=el('g',{},root);
  for(const l of G.links){const q=G.byId[l.t],cl=['tlink'];if(l.wifi)cl.push('wifi');if(l.weak)cl.push('weak');if(l.down)cl.push('down');
-  const w=l.wifi?1:(l.vpn?5:1.1+Math.min(2.1,Math.log10((l.bps||0)/1e5+1)*.9));if(!l.wifi&&!l.down&&!l.vpn&&l.bps>2e4)cl.push('flow');if(l.vpn){cl.push('vpn');if(!l.up)cl.push('down')}if(l.failed)cl.push('failed');
+  const w=l.wifi?1:(l.vpn?5:1.1+Math.min(2.1,Math.log10((l.bps||0)/1e5+1)*.9));if(!l.wifi&&!l.down&&!l.vpn&&l.bps>2e4)cl.push('flow');if(l.vpn){cl.push('vpn');if(!l.up)cl.push('down')}if(l.failed)cl.push('failed');if(l.wired)cl.push('wired');
   l.el=el('path',{class:cl.join(' '),'stroke-width':w},lg)}
- for(const n of G.nodes){const g=el('g',{class:'tnode '+n.type+(n.status?' '+n.status:'')+(n.qc?' '+n.qc:'')+(n.failed?' failed':'')},ng);n.el=g;g.dataset.id=n.id;
+ for(const n of G.nodes){const g=el('g',{class:'tnode '+n.type+(n.status?' '+n.status:'')+(n.qc?' '+n.qc:'')+(n.failed?' failed':'')+(n.wired?' wired':'')},ng);n.el=g;g.dataset.id=n.id;
   if(n.type==='inet'){globe(g,n)}
   else if(n.type==='client'){const r=R(n);el('circle',{class:'bg',r:r},g);el('use',{href:'#'+icon(n),x:-r*.58,y:-r*.58,width:r*1.16,height:r*1.16},g);if(n.failed){el('circle',{class:'fb',cx:r*.8,cy:-r*.8,r:7},g);const b=el('text',{class:'fbt',x:r*.8,y:-r*.8+3.5},g);b.textContent='!'}}
   else{const r=R(n);el('circle',{class:'bg',r:r},g);el('use',n.type==='inet'?{href:'#'+icon(n),x:-r*.74,y:-r*.74,width:r*1.48,height:r*1.48}:{href:'#'+icon(n),x:-r*.55,y:-r*.55,width:r*1.1,height:r*1.1},g);
@@ -147,6 +147,7 @@ function line(par,t,c){const d=document.createElement('div');if(c)d.style.cssTex
 function hover(n,e){tip.textContent='';const b=document.createElement('b');b.textContent=n.name;tip.appendChild(b);
  if(n.type==='router'){line(tip,(n.ap?T.ap:T.router)+(n.edge?' · WAN':''));if(n.sub)line(tip,n.sub);line(tip,T[n.status]);if(n.nc)line(tip,'Wi-Fi: '+n.nc);line(tip,'↗ '+T.open)}
  else if(n.type==='client'&&n.failed){line(tip,T.kind[n.kind]||T.kind.other);if(n.sub)line(tip,n.sub);line(tip,n.mac);line(tip,T.ftries.replace('{n}',n.tries).replace('{t}',new Date(n.last+'Z').toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})),'color:var(--bad)');line(tip,n.known?T.fknown:T.funknown)}
+ else if(n.type==='client'&&n.wired){line(tip,T.kind[n.kind]||T.kind.other);if(n.sub)line(tip,n.sub);if(n.ip)line(tip,n.ip);line(tip,n.mac);if(n.port)line(tip,T.port+': '+n.port)}
  else if(n.type==='client'){line(tip,T.kind[n.kind]||T.kind.other);if(n.sub)line(tip,n.sub);if(n.ip)line(tip,n.ip);line(tip,n.mac);line(tip,T.sig+': '+(n.signal==null?'-':n.signal+' dBm')+' · '+n.q);if(n.iface)line(tip,n.iface)}
  else if(n.type==='nbr'){line(tip,T.nbr);if(n.sub)line(tip,n.sub);if(n.ip)line(tip,n.ip)}else line(tip,T.inet);
  tip.style.display='block';moveTip(e);

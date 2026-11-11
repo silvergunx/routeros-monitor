@@ -771,7 +771,7 @@ INV_MAIN = '\n:if ([:len [/system script find where name="app-inv-dhcp"]] > 0) d
 
 INV_ETH = INV_DHCP[:INV_DHCP.index(':local buf ""')].rstrip('\n') + '\n' + '\n:local buf ""\n:foreach i in=[/interface ethernet find] do={\n  :do {\n    :local n [/interface ethernet get $i name]\n    :local dis [/interface ethernet get $i disabled]\n    :local run [/interface ethernet get $i running]\n    :local cm ""\n    :do {:set cm [/interface ethernet get $i comment]} on-error={}\n    :local ce [$esc s=$cm]\n    :local rate ""\n    :local dup ""\n    :do {\n      :local mo [/interface ethernet monitor $i once as-value]\n      :set rate ($mo->"rate")\n      :set dup ($mo->"full-duplex")\n    } on-error={}\n    :local ld ""\n    :do {:set ld [/interface ethernet get $i link-downs]} on-error={}\n    :local br ""\n    :do {:set br [/interface bridge port get [find where interface=$n] bridge]} on-error={}\n    :if ([:len $buf] > 0) do={:set buf ($buf . ",")}\n    :set buf ($buf . "{\\"key\\":\\"$n\\",\\"run\\":\\"$run\\",\\"dis\\":\\"$dis\\",\\"rate\\":\\"$rate\\",\\"dup\\":\\"$dup\\",\\"ld\\":\\"$ld\\",\\"br\\":\\"$br\\",\\"cm\\":\\"$ce\\"}")\n  } on-error={}\n  :if ([:len $buf] > 3000) do={\n    $send u=$url d=("{\\"k\\":\\"eth\\",\\"seq\\":\\"$seq\\",\\"done\\":false,\\"items\\":\\5B" . $buf . "\\5D}")\n    :set buf ""\n  }\n}\n$send u=$url d=("{\\"k\\":\\"eth\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B" . $buf . "\\5D}")'
 
-INV_TOPO = INV_DHCP[:INV_DHCP.index(':local buf ""')].rstrip('\n') + '\n' + '\n:local buf ""\n:local n 0\n:foreach i in=[/ip neighbor find] do={\n  :if ($n < 80) do={\n    :set n ($n + 1)\n    :do {\n      :local m [/ip neighbor get $i mac-address]\n      :local ifc [:tostr [/ip neighbor get $i interface]]\n      :if ([:len $ifc] > 30) do={:set ifc [:pick $ifc 0 30]}\n      :local idn ""\n      :do {:set idn [/ip neighbor get $i identity]} on-error={}\n      :if ([:len $idn] > 40) do={:set idn [:pick $idn 0 40]}\n      :local ide [$esc s=$idn]\n      :local ad ""\n      :do {:set ad [:tostr [/ip neighbor get $i address]]} on-error={}\n      :if ([:len $ad] > 40) do={:set ad [:pick $ad 0 40]}\n      :local pl ""\n      :do {:set pl [/ip neighbor get $i platform]} on-error={}\n      :if ([:len $pl] > 20) do={:set pl [:pick $pl 0 20]}\n      :local ple [$esc s=$pl]\n      :local bd ""\n      :do {:set bd [/ip neighbor get $i board]} on-error={}\n      :if ([:len $bd] > 24) do={:set bd [:pick $bd 0 24]}\n      :local bde [$esc s=$bd]\n      :if ([:len $buf] > 0) do={:set buf ($buf . ",")}\n      :set buf ($buf . "{\\"key\\":\\"" . $m . "|" . $ifc . "\\",\\"mac\\":\\"" . $m . "\\",\\"if\\":\\"" . $ifc . "\\",\\"id\\":\\"" . $ide . "\\",\\"ip\\":\\"" . $ad . "\\",\\"pl\\":\\"" . $ple . "\\",\\"bd\\":\\"" . $bde . "\\"}")\n    } on-error={}\n    :if ([:len $buf] > 1200) do={\n      $send u=$url d=("{\\"k\\":\\"nbr\\",\\"seq\\":\\"$seq\\",\\"done\\":false,\\"items\\":\\5B" . $buf . "\\5D}")\n      :set buf ""\n    }\n  }\n}\n$send u=$url d=("{\\"k\\":\\"nbr\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B" . $buf . "\\5D}")'
+INV_TOPO = INV_DHCP[:INV_DHCP.index(':local buf ""')].rstrip('\n') + '\n' + '\n:local buf ""\n:local n 0\n:local trunk ";"\n:foreach i in=[/ip neighbor find] do={\n  :if ($n < 80) do={\n    :set n ($n + 1)\n    :do {\n      :local m [/ip neighbor get $i mac-address]\n      :local ifc [:tostr [/ip neighbor get $i interface]]\n      :set trunk ($trunk . $ifc . ";")\n      :if ([:len $ifc] > 30) do={:set ifc [:pick $ifc 0 30]}\n      :local idn ""\n      :do {:set idn [/ip neighbor get $i identity]} on-error={}\n      :if ([:len $idn] > 40) do={:set idn [:pick $idn 0 40]}\n      :local ide [$esc s=$idn]\n      :local ad ""\n      :do {:set ad [:tostr [/ip neighbor get $i address]]} on-error={}\n      :if ([:len $ad] > 40) do={:set ad [:pick $ad 0 40]}\n      :local pl ""\n      :do {:set pl [/ip neighbor get $i platform]} on-error={}\n      :if ([:len $pl] > 20) do={:set pl [:pick $pl 0 20]}\n      :local ple [$esc s=$pl]\n      :local bd ""\n      :do {:set bd [/ip neighbor get $i board]} on-error={}\n      :if ([:len $bd] > 24) do={:set bd [:pick $bd 0 24]}\n      :local bde [$esc s=$bd]\n      :if ([:len $buf] > 0) do={:set buf ($buf . ",")}\n      :set buf ($buf . "{\\"key\\":\\"" . $m . "|" . $ifc . "\\",\\"mac\\":\\"" . $m . "\\",\\"if\\":\\"" . $ifc . "\\",\\"id\\":\\"" . $ide . "\\",\\"ip\\":\\"" . $ad . "\\",\\"pl\\":\\"" . $ple . "\\",\\"bd\\":\\"" . $bde . "\\"}")\n    } on-error={}\n    :if ([:len $buf] > 1200) do={\n      $send u=$url d=("{\\"k\\":\\"nbr\\",\\"seq\\":\\"$seq\\",\\"done\\":false,\\"items\\":\\5B" . $buf . "\\5D}")\n      :set buf ""\n    }\n  }\n}\n$send u=$url d=("{\\"k\\":\\"nbr\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B" . $buf . "\\5D}")\n:local hb ""\n:local hn 0\n:foreach h in=[/interface bridge host find where local=no] do={\n  :if ($hn < 150) do={\n    :do {\n      :local oi [/interface bridge host get $h on-interface]\n      :if ([:typeof [:find $trunk (";" . $oi . ";")]] = "nil" && [:typeof [:find $trunk (";" . $oi . ",")]] = "nil" && [:typeof [:find $trunk ("," . $oi . ";")]] = "nil" && [:typeof [:find $trunk ("," . $oi . ",")]] = "nil") do={\n        :set hn ($hn + 1)\n        :local hm [/interface bridge host get $h mac-address]\n        :if ([:len $oi] > 30) do={:set oi [:pick $oi 0 30]}\n        :if ([:len $hb] > 0) do={:set hb ($hb . ",")}\n        :set hb ($hb . "{\\"key\\":\\"" . $hm . "\\",\\"if\\":\\"" . $oi . "\\"}")\n      }\n    } on-error={}\n    :if ([:len $hb] > 1200) do={\n      $send u=$url d=("{\\"k\\":\\"brh\\",\\"seq\\":\\"$seq\\",\\"done\\":false,\\"items\\":\\5B" . $hb . "\\5D}")\n      :set hb ""\n    }\n  }\n}\n$send u=$url d=("{\\"k\\":\\"brh\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B" . $hb . "\\5D}")'
 
 
 LIVE = r'''
@@ -1392,7 +1392,7 @@ def _store_metrics(s, t, raw, ip=None, cv=0, mods=""):
 
 
 # ---------- inventory (DHCP / Wi-Fi / VPN) ----------
-INV_KINDS = {"dhcp", "wifi", "wireless", "wg", "ppp", "sys", "eth", "nbr"}
+INV_KINDS = {"dhcp", "wifi", "wireless", "wg", "ppp", "sys", "eth", "nbr", "brh"}
 
 
 def parse_body(raw, rname):
@@ -1846,7 +1846,7 @@ def inventory_view(s, r):
     by = {k: [] for k in INV_KINDS}
     upd = None
     for x in rows:
-        if x.kind in ("wifi", "wireless", "eth", "nbr") and (now() - x.updated).total_seconds() > 300:
+        if x.kind in ("wifi", "wireless", "eth", "nbr", "brh") and (now() - x.updated).total_seconds() > 300:
             continue  # klient nie zgłaszany od 5 min - nie pokazuj "zamrożonego" odczytu
         try:
             d = json.loads(x.data)
@@ -4672,8 +4672,8 @@ def topology_view(s):
     info = {r.id: sys_info(s, r) for r in routers}
     by_ident = {r.ident.strip().lower(): r for r in routers if r.ident}
     by_ip = {r.log_ip: r for r in routers if r.log_ip}
-    inv = {r.id: {"nbr": {}, "wifi": [], "dhcp": {}} for r in routers}
-    for x in s.scalars(select(Inv).where(Inv.kind.in_(("nbr", "wifi", "wireless", "dhcp")))):
+    inv = {r.id: {"nbr": {}, "wifi": [], "dhcp": {}, "brh": {}} for r in routers}
+    for x in s.scalars(select(Inv).where(Inv.kind.in_(("nbr", "wifi", "wireless", "dhcp", "brh")))):
         if x.router_id not in inv or (x.kind != "dhcp" and (now() - x.updated).total_seconds() > 300):
             continue
         try:
@@ -4686,6 +4686,8 @@ def topology_view(s):
             old = slot["nbr"].get(mac)
             if mac and (not old or _port_rank(d) < _port_rank(old)):  # ten sam sąsiad jest widoczny na wielu interfejsach (port, VLAN-y, bridge): wolimy fizyczny port
                 slot["nbr"][mac] = d
+        elif x.kind == "brh":
+            inv[x.router_id]["brh"][(d.get("key") or "").upper()] = d
         elif x.kind == "dhcp":
             if d.get("src") != "arp":
                 slot["dhcp"][(d.get("key") or "").upper()] = d
@@ -4745,6 +4747,20 @@ def topology_view(s):
                              "signal": wq["signal"], "sc": wq["sc"]})
     for lst in clients.values():
         lst.sort(key=lambda c: (-(c["q"] if c["q"] is not None else -1), c["name"].lower()))
+    # urządzenia na kablu: tabela hostów bridge (bez Wi-Fi, bez portów z sąsiadami/trunków i bez samych routerów)
+    skip = set(pick) | {m for r in routers for m in inv[r.id]["nbr"]}
+    wired = {r.id: [] for r in routers}
+    for r in routers:
+        for mac, d in inv[r.id]["brh"].items():
+            port = d.get("if") or ""
+            if not mac or mac in skip or port.lower().startswith(("wifi", "wlan", "cap")):
+                continue
+            skip.add(mac)
+            l = leases.get(mac, {})
+            name, sub = device_label(mac, l.get("comment"), l.get("host"), names.get(oui.normalize(mac)))
+            wired[r.id].append({"mac": mac, "name": name if name != "-" else mac, "sub": sub, "ip": l.get("ip") or "", "port": port,
+                                "kind": device_kind(name, OUI.lookup(mac))})
+        wired[r.id].sort(key=lambda c: c["name"].lower())
     # urządzenia, które próbują się połączyć z Wi-Fi i nie mogą (błędne hasło albo obca próba): powtarzające się błędy uwierzytelnienia w logach
     failed = {r.id: [] for r in routers}
     since = now() - dt.timedelta(minutes=FAIL_WINDOW_MIN)
@@ -4784,7 +4800,7 @@ def topology_view(s):
         si = info[r.id]
         return {"type": "router", "id": r.id, "name": r.name, "model": si["model"], "online": r.online, "upg": r.upgrading,
                 "edge": bool(r.edge), "gw": bool(r.edge or si["dhcp"]), "manager": si["manager"], "up_port": up_port, "parent_port": parent_port,
-                "clients": clients[r.id], "failed": failed[r.id], "children": kids + nb[:20], "more": max(0, len(nb) - 20)}
+                "clients": clients[r.id], "wired": wired[r.id], "failed": failed[r.id], "children": kids + nb[:20], "more": max(0, len(nb) - 20)}
     by_name = {r.id: r for r in routers}
     roots = [r for r in routers if r.edge] or [max(routers, key=lambda r: len(adj[r.id]))]
     trees = [node(r) for r in roots if r.id not in visited]
@@ -4812,7 +4828,7 @@ def topology_graph(s, root, orphans):
             nid = "r%d" % n["id"]
             nodes.append({"id": nid, "type": "router", "name": n["name"], "sub": n["model"], "depth": depth, "rid": n["id"],
                           "status": "upg" if n["upg"] else ("up" if n["online"] else "down"), "edge": n["edge"],
-                          "ap": bool(n["clients"] or n["manager"]), "nc": len(n["clients"]), "gw": n["gw"]})
+                          "ap": bool(n["clients"] or n["manager"]), "nc": len(n["clients"]), "nw": len(n["wired"]), "gw": n["gw"]})
         else:
             cnt[0] += 1
             nid = "x%d" % cnt[0]
@@ -4832,6 +4848,11 @@ def topology_graph(s, root, orphans):
                 nodes.append({"id": cid, "type": "client", "name": c["name"], "sub": c["sub"], "ip": c["ip"], "mac": c["mac"], "iface": c["iface"],
                               "qc": c["qc"], "q": c["qlabel"], "signal": c["signal"], "kind": c["kind"], "depth": depth + 1})
                 links.append({"s": nid, "t": cid, "wifi": True})
+            for w in n["wired"]:
+                wid = "w" + w["mac"]
+                nodes.append({"id": wid, "type": "client", "wired": True, "name": w["name"], "sub": w["sub"], "ip": w["ip"], "mac": w["mac"],
+                              "port": w["port"], "kind": w["kind"], "qc": "", "signal": None, "depth": depth + 1})
+                links.append({"s": nid, "t": wid, "wired": True})
             for f in n["failed"]:
                 fid = "f" + f["mac"]
                 nodes.append({"id": fid, "type": "client", "failed": True, "name": f["name"], "sub": f["sub"], "mac": f["mac"], "tries": f["tries"],
