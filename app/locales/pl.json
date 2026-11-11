@@ -291,7 +291,7 @@
   "rp.static": "statyczna",
   "rp.dynamic": "dynamiczna",
   "rp.no_leases": "Brak dzierżaw DHCP.",
-  "rp.dev_help": "Online: urządzenie wysyłało ruch w ostatnich minutach (tablica hostów bridge), jest połączone przez Wi-Fi, odpowiada w ARP albo jest monitorowanym routerem online. Bezczynny: router zna urządzenie, ale od dawna nie widział jego ruchu.",
+  "rp.dev_help": "Online: urządzenie wysyłało ruch w ostatnich minutach (tablica hostów bridge), jest połączone przez Wi-Fi, odpowiada w ARP albo jest monitorowanym routerem online. Bezczynny: router zna urządzenie, ale od dawna nie widział jego ruchu. „bez DHCP”: urządzenie ze stałym adresem IP, znane z tablicy ARP (bez nazwy hosta; nazwę nadasz przyciskiem ✎). Wpisy z interfejsu WAN są pomijane.",
   "rp.interface": "Interfejs",
   "rp.connected": "Połączony",
   "rp.pct_max": "{n}% maks.",
@@ -821,5 +821,6 @@
   "set.oui.auto_off": "Automatyczne pobieranie jest wyłączone (OUI_DOWNLOAD=0).",
   "msg.oui_ok": "Pobrano rejestr producentów: %s wpisów.",
   "msg.oui_err": "Nie udało się pobrać rejestru producentów:",
-  "an.203": "Urządzenie %s odpadło %d razy na uwierzytelnianiu. Jeśli ciągle się łączy i odpada, najpewniej ma zapisane błędne lub stare hasło Wi-Fi: na urządzeniu zapomnij tę sieć i połącz się ponownie z aktualnym hasłem."
+  "an.203": "Urządzenie %s odpadło %d razy na uwierzytelnianiu. Jeśli ciągle się łączy i odpada, najpewniej ma zapisane błędne lub stare hasło Wi-Fi: na urządzeniu zapomnij tę sieć i połącz się ponownie z aktualnym hasłem.",
+  "rp.no_dhcp": "bez DHCP"
 }

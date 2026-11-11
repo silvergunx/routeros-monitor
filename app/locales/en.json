@@ -290,7 +290,7 @@
   "rp.static": "static",
   "rp.dynamic": "dynamic",
   "rp.no_leases": "No DHCP leases.",
-  "rp.dev_help": "Online: the device sent traffic in the last few minutes (bridge host table), is connected over Wi-Fi, answers ARP or is a monitored router that is online. Idle: the router knows the device but has not seen its traffic for a long time.",
+  "rp.dev_help": "Online: the device sent traffic in the last few minutes (bridge host table), is connected over Wi-Fi, answers ARP or is a monitored router that is online. Idle: the router knows the device but has not seen its traffic for a long time. \"no DHCP\": a device with a fixed IP address known from the ARP table (no host name; give it a name with the ✎ button). Entries from the WAN interface are ignored.",
   "rp.interface": "Interface",
   "rp.connected": "Connected",
   "rp.pct_max": "{n}% max.",
@@ -820,5 +820,6 @@
   "set.oui.auto_off": "Automatic download is disabled (OUI_DOWNLOAD=0).",
   "msg.oui_ok": "Vendor registry downloaded: %s entries.",
   "msg.oui_err": "Could not download the vendor registry:",
-  "an.203": "Device %s dropped %d times on authentication. If it keeps connecting and dropping, it most likely has a wrong or outdated Wi-Fi password saved: forget the network on the device and reconnect with the current password."
+  "an.203": "Device %s dropped %d times on authentication. If it keeps connecting and dropping, it most likely has a wrong or outdated Wi-Fi password saved: forget the network on the device and reconnect with the current password.",
+  "rp.no_dhcp": "no DHCP"
 }
