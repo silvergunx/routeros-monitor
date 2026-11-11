@@ -1580,7 +1580,7 @@ def sys_info(s, r):
         feats.append("WireGuard")
     return {"model": d.get("model") or "", "role": role, "manager": "manager" in caps, "fw": fwc, "fw_upd": fwu if fwu and fwc and fwu != fwc else "",
             "qcom": wq, "ram_w": 90 if wq else 75, "ram_b": 94 if wq else 90, "mem_total": tm,
-            "has_wifi": bool(wifi_n or wl_n or role), "feats": feats, "known": bool(d)}
+            "has_wifi": bool(wifi_n or wl_n or role), "feats": feats, "known": bool(d), "dhcp": bool(num(d.get("dhs")))}
 
 
 def ram_mb(m, si):
@@ -4743,7 +4743,7 @@ def topology_view(s):
                        "ip": d.get("ip") or ""})
         si = info[r.id]
         return {"type": "router", "id": r.id, "name": r.name, "model": si["model"], "online": r.online, "upg": r.upgrading,
-                "edge": bool(r.edge), "manager": si["manager"], "up_port": up_port, "parent_port": parent_port,
+                "edge": bool(r.edge), "gw": bool(r.edge or si["dhcp"]), "manager": si["manager"], "up_port": up_port, "parent_port": parent_port,
                 "clients": clients[r.id], "failed": failed[r.id], "children": kids + nb[:20], "more": max(0, len(nb) - 20)}
     by_name = {r.id: r for r in routers}
     roots = [r for r in routers if r.edge] or [max(routers, key=lambda r: len(adj[r.id]))]
@@ -4772,7 +4772,7 @@ def topology_graph(s, root, orphans):
             nid = "r%d" % n["id"]
             nodes.append({"id": nid, "type": "router", "name": n["name"], "sub": n["model"], "depth": depth, "rid": n["id"],
                           "status": "upg" if n["upg"] else ("up" if n["online"] else "down"), "edge": n["edge"],
-                          "ap": bool(n["clients"] or n["manager"]), "nc": len(n["clients"])})
+                          "ap": bool(n["clients"] or n["manager"]), "nc": len(n["clients"]), "gw": n["gw"]})
         else:
             cnt[0] += 1
             nid = "x%d" % cnt[0]
@@ -4804,7 +4804,8 @@ def topology_graph(s, root, orphans):
     for o in orphans:
         k = len(links)
         add(o, ("inet", root), 1)
-        links[k]["inet"] = True
+        if not o["gw"]:  # bez znanego połączenia i bez serwera DHCP (zwykle AP za innym routerem): nie zakładamy wyjścia do Internetu
+            links[k]["weak"] = True
     # VPN między monitorowanymi routerami: peer WireGuard nazwany (name/comment) jak drugi router albo wskazujący jego adres
     rids = {n["rid"]: n for n in nodes if n["type"] == "router"}
     routers = {r.id: r for r in s.scalars(select(Router)) if r.id in rids}

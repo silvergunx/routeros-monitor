@@ -29,7 +29,7 @@
 .tlink{fill:none;stroke:color-mix(in srgb,var(--mut) 55%,transparent);stroke-linecap:round}.tlink.wifi{stroke:var(--acc);stroke-width:1.5;stroke-dasharray:2 6;opacity:.85;animation:tflow 1.8s linear infinite}
 .tlink.flow{stroke:color-mix(in srgb,var(--acc) 80%,var(--mut));stroke-dasharray:7 9;animation:tflow 1.4s linear infinite}.tlink.down{stroke:var(--bad);stroke-dasharray:3 7}.tnode.failed circle.bg{stroke:var(--bad);stroke-dasharray:3 3;animation:tpulse 1.6s ease-in-out infinite}.tnode .fb{fill:var(--bad);stroke:var(--card);stroke-width:2}.tnode text.fbt{fill:#fff;font-size:10px;font-weight:700;stroke:none}
 .tlink.failed{stroke:var(--bad);stroke-dasharray:2 6;opacity:.85;animation:tflow 1.8s linear infinite}@keyframes tpulse{50%{opacity:.45}}
-.tlink.vpn{stroke:var(--ok);stroke-width:5px;stroke-dasharray:16 7;animation:tflow 1.3s linear infinite;filter:drop-shadow(0 0 5px color-mix(in srgb,var(--ok) 65%,transparent))}.tlink.vpn.down{stroke:var(--mut);stroke-width:2px;stroke-dasharray:3 7;animation:none;filter:none;opacity:.6}
+.tlink.weak{display:none}.tlink.vpn{stroke:var(--ok);stroke-width:5px;stroke-dasharray:16 7;animation:tflow 1.3s linear infinite;filter:drop-shadow(0 0 5px color-mix(in srgb,var(--ok) 65%,transparent))}.tlink.vpn.down{stroke:var(--mut);stroke-width:2px;stroke-dasharray:3 7;animation:none;filter:none;opacity:.6}
 @keyframes tflow{to{stroke-dashoffset:-32}}@media(prefers-reduced-motion:reduce){.tlink.flow,.tlink.vpn,.tlink.wifi,.tlink.failed,.tnode.failed circle.bg{animation:none}}
 #tmap.hl .tnode:not(.on){opacity:.22}#tmap.hl .tlink:not(.on){opacity:.07}
 .tmleg{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-size:12px;color:var(--mut);align-items:center}
@@ -68,7 +68,7 @@ function layout(iters,a0){const N=G.nodes;let a=a0;
   for(const l of G.links){const p=G.byId[l.s],q=G.byId[l.t];let dx=q.x-p.x,dy=q.y-p.y,d=Math.sqrt(dx*dx+dy*dy)||.01;
    if(l.vpn)continue;const L=l.wifi?wl(q,p):(q.type==='nbr'?112:(p.type==='inet'?160:150));
    const f=(d-L)*.1*Math.max(a,.15),fx=dx/d*f,fy=dy/d*f;p.vx+=fx;p.vy+=fy;q.vx-=fx;q.vy-=fy}
-  for(const l of G.links){if(l.vpn)continue;const p=G.byId[l.s],q=G.byId[l.t],ex=q.x-p.x,ey=q.y-p.y,e2=ex*ex+ey*ey||1;
+  for(const l of G.links){if(l.vpn||l.weak)continue;const p=G.byId[l.s],q=G.byId[l.t],ex=q.x-p.x,ey=q.y-p.y,e2=ex*ex+ey*ey||1;
    for(const n of N){if(n===p||n===q||n.pin)continue;let u=((n.x-p.x)*ex+(n.y-p.y)*ey)/e2;if(u<-.05||u>1.05)continue;u=Math.max(0,Math.min(1,u));
     const cx=p.x+ex*u,cy=p.y+ey*u;let dx=n.x-cx,dy=n.y-cy,d=Math.sqrt(dx*dx+dy*dy)||.01;const m=R(n)+(n.type==='client'?12:30);
     if(d<m){const f=(m-d)*.45;n.vx+=dx/d*f;n.vy+=dy/d*f}}}
