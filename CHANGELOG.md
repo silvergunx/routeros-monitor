@@ -9,6 +9,9 @@ Notes marked **Routers** mean the configuration command has to be pasted again o
 
 Work in progress on `develop` (version 1.6.0).
 
+### Added
+- **Ports tab** (first tab on a router page, before the charts): a drawing of the router's Ethernet ports (ether, SFP, SFP+) with the link state, link speed (10M, 100M, 1G, 2.5G, 10G), current traffic, the bridge the port belongs to and a WAN mark. Green means link up, yellow a degraded link (10/100 Mb/s on a router whose other ports run at 1 Gb/s or faster, or half duplex, usually a bad cable), grey no link, dashed disabled. A new small router script `app-inv-eth` reads the port state once a minute. The layout is a simple row in port order, not the physical layout of the model. **Routers**: paste the configuration command again on every router (the script version is now 4).
+
 ## [1.5.0] - 2026-11-11
 
 ### Added

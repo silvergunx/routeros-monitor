@@ -10,6 +10,9 @@ Uwagi oznaczone **Routery** oznaczają, że trzeba ponownie wkleić komendę kon
 
 Prace w toku na gałęzi `develop` (wersja 1.6.0).
 
+### Dodano
+- **Zakładka Porty** (pierwsza na stronie routera, przed wykresami): rysunek portów Ethernet routera (ether, SFP, SFP+) ze stanem łącza, prędkością linku (10M, 100M, 1G, 2,5G, 10G), bieżącym ruchem, nazwą bridge, do którego należy port, i oznaczeniem WAN. Zielony to link działa, żółty link zdegradowany (10/100 Mb/s na routerze, którego inne porty pracują z 1 Gb/s lub szybciej, albo half-duplex; zwykle zły kabel), szary brak linku, kreskowany port wyłączony. Nowy mały skrypt `app-inv-eth` na routerze odczytuje stan portów raz na minutę. Układ to prosty rząd w kolejności portów, a nie fizyczny układ gniazd danego modelu. **Routery**: wklej ponownie komendę konfiguracyjną na każdym routerze (wersja skryptu to teraz 4).
+
 ## [1.5.0] - 2026-11-11
 
 ### Dodano
