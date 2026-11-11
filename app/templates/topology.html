@@ -4,7 +4,7 @@
 {% macro tree(n) %}<li>{% if n.type == 'inet' %}<div class="tn tinet">🌐 {{ t('topo.internet') }}</div>
 {% elif n.type == 'router' %}<a class="tn trt {{ 'tdown' if not n.online and not n.upg }}" href="/routers/{{n.id}}"><b>{{n.name}}</b><span class="mut small">{{n.model or ''}}</span>
 <span class="small">{% if n.upg %}<span class="warn">{{ t('rt.upgrading') }}</span>{% elif n.online %}<span class="ok">{{ t('rt.online') }}</span>{% else %}<span class="bad">{{ t('rt.offline') }}</span>{% endif %}{% if n.manager %} · CAPsMAN{% endif %}</span>
-{% if n.up_port or n.parent_port %}<span class="mut small">{{ n.parent_port or '?' }} ⇄ {{ n.up_port or '?' }}</span>{% endif %}</a>{{ clients(n) }}
+{% if n.up_port or n.parent_port %}<span class="mut small">{{ n.parent_port or '?' }} ⇄ {{ n.up_port or '?' }}</span>{% endif %}</a>{{ clients(n) }}{% if n.failed %}<div class="tcl tfail"><span class="bad">⚠ {{ t('topo.failed_h', n=n.failed|length) }}</span>{% for f in n.failed %}<div class="tc" title="{{f.mac}}"><span class="qd bad"></span><span class="tcn">{{f.name}}</span><span class="mut tcs">×{{f.tries}}</span></div>{% endfor %}</div>{% endif %}
 {% else %}<div class="tn tnbr"><b>{{n.name}}</b><span class="mut small">{{n.model}}</span><span class="mut small">{{n.port}}{% if n.ip %} · {{n.ip}}{% endif %}</span></div>{% endif %}
 {% if n.children %}<ul>{% for c in n.children %}{{ tree(c) }}{% endfor %}</ul>{% endif %}</li>{% endmacro %}
 {% set has = topo.root and (topo.root.children or topo.orphans) %}
@@ -27,8 +27,10 @@
 .tnode .badge{fill:var(--acc);stroke:var(--card);stroke-width:2}.tnode text.bt{fill:#fff;font-size:10px;font-weight:700;stroke:none}
 .tnode.client circle.bg{stroke-width:2.2;stroke:var(--mut)}.tnode.client.ok circle.bg{stroke:var(--ok)}.tnode.client.warn circle.bg{stroke:var(--warn)}.tnode.client.bad circle.bg{stroke:var(--bad)}.tnode.client:hover circle.bg{fill:color-mix(in srgb,var(--acc) 18%,var(--card))}
 .tlink{fill:none;stroke:color-mix(in srgb,var(--mut) 55%,transparent);stroke-linecap:round}.tlink.wifi{stroke-width:1;opacity:.6}
-.tlink.flow{stroke:color-mix(in srgb,var(--acc) 80%,var(--mut));stroke-dasharray:7 9;animation:tflow 1.4s linear infinite}.tlink.down{stroke:var(--bad);stroke-dasharray:3 7}.tlink.vpn{stroke:var(--ok);stroke-width:3;stroke-dasharray:3 8;animation:tflow 1.1s linear infinite reverse;filter:drop-shadow(0 0 4px color-mix(in srgb,var(--ok) 70%,transparent))}.tlink.vpn.down{stroke:var(--mut);animation:none;filter:none;opacity:.6}
-@keyframes tflow{to{stroke-dashoffset:-32}}@media(prefers-reduced-motion:reduce){.tlink.flow,.tlink.vpn{animation:none}}
+.tlink.flow{stroke:color-mix(in srgb,var(--acc) 80%,var(--mut));stroke-dasharray:7 9;animation:tflow 1.4s linear infinite}.tlink.down{stroke:var(--bad);stroke-dasharray:3 7}.tnode.failed circle.bg{stroke:var(--bad);stroke-dasharray:3 3;animation:tpulse 1.6s ease-in-out infinite}.tnode .fb{fill:var(--bad);stroke:var(--card);stroke-width:2}.tnode text.fbt{fill:#fff;font-size:10px;font-weight:700;stroke:none}
+.tlink.failed{stroke:var(--bad);stroke-dasharray:2 6;opacity:.85;animation:tflow 1.8s linear infinite}@keyframes tpulse{50%{opacity:.45}}
+.tlink.vpn{stroke:var(--ok);stroke-width:3;stroke-dasharray:3 8;animation:tflow 1.1s linear infinite reverse;filter:drop-shadow(0 0 4px color-mix(in srgb,var(--ok) 70%,transparent))}.tlink.vpn.down{stroke:var(--mut);animation:none;filter:none;opacity:.6}
+@keyframes tflow{to{stroke-dashoffset:-32}}@media(prefers-reduced-motion:reduce){.tlink.flow,.tlink.vpn,.tlink.failed,.tnode.failed circle.bg{animation:none}}
 #tmap.hl .tnode:not(.on){opacity:.22}#tmap.hl .tlink:not(.on){opacity:.07}
 .tmleg{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-size:12px;color:var(--mut);align-items:center}
 </style>
@@ -42,19 +44,19 @@
 <div class="ttreeview"><div class="tree"><ul>{{ tree(topo.root) }}</ul></div>
 {% if topo.orphans %}<h3 style="margin:18px 0 6px">{{ t('topo.orphans') }}</h3><div class="tree"><ul>{% for o in topo.orphans %}{{ tree(o) }}{% endfor %}</ul></div>{% endif %}</div>
 <script type="application/json" id="tgraph">{{ topo.graph|tojson }}</script>
-<div class="tmleg"><span><svg width="26" height="8"><path d="M1 4h24" class="tlink flow" stroke-width="3"/></svg> {{ t('topo.leg_flow') }}</span><span><svg width="26" height="8"><path d="M1 4h24" class="tlink vpn" /></svg> {{ t('topo.leg_vpn') }}</span><span><span class="qd ok"></span> {{ t('topo.leg_good') }}</span><span><span class="qd warn"></span> {{ t('topo.leg_mid') }}</span><span><span class="qd bad"></span> {{ t('topo.leg_bad') }}</span></div>
+<div class="tmleg"><span><svg width="26" height="8"><path d="M1 4h24" class="tlink flow" stroke-width="3"/></svg> {{ t('topo.leg_flow') }}</span><span><svg width="26" height="8"><path d="M1 4h24" class="tlink vpn" /></svg> {{ t('topo.leg_vpn') }}</span><span><span class="qd ok"></span> {{ t('topo.leg_good') }}</span><span><span class="qd bad" style="outline:2px dotted var(--bad);outline-offset:1px;background:none"></span> {{ t('topo.leg_failed') }}</span><span><span class="qd warn"></span> {{ t('topo.leg_mid') }}</span><span><span class="qd bad"></span> {{ t('topo.leg_bad') }}</span></div>
 {% endif %}</div>
 <p class="mut small" style="margin-top:12px">{{ t('topo.help') }}</p></div>
 {% if has %}<script>
 (function(){
 const NS='http://www.w3.org/2000/svg',svg=document.getElementById('tmap'),wrap=document.getElementById('tmapwrap'),tip=document.getElementById('ttip');
 const T={router:{{ t('topo.t_router')|tojson }},ap:{{ t('topo.t_ap')|tojson }},inet:{{ t('topo.internet')|tojson }},nbr:{{ t('topo.t_nbr')|tojson }},client:{{ t('topo.t_client')|tojson }},
- up:{{ t('rt.online')|tojson }},down:{{ t('rt.offline')|tojson }},upg:{{ t('rt.upgrading')|tojson }},open:{{ t('topo.open')|tojson }},sig:{{ t('topo.signal')|tojson }},kind:{{ {'phone':t('topo.k_phone'),'tablet':t('topo.k_tablet'),'laptop':t('topo.k_laptop'),'tv':t('topo.k_tv'),'printer':t('topo.k_printer'),'camera':t('topo.k_camera'),'iot':t('topo.k_iot'),'server':t('topo.k_server'),'other':t('topo.t_client')}|tojson }}};
+ up:{{ t('rt.online')|tojson }},down:{{ t('rt.offline')|tojson }},upg:{{ t('rt.upgrading')|tojson }},open:{{ t('topo.open')|tojson }},sig:{{ t('topo.signal')|tojson }},ftries:{{ t('topo.failed_tries')|tojson }},fknown:{{ t('topo.failed_known')|tojson }},funknown:{{ t('topo.failed_unknown')|tojson }},kind:{{ {'phone':t('topo.k_phone'),'tablet':t('topo.k_tablet'),'laptop':t('topo.k_laptop'),'tv':t('topo.k_tv'),'printer':t('topo.k_printer'),'camera':t('topo.k_camera'),'iot':t('topo.k_iot'),'server':t('topo.k_server'),'other':t('topo.t_client')}|tojson }}};
 let G={nodes:[],links:[],byId:{},parent:{}},S={k:1,x:0,y:0},sig='',pins={},hint='';
 try{pins=JSON.parse(localStorage.getItem('topoPins')||'{}')}catch(e){pins={}}
 const R=n=>n.type==='inet'?30:n.type==='router'?28:n.type==='nbr'?21:13;
 function el(tag,at,par){const e=document.createElementNS(NS,tag);for(const k in at)e.setAttribute(k,at[k]);if(par)par.appendChild(e);return e}
-function wl(c,ap){const s=c.signal==null?-70:c.signal,w=Math.max(0,Math.min(1,(-s-45)/45));return 58+w*82+Math.min(22,(ap.nc||0)*1.1)}
+function wl(c,ap){if(c.failed)return 165;const s=c.signal==null?-70:c.signal,w=Math.max(0,Math.min(1,(-s-45)/45));return 58+w*82+Math.min(22,(ap.nc||0)*1.1)}
 function layout(iters,a0){const N=G.nodes;let a=a0;
  for(let it=0;it<iters;it++){a=Math.max(0.03,a*0.985);
   for(let i=0;i<N.length;i++){const p=N[i];for(let j=i+1;j<N.length;j++){const q=N[j];
@@ -106,10 +108,10 @@ function draw(){svg.textContent='';const d=el('defs',{},svg);
  '<symbol id="ic-box" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="8" rx="1.6"/><path d="M7 12h.01M11 12h.01M15 12h.01"/></symbol>';
  const root=el('g',{id:'tg'},svg),lg=el('g',{},root),ng=el('g',{},root);
  for(const l of G.links){const q=G.byId[l.t],cl=['tlink'];if(l.wifi)cl.push('wifi');if(l.weak)cl.push('weak');if(l.down)cl.push('down');
-  const w=l.wifi?1:(l.vpn?3:2+Math.min(4,Math.log10((l.bps||0)/1e5+1)*1.7));if(!l.wifi&&!l.down&&!l.vpn&&l.bps>2e4)cl.push('flow');if(l.vpn){cl.push('vpn');if(!l.up)cl.push('down')}
+  const w=l.wifi?1:(l.vpn?3:2+Math.min(4,Math.log10((l.bps||0)/1e5+1)*1.7));if(!l.wifi&&!l.down&&!l.vpn&&l.bps>2e4)cl.push('flow');if(l.vpn){cl.push('vpn');if(!l.up)cl.push('down')}if(l.failed)cl.push('failed');
   l.el=el('path',{class:cl.join(' '),'stroke-width':w},lg)}
- for(const n of G.nodes){const g=el('g',{class:'tnode '+n.type+(n.status?' '+n.status:'')+(n.qc?' '+n.qc:'')},ng);n.el=g;g.dataset.id=n.id;
-  if(n.type==='client'){const r=R(n);el('circle',{class:'bg',r:r},g);el('use',{href:'#'+icon(n),x:-r*.58,y:-r*.58,width:r*1.16,height:r*1.16},g)}
+ for(const n of G.nodes){const g=el('g',{class:'tnode '+n.type+(n.status?' '+n.status:'')+(n.qc?' '+n.qc:'')+(n.failed?' failed':'')},ng);n.el=g;g.dataset.id=n.id;
+  if(n.type==='client'){const r=R(n);el('circle',{class:'bg',r:r},g);el('use',{href:'#'+icon(n),x:-r*.58,y:-r*.58,width:r*1.16,height:r*1.16},g);if(n.failed){el('circle',{class:'fb',cx:r*.8,cy:-r*.8,r:7},g);const b=el('text',{class:'fbt',x:r*.8,y:-r*.8+3.5},g);b.textContent='!'}}
   else{const r=R(n);el('circle',{class:'bg',r:r},g);el('use',{href:'#'+icon(n),x:-r*.55,y:-r*.55,width:r*1.1,height:r*1.1},g);
    const t1=el('text',{y:r+15},g);t1.textContent=n.name;if(n.sub&&n.type!=='nbr'){const t2=el('text',{y:r+28,class:'sub'},g);t2.textContent=n.sub}
    if(n.nc){el('circle',{class:'badge',cx:r*.72,cy:-r*.72,r:9},g);const b=el('text',{class:'bt',x:r*.72,y:-r*.72+3.5},g);b.textContent=n.nc}}
@@ -119,6 +121,7 @@ function draw(){svg.textContent='';const d=el('defs',{},svg);
 function line(par,t,c){const d=document.createElement('div');if(c)d.style.cssText=c;d.textContent=t;par.appendChild(d)}
 function hover(n,e){tip.textContent='';const b=document.createElement('b');b.textContent=n.name;tip.appendChild(b);
  if(n.type==='router'){line(tip,(n.ap?T.ap:T.router)+(n.edge?' · WAN':''));if(n.sub)line(tip,n.sub);line(tip,T[n.status]);if(n.nc)line(tip,'Wi-Fi: '+n.nc);line(tip,'↗ '+T.open)}
+ else if(n.type==='client'&&n.failed){line(tip,T.kind[n.kind]||T.kind.other);if(n.sub)line(tip,n.sub);line(tip,n.mac);line(tip,T.ftries.replace('{n}',n.tries).replace('{t}',new Date(n.last+'Z').toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})),'color:var(--bad)');line(tip,n.known?T.fknown:T.funknown)}
  else if(n.type==='client'){line(tip,T.kind[n.kind]||T.kind.other);if(n.sub)line(tip,n.sub);if(n.ip)line(tip,n.ip);line(tip,n.mac);line(tip,T.sig+': '+(n.signal==null?'-':n.signal+' dBm')+' · '+n.q);if(n.iface)line(tip,n.iface)}
  else if(n.type==='nbr'){line(tip,T.nbr);if(n.sub)line(tip,n.sub);if(n.ip)line(tip,n.ip)}else line(tip,T.inet);
  tip.style.display='block';moveTip(e);

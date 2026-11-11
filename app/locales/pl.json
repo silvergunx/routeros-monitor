@@ -868,5 +868,10 @@
   "topo.k_printer": "Drukarka",
   "topo.k_camera": "Kamera",
   "topo.k_iot": "Urządzenie IoT",
-  "topo.k_server": "Serwer / NAS"
+  "topo.k_server": "Serwer / NAS",
+  "topo.failed_h": "Nieudane próby połączenia: {n}",
+  "topo.failed_tries": "Nieudane próby połączenia: {n} (ostatnia {t})",
+  "topo.failed_known": "Urządzenie z DHCP: najpewniej ma zapisane błędne lub stare hasło Wi-Fi.",
+  "topo.failed_unknown": "Nieznane urządzenie (nie ma go w DHCP): obca próba połączenia albo błędne hasło. Sprawdź, czyje to urządzenie.",
+  "topo.leg_failed": "próbuje się połączyć, ale nie może"
 }

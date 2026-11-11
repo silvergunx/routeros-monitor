@@ -4624,6 +4624,10 @@ _KIND_RULES = [
 ]
 
 
+FAIL_WINDOW_MIN = 15  # okno, w którym liczymy nieudane próby połączenia z Wi-Fi
+FAIL_MIN_TRIES = 3
+
+
 def device_kind(name, vendor=""):
     """Zgadywany typ urządzenia (ikona na mapie) z nazwy i producenta; 'other', gdy nic nie pasuje."""
     s = ("%s %s" % (name or "", vendor or "")).lower()
@@ -4701,6 +4705,26 @@ def topology_view(s):
                              "signal": wq["signal"], "sc": wq["sc"]})
     for lst in clients.values():
         lst.sort(key=lambda c: (-(c["q"] if c["q"] is not None else -1), c["name"].lower()))
+    # urządzenia, które próbują się połączyć z Wi-Fi i nie mogą (błędne hasło albo obca próba): powtarzające się błędy uwierzytelnienia w logach
+    failed = {r.id: [] for r in routers}
+    since = now() - dt.timedelta(minutes=FAIL_WINDOW_MIN)
+    tries = {}
+    for rid, ts, tp, msg in s.execute(select(LogEntry.router_id, LogEntry.ts, LogEntry.topics, LogEntry.msg).where(
+            LogEntry.router_id.in_([r.id for r in routers]), LogEntry.ts > since, LogEntry.msg.like("%handshake%")).limit(5000)):
+        res = translate_log(msg, tp)
+        mac = oui.normalize((res or {}).get("hs") or "")
+        if mac and mac not in pick:
+            e = tries.setdefault((rid, mac), [0, ts])
+            e[0] += 1
+            e[1] = max(e[1], ts)
+    for (rid, mac), (n_try, last) in tries.items():
+        if n_try < FAIL_MIN_TRIES:
+            continue
+        l = leases.get(mac, {})
+        name, sub = device_label(mac, l.get("comment"), l.get("host"), names.get(mac))
+        failed[rid].append({"mac": mac, "name": name if name != "-" else mac, "sub": sub, "tries": n_try,
+                            "last": last.isoformat(timespec="seconds"), "known": bool(l or names.get(mac)),
+                            "kind": device_kind(name, OUI.lookup(mac))})
     seen_nbr, visited = set(), set()
 
     def node(r, up_port="", parent_port=""):
@@ -4720,7 +4744,7 @@ def topology_view(s):
         si = info[r.id]
         return {"type": "router", "id": r.id, "name": r.name, "model": si["model"], "online": r.online, "upg": r.upgrading,
                 "edge": bool(r.edge), "manager": si["manager"], "up_port": up_port, "parent_port": parent_port,
-                "clients": clients[r.id], "children": kids + nb[:20], "more": max(0, len(nb) - 20)}
+                "clients": clients[r.id], "failed": failed[r.id], "children": kids + nb[:20], "more": max(0, len(nb) - 20)}
     by_name = {r.id: r for r in routers}
     roots = [r for r in routers if r.edge] or [max(routers, key=lambda r: len(adj[r.id]))]
     trees = [node(r) for r in roots if r.id not in visited]
@@ -4768,6 +4792,11 @@ def topology_graph(s, root, orphans):
                 nodes.append({"id": cid, "type": "client", "name": c["name"], "sub": c["sub"], "ip": c["ip"], "mac": c["mac"], "iface": c["iface"],
                               "qc": c["qc"], "q": c["qlabel"], "signal": c["signal"], "kind": c["kind"], "depth": depth + 1})
                 links.append({"s": nid, "t": cid, "wifi": True})
+            for f in n["failed"]:
+                fid = "f" + f["mac"]
+                nodes.append({"id": fid, "type": "client", "failed": True, "name": f["name"], "sub": f["sub"], "mac": f["mac"], "tries": f["tries"],
+                              "last": f["last"], "known": f["known"], "kind": f["kind"], "qc": "bad", "signal": None, "depth": depth + 1})
+                links.append({"s": nid, "t": fid, "wifi": True, "failed": True})
         for c in n.get("children", []):
             add(c, (nid, n), depth + 1)
 

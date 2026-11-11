@@ -867,5 +867,10 @@
   "topo.k_printer": "Printer",
   "topo.k_camera": "Camera",
   "topo.k_iot": "IoT device",
-  "topo.k_server": "Server / NAS"
+  "topo.k_server": "Server / NAS",
+  "topo.failed_h": "Failed connection attempts: {n}",
+  "topo.failed_tries": "Failed connection attempts: {n} (last {t})",
+  "topo.failed_known": "A device known from DHCP: most likely a wrong or outdated Wi-Fi password is saved on it.",
+  "topo.failed_unknown": "An unknown device (not in DHCP): a foreign connection attempt or a wrong password. Find out whose device it is.",
+  "topo.leg_failed": "tries to connect but cannot"
 }
