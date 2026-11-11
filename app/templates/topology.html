@@ -54,7 +54,7 @@ const T={router:{{ t('topo.t_router')|tojson }},ap:{{ t('topo.t_ap')|tojson }},i
  up:{{ t('rt.online')|tojson }},down:{{ t('rt.offline')|tojson }},upg:{{ t('rt.upgrading')|tojson }},open:{{ t('topo.open')|tojson }},sig:{{ t('topo.signal')|tojson }},ftries:{{ t('topo.failed_tries')|tojson }},fknown:{{ t('topo.failed_known')|tojson }},funknown:{{ t('topo.failed_unknown')|tojson }},kind:{{ {'phone':t('topo.k_phone'),'tablet':t('topo.k_tablet'),'laptop':t('topo.k_laptop'),'tv':t('topo.k_tv'),'printer':t('topo.k_printer'),'camera':t('topo.k_camera'),'iot':t('topo.k_iot'),'server':t('topo.k_server'),'other':t('topo.t_client')}|tojson }}};
 let G={nodes:[],links:[],byId:{},parent:{}},S={k:1,x:0,y:0},sig='',pins={},hint='';
 try{pins=JSON.parse(localStorage.getItem('topoPins')||'{}')}catch(e){pins={}}
-const R=n=>n.type==='inet'?30:n.type==='router'?28:n.type==='nbr'?21:13;
+const R=n=>n.type==='inet'?48:n.type==='router'?28:n.type==='nbr'?21:13;
 function el(tag,at,par){const e=document.createElementNS(NS,tag);for(const k in at)e.setAttribute(k,at[k]);if(par)par.appendChild(e);return e}
 function wl(c,ap){if(c.failed)return 165;const s=c.signal==null?-70:c.signal,w=Math.max(0,Math.min(1,(-s-45)/45));return 58+w*82+Math.min(22,(ap.nc||0)*1.1)}
 function layout(iters,a0){const N=G.nodes;let a=a0;
@@ -65,13 +65,13 @@ function layout(iters,a0){const N=G.nodes;let a=a0;
    let f=0;if(d<rr)f=(rr-d)*.5;if(d<420)f+=(cc?340:5400)*a/d;
    const fx=dx/d*f,fy=dy/d*f;p.vx-=fx;p.vy-=fy;q.vx+=fx;q.vy+=fy}}
   for(const l of G.links){const p=G.byId[l.s],q=G.byId[l.t];let dx=q.x-p.x,dy=q.y-p.y,d=Math.sqrt(dx*dx+dy*dy)||.01;
-   if(l.vpn)continue;const L=l.wifi?wl(q,p):(q.type==='nbr'?112:(p.type==='inet'?125:150));
+   if(l.vpn)continue;const L=l.wifi?wl(q,p):(q.type==='nbr'?112:(p.type==='inet'?160:150));
    const f=(d-L)*.1*Math.max(a,.15),fx=dx/d*f,fy=dy/d*f;p.vx+=fx;p.vy+=fy;q.vx-=fx;q.vy-=fy}
   for(const l of G.links){if(l.vpn)continue;const p=G.byId[l.s],q=G.byId[l.t],ex=q.x-p.x,ey=q.y-p.y,e2=ex*ex+ey*ey||1;
    for(const n of N){if(n===p||n===q||n.pin)continue;let u=((n.x-p.x)*ex+(n.y-p.y)*ey)/e2;if(u<-.05||u>1.05)continue;u=Math.max(0,Math.min(1,u));
     const cx=p.x+ex*u,cy=p.y+ey*u;let dx=n.x-cx,dy=n.y-cy,d=Math.sqrt(dx*dx+dy*dy)||.01;const m=R(n)+(n.type==='client'?12:30);
     if(d<m){const f=(m-d)*.45;n.vx+=dx/d*f;n.vy+=dy/d*f}}}
-  for(const n of N){if(n.type!=='client'){n.vy+=(n.depth*160-n.y)*.11*a;n.vx-=n.x*.004*a}
+  for(const n of N){if(n.type!=='client'){n.vy+=(n.depth*170-n.y)*.11*a;n.vx-=n.x*.004*a}
    if(n.pin){n.vx=n.vy=0;continue}n.x+=n.vx;n.y+=n.vy;n.vx*=.55;n.vy*=.55}}}
 function initPos(old){const rows={};G.nodes.forEach(n=>{if(n.type!=='client'&&n.type!=='nbr'){(rows[n.depth]=rows[n.depth]||[]).push(n)}});
  const order=G.nodes.slice().sort((a,b)=>a.depth-b.depth);
@@ -82,8 +82,8 @@ function initPos(old){const rows={};G.nodes.forEach(n=>{if(n.type!=='client'&&n.
   if(n.type==='client'||n.type==='nbr'||!par){
    if(par&&n.type!=='router'){const sib=G.nodes.filter(m=>G.parent[m.id]===par.id),i=sib.indexOf(n),ang=(i/Math.max(1,sib.length))*6.283+(par.x>0?.3:1.2);
     const rr=n.type==='client'?wl(n,par):70;n.x=par.x+Math.cos(ang)*rr;n.y=par.y+Math.sin(ang)*rr}
-   else{const r=rows[n.depth]||[n],i=r.indexOf(n);n.x=(i-(r.length-1)/2)*170;n.y=n.depth*160}}
-  else{const r=rows[n.depth]||[n],i=r.indexOf(n);n.x=(i-(r.length-1)/2)*170+(Math.random()-.5)*10;n.y=n.depth*160}}}
+   else{const r=rows[n.depth]||[n],i=r.indexOf(n);n.x=(i-(r.length-1)/2)*170;n.y=n.depth*170}}
+  else{const r=rows[n.depth]||[n],i=r.indexOf(n);n.x=(i-(r.length-1)/2)*170+(Math.random()-.5)*10;n.y=n.depth*170}}}
 function fit(){const w=wrap.clientWidth,h=wrap.clientHeight;if(!w||!G.nodes.length)return;
  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;G.nodes.forEach(n=>{const r=R(n)+30;x0=Math.min(x0,n.x-r);x1=Math.max(x1,n.x+r);y0=Math.min(y0,n.y-r);y1=Math.max(y1,n.y+r+14)});
  const k=Math.min(w/(x1-x0),h/(y1-y0),1.5);S={k,x:w/2-k*(x0+x1)/2,y:h/2-k*(y0+y1)/2};applyT()}
