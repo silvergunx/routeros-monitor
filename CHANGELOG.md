@@ -10,6 +10,7 @@ Notes marked **Routers** mean the configuration command has to be pasted again o
 Work in progress on `develop` (version 1.5.0).
 
 ### Added
+- **Panel ports in `.env`**: `HTTP_PORT` and `HTTPS_PORT` (defaults 80 and 443) set the ports on the server in `docker-compose.yml`, so another service using 80 or 443 no longer forces editing the compose file, which `git pull` would overwrite. Existing installations are unaffected. An automatic Let's Encrypt certificate still needs 80 and 443 reachable from the internet.
 - **Device vendor from the MAC address and your own device names** (suggested on the forum). The Devices and Wi-Fi tabs show the vendor under the name (also when a host name exists), taken from the public IEEE registry that your own server downloads (Settings → General, about 4 MB, refreshed every 30 days, button "Download now"; `OUI_DOWNLOAD=0` turns the automatic download off). Devices with a random, private MAC address (phones) are marked as such. Admins can give any device their own name with the ✎ button; the name is stored per MAC address and applies on all routers. The log analysis shows the name and vendor next to MAC addresses, and when the same device keeps dropping on authentication it adds a hint that it most likely has a wrong Wi-Fi password saved. No router script change, no need to paste the command again.
 
 ## [1.4.0] - 2026-11-11

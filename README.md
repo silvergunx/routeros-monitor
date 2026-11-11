@@ -152,6 +152,7 @@ If a change affects the scripts on the routers, the release notes will say that 
 | `SECRET_KEY` | – | session key, at least 16 characters (`openssl rand -hex 32`) |
 | `RETENTION_DAYS` | `30` | how many days to keep measurements (CPU, RAM, link quality, ...) |
 | `IFACE_RETENTION_DAYS` | `7` | how many days to keep per-interface traffic samples (the largest table); older samples are removed in the background |
+| `HTTP_PORT` / `HTTPS_PORT` | `80` / `443` | ports of the panel on the server, for when another service already uses 80 or 443 (then open `http://ADDRESS:PORT`). An automatic Let's Encrypt certificate needs the server reachable from the internet on 80 and 443 |
 | `SYSLOG_PORT` | `514` | UDP port on the server for router logs |
 | `LOG_RETENTION_DAYS` | `14` | how many days to keep logs |
 | `TZ` | `Europe/Warsaw` | time zone |
