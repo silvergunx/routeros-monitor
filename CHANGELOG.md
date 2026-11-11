@@ -7,7 +7,7 @@ Notes marked **Routers** mean the configuration command has to be pasted again o
 
 ## [Unreleased]
 
-Work in progress on `develop` (version 1.5.0).
+## [1.5.0] - 2026-11-11
 
 ### Added
 - **Devices without DHCP in the Devices list**: a device with a fixed IP address (or a network without a DHCP server) used to be missing, because only DHCP leases were read. The `app-inv-dhcp` router script now also sends the ARP table entries that have no DHCP lease (address, MAC, interface, state). They get the same online/idle/offline status as the others and show as "no DHCP" with the vendor from the MAC address and, if you set one, your own name (✎). An IP address in ARP without a real MAC address (empty or all zeros) is not hidden: it shows as a highlighted "unknown device" without a vendor, so you can notice that something tries to talk to an address nobody answers for. Entries from the WAN interface (the provider's gateway and neighbours) are ignored, and failed or incomplete ARP entries are skipped. An ARP entry expires a few minutes after the last traffic, so a silent device disappears sooner than a DHCP lease would. **Routers**: paste the configuration command again on every router (the script version is now 3, so routers show "script outdated" until then).
