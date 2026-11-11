@@ -96,12 +96,12 @@ o.querySelector('summary').addEventListener('click',e=>{if(o.classList.contains(
 </div>
 
 <div class="rp rp-ports card"><div id="live-ports" data-live>{% if not inv.ports %}<p class="mut small">{{ t('rp.ports_none') }}</p>{% else %}
-<div class="pnl">{% for p in inv.ports %}<div class="pt {{p.state}}" title="{{p.name}}{% if p.comment %} ({{p.comment}}){% endif %}: {{ {'up':t('rp.p_up'),'slow':t('rp.p_slow'),'down':t('rp.p_down'),'off':t('rp.p_off')}[p.state] }}{% if p.rate %}, {{p.rate}}{% endif %}{% if p.half %}, {{ t('rp.p_half') }}{% endif %}{% if p.bridge %}, bridge {{p.bridge}}{% endif %}{% if p.wan %}, WAN{% endif %}">
-{% if p.wan %}<span class="tag">WAN</span>{% endif %}<b>{{p.short}}</b>
+<div class="pnl">{% for p in inv.ports %}<div class="pt s-{{p.state}}" title="{{p.name}}{% if p.comment %} ({{p.comment}}){% endif %}: {{ {'up':t('rp.p_up'),'slow':t('rp.p_slow'),'down':t('rp.p_down'),'off':t('rp.p_off')}[p.state] }}{% if p.rate %}, {{p.rate}}{% endif %}{% if p.half %}, {{ t('rp.p_half') }}{% endif %}{% if p.bridge %}, bridge {{p.bridge}}{% endif %}{% if p.wan %}, WAN{% endif %}">
+{% if p.wan %}<span class="tag">WAN</span>{% endif %}<b style="font-size:{{ 15 if p.short|length <= 6 else (13 if p.short|length <= 8 else 11) }}px">{{p.short}}</b>
 {% if p.state in ('up','slow') %}<span class="sp1 {{'warn' if p.state=='slow'}}">{{p.rate or '·'}}{% if p.half %} ½{% endif %}</span><span class="tr">↓{{p.rx or '0'}}</span><span class="tr">↑{{p.tx or '0'}}</span>
 {% else %}<span class="nm">{{ t('rp.p_off') if p.state=='off' else t('rp.p_down') }}</span>{% endif %}
 {% if p.bridge %}<span class="nm">{{p.bridge}}</span>{% endif %}</div>{% endfor %}</div>
-<div class="pleg"><span><i class="up"></i>{{ t('rp.p_up') }}</span><span><i class="slow"></i>{{ t('rp.p_slow') }}</span><span><i></i>{{ t('rp.p_down') }}</span><span><i class="off"></i>{{ t('rp.p_off') }}</span></div>
+<div class="pleg"><span><i class="s-up"></i>{{ t('rp.p_up') }}</span><span><i class="s-slow"></i>{{ t('rp.p_slow') }}</span><span><i></i>{{ t('rp.p_down') }}</span><span><i class="s-off"></i>{{ t('rp.p_off') }}</span></div>
 {% if inv.ports|selectattr('state','equalto','slow')|list %}<p class="warn small">{{ t('rp.p_slow_help') }}</p>{% endif %}{% endif %}</div></div>
 <div class="rp rp-dev card"><div class="row" style="justify-content:flex-end;margin-bottom:8px"><input class="q" placeholder="{{ t('rp.search') }}" oninput="invFilter(this)" style="width:240px"></div><div id="live-dev" data-live>{% if inv.stale %}<p class="warn small">{{ t('rp.stale_a') }}<span class="t" data-t="{{inv.updated|iso}}Z"></span>{{ t('rp.stale_b') }}</p>{% elif not inv.updated %}<p class="mut small">{{ t('rp.nodata_inv') }}</p>{% endif %}<div class="scroll"><table class="mob"><tr><th>Status</th><th>{{ t('lv.name') }}</th><th>IP</th><th class="hm">MAC</th><th>Wi-Fi</th><th class="hm">{{ t('rp.lease') }}</th><th class="hm">{{ t('rp.last_dhcp') }}</th></tr>
 {% for d in inv.devices %}<tr><td data-l="Status"><span class="st {{d.state}}">{{ {'online':t('rt.online'),'idle':t('rp.idle'),'offline':t('rt.offline')}[d.state] }}</span></td>

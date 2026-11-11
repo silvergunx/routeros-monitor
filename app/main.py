@@ -1792,7 +1792,7 @@ def ports_view(s, r, rows, wan):
         rx, tx = bps.get(name, (None, None))
         out.append({"name": name, "short": port_short(name),
                     "state": state, "rate": rate_label(mb) if state in ("up", "slow") else "", "half": half and state in ("up", "slow"),
-                    "bridge": d.get("br", ""), "wan": bool(wan and name == wan), "comment": d.get("cm", ""),
+                    "bridge": "" if d.get("br", "").startswith("*") else d.get("br", ""), "wan": bool(wan and name == wan), "comment": d.get("cm", ""),
                     "link_downs": num(d.get("ld")),
                     "rx": bps_h(rx) if state in ("up", "slow") else "", "tx": bps_h(tx) if state in ("up", "slow") else ""})
     return out
