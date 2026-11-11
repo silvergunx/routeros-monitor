@@ -821,5 +821,7 @@
   "msg.oui_ok": "Vendor registry downloaded: %s entries.",
   "msg.oui_err": "Could not download the vendor registry:",
   "an.203": "Device %s dropped %d times on authentication. If it keeps connecting and dropping, it most likely has a wrong or outdated Wi-Fi password saved: forget the network on the device and reconnect with the current password.",
-  "rp.no_dhcp": "no DHCP"
+  "rp.no_dhcp": "no DHCP",
+  "dev.unknown": "unknown device",
+  "dev.no_mac": "IP address in ARP without a MAC address"
 }

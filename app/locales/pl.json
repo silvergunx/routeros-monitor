@@ -822,5 +822,7 @@
   "msg.oui_ok": "Pobrano rejestr producentów: %s wpisów.",
   "msg.oui_err": "Nie udało się pobrać rejestru producentów:",
   "an.203": "Urządzenie %s odpadło %d razy na uwierzytelnianiu. Jeśli ciągle się łączy i odpada, najpewniej ma zapisane błędne lub stare hasło Wi-Fi: na urządzeniu zapomnij tę sieć i połącz się ponownie z aktualnym hasłem.",
-  "rp.no_dhcp": "bez DHCP"
+  "rp.no_dhcp": "bez DHCP",
+  "dev.unknown": "nieznane urządzenie",
+  "dev.no_mac": "adres IP w ARP bez adresu MAC"
 }
