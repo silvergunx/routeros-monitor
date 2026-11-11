@@ -755,9 +755,11 @@ INV_WIFI = '\n:local url "@URL@/api/inventory?t=@TOKEN@"\n:local seq [:tostr [:r
 INV_WIRELESS = '\n:local url "@URL@/api/inventory?t=@TOKEN@"\n:local seq [:tostr [:rndnum from=100000 to=999999999]]\n:local esc do={\n  :local o ""\n  :if ([:len $s] > 0) do={\n    :for k from=0 to=([:len $s] - 1) do={\n      :local ch [:pick $s $k]\n      :if ($ch = "\\"" || $ch = "\\\\") do={:set o ($o . "\\\\" . $ch)} else={\n        :if ($ch = "\\n" || $ch = "\\r" || $ch = "\\t") do={:set o ($o . " ")} else={:set o ($o . $ch)}\n      }\n    }\n  }\n  :return $o\n}\n:local send do={\n  :do {/tool fetch url=$u http-method=post http-data=$d http-header-field="Content-Type: application/json" output=none} on-error={\n    :delay 5s\n    /tool fetch url=$u http-method=post http-data=$d http-header-field="Content-Type: application/json" output=none\n  }\n}\n\n:local buf ""\n:foreach i in=[/interface wireless registration-table find] do={\n  :do {\n    :local a [/interface wireless registration-table get $i]\n    :local o ""\n    :foreach k,v in=$a do={\n      :if ($k ~ "^(interface|ssid|signal|band|uptime|last-ip|tx-ccq|signal-to-noise)\\$" || $k ~ "(rate|snr|noise|mcs|width|stream|strength)") do={\n        :local vs [$esc s=[:tostr $v]]\n        :set o ($o . ",\\"" . $k . "\\":\\"" . $vs . "\\"")\n      }\n    }\n    :local mac [/interface wireless registration-table get $i mac-address]\n    :if ([:len $buf] > 0) do={:set buf ($buf . ",")}\n    :set buf ($buf . "{\\"key\\":\\"" . $mac . "\\"" . $o . "}")\n  } on-error={}\n  :if ([:len $buf] > 3000) do={\n    $send u=$url d=("{\\"k\\":\\"wireless\\",\\"seq\\":\\"$seq\\",\\"done\\":false,\\"items\\":\\5B" . $buf . "\\5D}")\n    :set buf ""\n  }\n}\n$send u=$url d=("{\\"k\\":\\"wireless\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B" . $buf . "\\5D}")'
 INV_VPN = '\n:local url "@URL@/api/inventory?t=@TOKEN@"\n:local seq [:tostr [:rndnum from=100000 to=999999999]]\n:local esc do={\n  :local o ""\n  :if ([:len $s] > 0) do={\n    :for k from=0 to=([:len $s] - 1) do={\n      :local ch [:pick $s $k]\n      :if ($ch = "\\"" || $ch = "\\\\") do={:set o ($o . "\\\\" . $ch)} else={\n        :if ($ch = "\\n" || $ch = "\\r" || $ch = "\\t") do={:set o ($o . " ")} else={:set o ($o . $ch)}\n      }\n    }\n  }\n  :return $o\n}\n:local send do={\n  :do {/tool fetch url=$u http-method=post http-data=$d http-header-field="Content-Type: application/json" output=none} on-error={\n    :delay 5s\n    /tool fetch url=$u http-method=post http-data=$d http-header-field="Content-Type: application/json" output=none\n  }\n}\n\n:local buf ""\n:foreach i in=[/interface wireguard peers find] do={\n  :do {\n    :local pk [/interface wireguard peers get $i public-key]\n    :local ifn [/interface wireguard peers get $i interface]\n    :local nm ""\n    :do {:set nm [/interface wireguard peers get $i name]} on-error={}\n    :local nme [$esc s=$nm]\n    :local cm ""\n    :do {:set cm [/interface wireguard peers get $i comment]} on-error={}\n    :local cme [$esc s=$cm]\n    :local ep ""\n    :do {:set ep [/interface wireguard peers get $i current-endpoint-address]} on-error={}\n    :local hs ""\n    :do {:set hs [/interface wireguard peers get $i last-handshake]} on-error={}\n    :local rx ""\n    :local tx ""\n    :do {:set rx [/interface wireguard peers get $i rx]; :set tx [/interface wireguard peers get $i tx]} on-error={}\n    :local dis [/interface wireguard peers get $i disabled]\n    :if ([:len $buf] > 0) do={:set buf ($buf . ",")}\n    :set buf ($buf . "{\\"key\\":\\"$pk\\",\\"iface\\":\\"$ifn\\",\\"name\\":\\"$nme\\",\\"comment\\":\\"$cme\\",\\"endpoint\\":\\"$ep\\",\\"hs\\":\\"$hs\\",\\"rx\\":\\"$rx\\",\\"tx\\":\\"$tx\\",\\"disabled\\":\\"$dis\\"}")\n  } on-error={}\n  :if ([:len $buf] > 3000) do={\n    $send u=$url d=("{\\"k\\":\\"wg\\",\\"seq\\":\\"$seq\\",\\"done\\":false,\\"items\\":\\5B" . $buf . "\\5D}")\n    :set buf ""\n  }\n}\n$send u=$url d=("{\\"k\\":\\"wg\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B" . $buf . "\\5D}")\n:set buf ""\n:set seq [:tostr [:rndnum from=100000 to=999999999]]\n:foreach i in=[/ppp active find] do={\n  :do {\n    :local nmr [/ppp active get $i name]\n    :local nm [$esc s=$nmr]\n    :local sv [/ppp active get $i service]\n    :local ad [/ppp active get $i address]\n    :local up [/ppp active get $i uptime]\n    :local cir ""\n    :do {:set cir [/ppp active get $i caller-id]} on-error={}\n    :local ci [$esc s=$cir]\n    :if ([:len $buf] > 0) do={:set buf ($buf . ",")}\n    :local ky ($nm . "/" . $sv)\n    :set buf ($buf . "{\\"key\\":\\"$ky\\",\\"name\\":\\"$nm\\",\\"service\\":\\"$sv\\",\\"address\\":\\"$ad\\",\\"uptime\\":\\"$up\\",\\"caller\\":\\"$ci\\"}")\n  } on-error={}\n  :if ([:len $buf] > 3000) do={\n    $send u=$url d=("{\\"k\\":\\"ppp\\",\\"seq\\":\\"$seq\\",\\"done\\":false,\\"items\\":\\5B" . $buf . "\\5D}")\n    :set buf ""\n  }\n}\n$send u=$url d=("{\\"k\\":\\"ppp\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B" . $buf . "\\5D}")'
 INV_SYS = '\n:local url "@URL@/api/inventory?t=@TOKEN@"\n:local seq [:tostr [:rndnum from=100000 to=999999999]]\n:local send do={\n  :do {/tool fetch url=$u http-method=post http-data=$d http-header-field="Content-Type: application/json" output=none} on-error={\n    :delay 5s\n    /tool fetch url=$u http-method=post http-data=$d http-header-field="Content-Type: application/json" output=none\n  }\n}\n:global appCaps ""\n:set appCaps ""\n:do {:local f [:parse ":global appCaps; :if (\\5B:tostr \\5B/interface wifi capsman get enabled\\5D\\5D ~ \\"^(true|yes)\\") do={:set appCaps (\\$appCaps . \\"manager,\\")}"]; $f} on-error={}\n:do {:local f [:parse ":global appCaps; :if (\\5B:tostr \\5B/interface wifi cap get enabled\\5D\\5D ~ \\"^(true|yes)\\") do={:set appCaps (\\$appCaps . \\"cap,\\")}"]; $f} on-error={}\n:do {:local f [:parse ":global appCaps; :if (\\5B:tostr \\5B/caps-man manager get enabled\\5D\\5D ~ \\"^(true|yes)\\") do={:set appCaps (\\$appCaps . \\"manager,\\")}"]; $f} on-error={}\n:do {:local f [:parse ":global appCaps; :if (\\5B:tostr \\5B/interface wireless cap get enabled\\5D\\5D ~ \\"^(true|yes)\\") do={:set appCaps (\\$appCaps . \\"cap,\\")}"]; $f} on-error={}\n:global appCapsN ""\n:set appCapsN ""\n:do {:local f [:parse ":global appCapsN; :set appCapsN \\5B:len \\5B/interface wifi capsman remote-cap find\\5D\\5D"]; $f} on-error={}\n:if ([:len [:tostr $appCapsN]] = 0) do={:do {:local f [:parse ":global appCapsN; :set appCapsN \\5B:len \\5B/caps-man remote-cap find\\5D\\5D"]; $f} on-error={}}\n:local model ""\n:local fwc ""\n:local fwu ""\n:do {:set model [/system routerboard get model]} on-error={}\n:do {:set fwc [/system routerboard get current-firmware]} on-error={}\n:do {:set fwu [/system routerboard get upgrade-firmware]} on-error={}\n:local wq [:len [/system package find where name~"^wifi-qcom" and disabled=no]]\n:local tm [/system resource get total-memory]\n:global appHasWifi\n:global appHasWl\n:set appHasWifi 0\n:set appHasWl 0\n:do {:local f [:parse ":global appHasWifi; :set appHasWifi [:len [/interface wifi find]]"]; $f} on-error={}\n:do {:local f [:parse ":global appHasWl; :set appHasWl [:len [/interface wireless find]]"]; $f} on-error={}\n:local dhs [:len [/ip dhcp-server find]]\n:local wgs 0\n:do {:set wgs [:len [/interface wireguard find]]} on-error={}\n:local mdl ""\n:for k from=0 to=([:len $model] - 1) do={:local ch [:pick $model $k]; :if ($ch != "\\"" && $ch != "\\\\") do={:set mdl ($mdl . $ch)}}\n$send u=$url d=("{\\"k\\":\\"sys\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B{\\"key\\":\\"sys\\",\\"caps\\":\\"$appCaps\\",\\"capsn\\":\\"$appCapsN\\",\\"model\\":\\"$mdl\\",\\"fwc\\":\\"$fwc\\",\\"fwu\\":\\"$fwu\\",\\"wq\\":\\"$wq\\",\\"tm\\":\\"$tm\\",\\"wifi\\":\\"$appHasWifi\\",\\"wl\\":\\"$appHasWl\\",\\"dhs\\":\\"$dhs\\",\\"wgs\\":\\"$wgs\\"}\\5D}")\n'
-INV_MAIN = '\n:if ([:len [/system script find where name="app-inv-dhcp"]] > 0) do={:do {/system script run app-inv-dhcp} on-error={}}\n:global appHasWifi\n:global appHasWl\n:set appHasWifi 0\n:set appHasWl 0\n:do {:local f [:parse ":global appHasWifi; :set appHasWifi [:len [/interface wifi find]]"]; $f} on-error={}\n:do {:local f [:parse ":global appHasWl; :set appHasWl [:len [/interface wireless find]]"]; $f} on-error={}\n:if ($appHasWifi > 0) do={:do {/system script run app-inv-wifi} on-error={}}\n:if ($appHasWl > 0) do={:do {/system script run app-inv-wireless} on-error={}}\n:do {/system script run app-inv-vpn} on-error={}\n:do {/system script run app-inv-sys} on-error={}\n:do {/system script run app-inv-eth} on-error={}\n'
+INV_MAIN = '\n:if ([:len [/system script find where name="app-inv-dhcp"]] > 0) do={:do {/system script run app-inv-dhcp} on-error={}}\n:global appHasWifi\n:global appHasWl\n:set appHasWifi 0\n:set appHasWl 0\n:do {:local f [:parse ":global appHasWifi; :set appHasWifi [:len [/interface wifi find]]"]; $f} on-error={}\n:do {:local f [:parse ":global appHasWl; :set appHasWl [:len [/interface wireless find]]"]; $f} on-error={}\n:if ($appHasWifi > 0) do={:do {/system script run app-inv-wifi} on-error={}}\n:if ($appHasWl > 0) do={:do {/system script run app-inv-wireless} on-error={}}\n:do {/system script run app-inv-vpn} on-error={}\n:do {/system script run app-inv-sys} on-error={}\n:do {/system script run app-inv-eth} on-error={}\n:if ([:len [/system script find where name="app-inv-topo"]] > 0) do={:do {/system script run app-inv-topo} on-error={}}\n'
 
 INV_ETH = INV_DHCP[:INV_DHCP.index(':local buf ""')].rstrip('\n') + '\n' + '\n:local buf ""\n:foreach i in=[/interface ethernet find] do={\n  :do {\n    :local n [/interface ethernet get $i name]\n    :local dis [/interface ethernet get $i disabled]\n    :local run [/interface ethernet get $i running]\n    :local cm ""\n    :do {:set cm [/interface ethernet get $i comment]} on-error={}\n    :local ce [$esc s=$cm]\n    :local rate ""\n    :local dup ""\n    :do {\n      :local mo [/interface ethernet monitor $i once as-value]\n      :set rate ($mo->"rate")\n      :set dup ($mo->"full-duplex")\n    } on-error={}\n    :local ld ""\n    :do {:set ld [/interface ethernet get $i link-downs]} on-error={}\n    :local br ""\n    :do {:set br [/interface bridge port get [find where interface=$n] bridge]} on-error={}\n    :if ([:len $buf] > 0) do={:set buf ($buf . ",")}\n    :set buf ($buf . "{\\"key\\":\\"$n\\",\\"run\\":\\"$run\\",\\"dis\\":\\"$dis\\",\\"rate\\":\\"$rate\\",\\"dup\\":\\"$dup\\",\\"ld\\":\\"$ld\\",\\"br\\":\\"$br\\",\\"cm\\":\\"$ce\\"}")\n  } on-error={}\n  :if ([:len $buf] > 3000) do={\n    $send u=$url d=("{\\"k\\":\\"eth\\",\\"seq\\":\\"$seq\\",\\"done\\":false,\\"items\\":\\5B" . $buf . "\\5D}")\n    :set buf ""\n  }\n}\n$send u=$url d=("{\\"k\\":\\"eth\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B" . $buf . "\\5D}")'
+
+INV_TOPO = INV_DHCP[:INV_DHCP.index(':local buf ""')].rstrip('\n') + '\n' + '\n:local buf ""\n:foreach i in=[/ip neighbor find] do={\n  :do {\n    :local m [/ip neighbor get $i mac-address]\n    :local ifc [/ip neighbor get $i interface]\n    :local idn ""\n    :do {:set idn [/ip neighbor get $i identity]} on-error={}\n    :local ide [$esc s=$idn]\n    :local ad ""\n    :do {:set ad [/ip neighbor get $i address]} on-error={}\n    :local pl ""\n    :do {:set pl [/ip neighbor get $i platform]} on-error={}\n    :local bd ""\n    :do {:set bd [/ip neighbor get $i board]} on-error={}\n    :local ple [$esc s=$pl]\n    :local bde [$esc s=$bd]\n    :if ([:len $buf] > 0) do={:set buf ($buf . ",")}\n    :set buf ($buf . "{\\"key\\":\\"" . $m . "|" . $ifc . "\\",\\"mac\\":\\"" . $m . "\\",\\"if\\":\\"" . $ifc . "\\",\\"id\\":\\"" . $ide . "\\",\\"ip\\":\\"" . $ad . "\\",\\"pl\\":\\"" . $ple . "\\",\\"bd\\":\\"" . $bde . "\\"}")\n  } on-error={}\n  :if ([:len $buf] > 3000) do={\n    $send u=$url d=("{\\"k\\":\\"nbr\\",\\"seq\\":\\"$seq\\",\\"done\\":false,\\"items\\":\\5B" . $buf . "\\5D}")\n    :set buf ""\n  }\n}\n$send u=$url d=("{\\"k\\":\\"nbr\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B" . $buf . "\\5D}")'
 
 
 LIVE = r'''
@@ -936,6 +938,7 @@ def setup_rsc(request: Request, t: str, iface: str = "ether1", list: str = "whit
     r = get_router(s, t)
     wl = 1 if whitelist_on(s) else 0
     bl = 1 if blacklist_on(s) else 0
+    topo = 1 if topo_on(s) else 0
     base = str(request.base_url).rstrip("/")
     rep = {"@URL@": base, "@TOKEN@": t, "@IFACE@": clean(iface, "ether1"), "@LIST@": clean(list, "whitelist"),
            "@CV@": str(SCRIPT_VERSION), "@SPEEDURL@": SPEED_URL, "@SPEEDBYTES@": str(SPEED_BYTES), "@SPEEDN@": str(SPEED_STREAMS_ROUTER)}
@@ -960,6 +963,7 @@ def setup_rsc(request: Request, t: str, iface: str = "ether1", list: str = "whit
         '/system script add name=app-inv-vpn source="%s"' % q(fill(INV_VPN)),
         '/system script add name=app-inv-sys source="%s"' % q(fill(INV_SYS)),
         '/system script add name=app-inv-eth source="%s"' % q(fill(INV_ETH)),
+    ] + ['/system script add name=app-inv-topo source="%s"' % q(fill(INV_TOPO))] * topo + [
         '/system script add name=app-inventory source="%s"' % q(fill(INV_MAIN)),
         '/system script add name=app-upgrade source="%s"' % q(fill(UPG)),
         '/system script add name=app-speed source="%s"' % q(fill(SPEED)),
@@ -1375,7 +1379,7 @@ def _store_metrics(s, t, raw, ip=None, cv=0):
 
 
 # ---------- inventory (DHCP / Wi-Fi / VPN) ----------
-INV_KINDS = {"dhcp", "wifi", "wireless", "wg", "ppp", "sys", "eth"}
+INV_KINDS = {"dhcp", "wifi", "wireless", "wg", "ppp", "sys", "eth", "nbr"}
 
 
 def parse_body(raw, rname):
@@ -1615,6 +1619,29 @@ def whitelist_on(s):
     return bool(s.scalar(select(func.count(Whitelist.id)).where(Whitelist.kind == "white")))
 
 
+def topo_on(s):
+    """Moduł 'Topologia' (karta z mapą połączeń): wyłączony, dopóki administrator go nie włączy w Ustawieniach."""
+    return sget(s, "topo_on", "0") == "1"
+
+
+_TOPO_ON = [None, 0.0]
+
+
+def topo_enabled():
+    if time.time() - _TOPO_ON[1] < 30:
+        return _TOPO_ON[0]
+    try:
+        with Session(engine) as s:
+            val = topo_on(s)
+    except Exception:
+        val = False
+    _TOPO_ON[:] = [val, time.time()]
+    return val
+
+
+templates.env.globals["topo_on"] = topo_enabled
+
+
 def wl_on():
     if time.time() - _WL_ON[1] < 30:
         return _WL_ON[0]
@@ -1806,7 +1833,7 @@ def inventory_view(s, r):
     by = {k: [] for k in INV_KINDS}
     upd = None
     for x in rows:
-        if x.kind in ("wifi", "wireless", "eth") and (now() - x.updated).total_seconds() > 300:
+        if x.kind in ("wifi", "wireless", "eth", "nbr") and (now() - x.updated).total_seconds() > 300:
             continue  # klient nie zgłaszany od 5 min - nie pokazuj "zamrożonego" odczytu
         try:
             d = json.loads(x.data)
@@ -4562,7 +4589,7 @@ def settings_view(request, s, msg="", ok=True):
         "domain": sget(s, "domain"), "email": sget(s, "email"), "msg": msg, "ok": ok,
         "interval": interval(s), "intervals": INTERVALS, "routers": ordered_routers(s), "bk": backups_view(s),
         "wl_enabled": whitelist_on(s), "bl_enabled": blacklist_on(s), "ab": autoban_cfg(s), "ab_hours": AUTOBAN_HOURS,
-        "off_mult": offline_mult(s),
+        "off_mult": offline_mult(s), "topo_enabled": topo_on(s),
         "thr_rows": [{"id": r.id, "name": r.name, "gap": reporting_gap(r.id), "auto_nr": auto_no_response(r.id),
                       "auto_off": auto_offline(r.id), "own_nr": _THR.get(r.id, {}).get("nr"), "own_off": _THR.get(r.id, {}).get("off"),
                       "eff_nr": no_response_after(r.id), "eff_off": online_after(r.id)} for r in ordered_routers(s)], "nf": notif_view(s), "langs": i18n.languages(),
@@ -4582,6 +4609,117 @@ def settings_whitelist(request: Request, on: str = Form(""), s: Session = Depend
     s.commit()
     _WL_ON[1] = 0
     return settings_view(request, s, (tr("msg.wl_on") if on == "1" else tr("msg.wl_off")) + " " + tr("msg.wl_paste"), True)
+
+
+def _nbr_port(d):
+    """Port lokalny, na którym widać sąsiada (RouterOS podaje też bridge: bierzemy fizyczny port)."""
+    parts = [x for x in (d.get("if") or "").split(",") if x]
+    return next((x for x in parts if not x.startswith("bridge")), parts[0] if parts else "")
+
+
+def topology_view(s):
+    """Drzewo połączeń: Internet -> router brzegowy -> sąsiedzi (MNDP/LLDP) -> klienci Wi-Fi pod swoim AP."""
+    routers = ordered_routers(s)
+    if not routers:
+        return {"root": None, "orphans": [], "has_nbr": False}
+    info = {r.id: sys_info(s, r) for r in routers}
+    by_ident = {r.ident.strip().lower(): r for r in routers if r.ident}
+    by_ip = {r.log_ip: r for r in routers if r.log_ip}
+    inv = {r.id: {"nbr": {}, "wifi": [], "dhcp": {}} for r in routers}
+    for x in s.scalars(select(Inv).where(Inv.kind.in_(("nbr", "wifi", "wireless", "dhcp")))):
+        if x.router_id not in inv or (x.kind != "dhcp" and (now() - x.updated).total_seconds() > 300):
+            continue
+        try:
+            d = json.loads(x.data)
+        except ValueError:
+            continue
+        slot = inv[x.router_id]
+        if x.kind == "nbr":
+            mac = (d.get("mac") or "").upper()
+            old = slot["nbr"].get(mac)
+            if mac and (not old or old["if"].startswith("bridge")):  # ten sam sąsiad bywa widoczny też na bridge: wolimy port
+                slot["nbr"][mac] = d
+        elif x.kind == "dhcp":
+            if d.get("src") != "arp":
+                slot["dhcp"][(d.get("key") or "").upper()] = d
+        else:
+            slot["wifi"].append((x.updated, d))
+    # sąsiedzi -> połączenia między monitorowanymi routerami albo niemonitorowane urządzenia
+    adj, other = {r.id: {} for r in routers}, {r.id: [] for r in routers}
+    for r in routers:
+        for mac, d in inv[r.id]["nbr"].items():
+            n = by_ident.get((d.get("id") or "").strip().lower()) or by_ip.get(d.get("ip") or "")
+            if n and n.id != r.id:
+                adj[r.id].setdefault(n.id, _nbr_port(d))
+            elif not n:
+                other[r.id].append(d)
+    for a_id, links in list(adj.items()):  # połączenie widziane z jednej strony działa w obie
+        for b_id, port in links.items():
+            adj[b_id].setdefault(a_id, "")
+    # klienci Wi-Fi: każdy do jednego AP (kontroler CAPsMAN widzi wszystkich, więc wolimy router, który nie jest kontrolerem)
+    names = device_names(s)
+    leases = {}
+    for r in routers:
+        leases.update(inv[r.id]["dhcp"])
+    pick = {}
+    for r in routers:
+        for upd, d in inv[r.id]["wifi"]:
+            mac = (d.get("key") or "").upper()
+            rank = (info[r.id]["manager"], -upd.timestamp())
+            if mac and (mac not in pick or rank < pick[mac][0]):
+                pick[mac] = (rank, r.id, d)
+    clients = {r.id: [] for r in routers}
+    for mac, (_, rid, d) in pick.items():
+        l = leases.get(mac, {})
+        name, sub = device_label(mac, l.get("comment"), l.get("host"), names.get(oui.normalize(mac)))
+        wq = wifi_quality(d)
+        clients[rid].append({"mac": mac, "name": name if name != "-" else mac, "sub": sub, "ip": l.get("ip") or d.get("last-ip") or "",
+                             "iface": d.get("interface") or d.get("iface", ""), "q": wq["q"], "qc": wq["qc"], "qlabel": wq["qlabel"],
+                             "signal": wq["signal"], "sc": wq["sc"]})
+    for lst in clients.values():
+        lst.sort(key=lambda c: (-(c["q"] if c["q"] is not None else -1), c["name"].lower()))
+    seen_nbr, visited = set(), set()
+
+    def node(r, up_port="", parent_port=""):
+        visited.add(r.id)
+        kids = []
+        for b_id, port in sorted(adj[r.id].items(), key=lambda kv: by_name[kv[0]].pos or 0):
+            if b_id not in visited:
+                kids.append(node(by_name[b_id], adj[b_id].get(r.id, ""), port))
+        nb = []
+        for d in other[r.id]:
+            mac = (d.get("mac") or "").upper()
+            if mac in seen_nbr:
+                continue
+            seen_nbr.add(mac)
+            nb.append({"type": "nbr", "name": d.get("id") or mac, "model": d.get("bd") or d.get("pl") or "", "port": _nbr_port(d),
+                       "ip": d.get("ip") or ""})
+        si = info[r.id]
+        return {"type": "router", "id": r.id, "name": r.name, "model": si["model"], "online": r.online, "upg": r.upgrading,
+                "edge": bool(r.edge), "manager": si["manager"], "up_port": up_port, "parent_port": parent_port,
+                "clients": clients[r.id], "children": kids + nb[:20], "more": max(0, len(nb) - 20)}
+    by_name = {r.id: r for r in routers}
+    roots = [r for r in routers if r.edge] or [max(routers, key=lambda r: len(adj[r.id]))]
+    trees = [node(r) for r in roots if r.id not in visited]
+    orphans = [node(r) for r in routers if r.id not in visited]
+    root = {"type": "inet", "children": trees}
+    return {"root": root, "orphans": orphans, "has_nbr": any(inv[r.id]["nbr"] for r in routers)}
+
+
+@app.get("/topology", dependencies=[Depends(user)])
+def topology_page(request: Request, s: Session = Depends(db)):
+    if not topo_on(s):
+        return RedirectResponse("/", 303)
+    return templates.TemplateResponse(request, "topology.html", {"topo": topology_view(s)})
+
+
+@app.post("/settings/topology", dependencies=[Depends(admin)])
+def settings_topology(request: Request, on: str = Form(""), s: Session = Depends(db)):
+    sset(s, "topo_on", "1" if on == "1" else "0")
+    log(s, "moduł topologii", "włączony" if on == "1" else "wyłączony")
+    s.commit()
+    _TOPO_ON[1] = 0
+    return settings_view(request, s, (tr("msg.topo_on") if on == "1" else tr("msg.topo_off")) + " " + tr("msg.wl_paste"), True)
 
 
 @app.post("/settings/blacklist", dependencies=[Depends(admin)])

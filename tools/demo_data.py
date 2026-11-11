@@ -177,6 +177,14 @@ def build(s):
         2: [("ether1", "true", "false", "1Gbps", "true", "bridge", "")],
         3: [("ether1", "true", "false", "1Gbps", "true", "", ""), ("ether2", "true", "false", "100Mbps", "false", "bridge", "Old phone"),
             ("ether3", "false", "false", "", "", "bridge", "")]}
+    # sąsiedzi MNDP/LLDP (karta Topologia): router -> (port lokalny, identity, model, adres)
+    NBR = {0: [("ether2", "ap-upstairs", "hAP ax3", "192.168.88.2"), ("ether5", "ap-garage", "cAP ac", "192.168.88.3"),
+               ("sfp-sfpplus1", "switch-office", "CRS326-24G-2S+", "192.168.88.9"), ("ether6", "nas-synology", "", "192.168.88.40")],
+           1: [("ether1", "master", "RB5009UG+S+IN", "192.168.88.1")], 2: [("ether1", "master", "RB5009UG+S+IN", "192.168.88.1")]}
+    for ri, nl_ in NBR.items():
+        for k, (port, ident, board, ip) in enumerate(nl_):
+            m = "48:A9:8A:%02X:%02X:%02X" % (ri, k, 7)
+            inv(rs[ri], "nbr", m + "|" + port, dict(mac=m, id=ident, ip=ip, pl="MikroTik" if board else "", bd=board, **{"if": port}))
     for ri, plist in PORTS.items():
         for n, run, dis, rate, dup, br, cm in plist:
             inv(rs[ri], "eth", n, dict(run=run, dis=dis, rate=rate, dup=dup, ld="0", br=br, cm=cm))
@@ -273,7 +281,7 @@ def build(s):
                        {"id": "105", "name": "Frankfurt, Germany (FS IT-Systeme GmbH)", "ping": 19.0, "down": 255.4},
                        {"id": "85", "name": "Prague, Czech Republic (Turris)", "ping": 21.0, "down": 134.2}]}
     for k, v in (("speed_router", str(master.id)), ("speed_engine", "librespeed"), ("speed_server_librespeed", "best"),
-                 ("speed_ls_best", json.dumps(best)), ("interval", "60")):
+                 ("speed_ls_best", json.dumps(best)), ("interval", "60"), ("topo_on", "1")):
         main.sset(s, k, v)
     s.add(main.LiveSpot(ts=ago(hours=3), mac=mac(2), label="Living room by the window", device="Anna iPhone", iface="wifi2", signal=-54.0, rate=866.0, quality=3))
     s.add(main.LiveSpot(ts=ago(hours=3, minutes=-12), mac=mac(2), label="Kitchen", device="Anna iPhone", iface="wifi1", signal=-66.0, rate=144.0, quality=2))

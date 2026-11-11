@@ -831,5 +831,21 @@
   "rp.p_down": "no link",
   "rp.p_off": "disabled",
   "rp.p_half": "half duplex",
-  "rp.p_slow_help": "Yellow port: the link runs slower (10/100 Mb/s) than the other ports of this router or in half duplex. Usually a bad cable, connector or the device on the other end."
+  "rp.p_slow_help": "Yellow port: the link runs slower (10/100 Mb/s) than the other ports of this router or in half duplex. Usually a bad cable, connector or the device on the other end.",
+  "set.topo.title": "Network topology",
+  "set.topo.on": "Show the \"Topology\" tab (map of router links and Wi-Fi devices)",
+  "set.topo.help": "Off by default so weak routers are not loaded. When on, a small script appears on the routers that reads the neighbour list (/ip neighbor, MNDP and LLDP) once a minute, and the Wi-Fi clients come from data the routers already send. After changing it, paste the configuration command on the routers again.",
+  "msg.topo_on": "The Topology tab is on.",
+  "msg.topo_off": "The Topology tab is off.",
+  "nav.topo": "Topology",
+  "topo.title": "Network topology",
+  "topo.internet": "Internet",
+  "topo.none": "No data to draw the map yet. Wait a minute after pasting the configuration command on the routers.",
+  "topo.no_nbr": "The routers have not reported their neighbour lists yet, so the links between them are unknown. Paste the configuration command again after enabling the module in Settings.",
+  "topo.orphans": "No known link",
+  "topo.clients": "Wi-Fi: {n}",
+  "topo.leg_good": "good Wi-Fi link",
+  "topo.leg_mid": "medium",
+  "topo.leg_bad": "weak",
+  "topo.help": "Links come from the routers' neighbour lists (MNDP/LLDP), so unmanaged switches and devices without these protocols are not visible. A Wi-Fi client is shown under the AP it was connected to in the latest reading. Click a router to open it."
 }

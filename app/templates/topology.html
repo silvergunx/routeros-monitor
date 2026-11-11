@@ -1,0 +1,19 @@
+{% extends "base.html" %}{% block c %}
+{% macro clients(n) %}{% if n.clients %}<details class="tcl" {{ 'open' if n.clients|length <= 8 }}><summary>{{ t('topo.clients', n=n.clients|length) }}</summary>
+{% for c in n.clients %}<div class="tc" title="{{c.mac}}{% if c.ip %} · {{c.ip}}{% endif %}{% if c.sub %} · {{c.sub}}{% endif %} · {{c.iface}}"><span class="qd {{c.qc}}"></span><span class="tcn">{{c.name}}</span><span class="mut tcs">{{ c.signal|int if c.signal is not none else '' }}</span></div>{% endfor %}</details>{% endif %}{% endmacro %}
+{% macro tree(n) %}<li>{% if n.type == 'inet' %}<div class="tn tinet">🌐 {{ t('topo.internet') }}</div>
+{% elif n.type == 'router' %}<a class="tn trt {{ 'tdown' if not n.online and not n.upg }}" href="/routers/{{n.id}}"><b>{{n.name}}</b><span class="mut small">{{n.model or ''}}</span>
+<span class="small">{% if n.upg %}<span class="warn">{{ t('rt.upgrading') }}</span>{% elif n.online %}<span class="ok">{{ t('rt.online') }}</span>{% else %}<span class="bad">{{ t('rt.offline') }}</span>{% endif %}{% if n.manager %} · CAPsMAN{% endif %}</span>
+{% if n.up_port or n.parent_port %}<span class="mut small">{{ n.parent_port or '?' }} ⇄ {{ n.up_port or '?' }}</span>{% endif %}</a>{{ clients(n) }}
+{% else %}<div class="tn tnbr"><b>{{n.name}}</b><span class="mut small">{{n.model}}</span><span class="mut small">{{n.port}}{% if n.ip %} · {{n.ip}}{% endif %}</span></div>{% endif %}
+{% if n.children %}<ul>{% for c in n.children %}{{ tree(c) }}{% endfor %}</ul>{% endif %}</li>{% endmacro %}
+<div class="card"><h2>{{ t('topo.title') }}</h2>
+<div id="live-topo" data-live>
+{% if not topo.root or (not topo.root.children and not topo.orphans) %}<p class="mut">{{ t('topo.none') }}</p>{% else %}
+{% if not topo.has_nbr %}<p class="warn small">{{ t('topo.no_nbr') }}</p>{% endif %}
+<div class="tree"><ul>{{ tree(topo.root) }}</ul></div>
+{% if topo.orphans %}<h3 style="margin:18px 0 6px">{{ t('topo.orphans') }}</h3><div class="tree"><ul>{% for o in topo.orphans %}{{ tree(o) }}{% endfor %}</ul></div>{% endif %}
+<div class="pleg"><span><span class="qd ok"></span> {{ t('topo.leg_good') }}</span><span><span class="qd warn"></span> {{ t('topo.leg_mid') }}</span><span><span class="qd bad"></span> {{ t('topo.leg_bad') }}</span></div>
+{% endif %}</div>
+<p class="mut small" style="margin-top:12px">{{ t('topo.help') }}</p></div>
+{% endblock %}

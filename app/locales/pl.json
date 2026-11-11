@@ -832,5 +832,21 @@
   "rp.p_down": "brak linku",
   "rp.p_off": "wyłączony",
   "rp.p_half": "half-duplex",
-  "rp.p_slow_help": "Żółty port: link działa wolniej (10/100 Mb/s) niż inne porty tego routera albo w half-duplex. Zwykle winny jest kabel, wtyk lub urządzenie po drugiej stronie."
+  "rp.p_slow_help": "Żółty port: link działa wolniej (10/100 Mb/s) niż inne porty tego routera albo w half-duplex. Zwykle winny jest kabel, wtyk lub urządzenie po drugiej stronie.",
+  "set.topo.title": "Topologia sieci",
+  "set.topo.on": "Pokaż kartę „Topologia” (mapa połączeń routerów i urządzeń Wi-Fi)",
+  "set.topo.help": "Domyślnie wyłączone, żeby nie obciążać słabych routerów. Po włączeniu na routerach pojawia się mały skrypt, który raz na minutę odczytuje listę sąsiadów (/ip neighbor, MNDP i LLDP), a klientów Wi-Fi panel bierze z danych, które routery już wysyłają. Po zmianie wklej ponownie komendę konfiguracyjną na routerach.",
+  "msg.topo_on": "Karta Topologia włączona.",
+  "msg.topo_off": "Karta Topologia wyłączona.",
+  "nav.topo": "Topologia",
+  "topo.title": "Topologia sieci",
+  "topo.internet": "Internet",
+  "topo.none": "Brak danych do narysowania mapy. Poczekaj minutę po wklejeniu komendy konfiguracyjnej na routerach.",
+  "topo.no_nbr": "Routery nie zgłosiły jeszcze listy sąsiadów, więc połączenia między nimi nie są znane. Wklej ponownie komendę konfiguracyjną po włączeniu modułu w Ustawieniach.",
+  "topo.orphans": "Bez znanego połączenia",
+  "topo.clients": "Wi-Fi: {n}",
+  "topo.leg_good": "dobre połączenie Wi-Fi",
+  "topo.leg_mid": "średnie",
+  "topo.leg_bad": "słabe",
+  "topo.help": "Połączenia pochodzą z listy sąsiadów routerów (MNDP/LLDP), więc switche niezarządzalne i sprzęt bez tych protokołów nie są widoczne. Klient Wi-Fi jest pokazany pod AP, do którego był podłączony w ostatnim odczycie. Kliknij router, aby go otworzyć."
 }
