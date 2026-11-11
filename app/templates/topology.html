@@ -20,7 +20,7 @@
 .tnode{cursor:pointer;transition:opacity .15s}.tnode circle.bg{fill:var(--card);stroke:var(--bd);stroke-width:2.5}
 .tnode.router.up circle.bg{stroke:var(--ok);filter:drop-shadow(0 0 7px color-mix(in srgb,var(--ok) 65%,transparent))}
 .tnode.router.down circle.bg{stroke:var(--bad);filter:drop-shadow(0 0 7px color-mix(in srgb,var(--bad) 60%,transparent))}
-.tnode.router.upg circle.bg{stroke:var(--warn)}.tnode.inet circle.bg{stroke:var(--acc);filter:drop-shadow(0 0 8px color-mix(in srgb,var(--acc) 60%,transparent))}
+.tnode.router.upg circle.bg{stroke:var(--warn)}.tnode.inet use{color:var(--acc)}.tnode.inet circle.bg{stroke:var(--acc);fill:color-mix(in srgb,var(--acc) 10%,var(--card));filter:drop-shadow(0 0 8px color-mix(in srgb,var(--acc) 60%,transparent))}
 .tnode.nbr circle.bg{stroke-dasharray:4 3;opacity:.9}
 .tnode use{color:var(--fg);pointer-events:none}.tnode.router.down use{color:var(--mut)}
 .tnode text{fill:var(--fg);font-size:12px;text-anchor:middle;pointer-events:none;paint-order:stroke;stroke:var(--bg);stroke-width:3px}.tnode text.sub{fill:var(--mut);font-size:10px}
@@ -100,10 +100,11 @@ function path(l){const p=G.byId[l.s],q=G.byId[l.t];if(l.wifi)return'M'+p.x+' '+p
  if(p.type==='inet'||q.type==='inet')return'M'+p.x+' '+p.y+'L'+q.x+' '+q.y;
  const dx=q.x-p.x,dy=q.y-p.y,mx=(p.x+q.x)/2,my=(p.y+q.y)/2,o=.1;return'M'+p.x+' '+p.y+'Q'+(mx-dy*o)+' '+(my+dx*o)+' '+q.x+' '+q.y}
 function place(){G.links.forEach(l=>{if(l.el)l.el.setAttribute('d',path(l))});G.nodes.forEach(n=>{if(n.el)n.el.setAttribute('transform','translate('+n.x+','+n.y+')')})}
-function icon(n){return n.type==='inet'?'ic-globe':n.type==='nbr'?'ic-box':n.type==='client'?'ic-'+(n.kind||'other'):(n.ap?'ic-ap':'ic-router')}
+function icon(n){return n.type==='inet'?'ic-cloud':n.type==='nbr'?'ic-box':n.type==='client'?'ic-'+(n.kind||'other'):(n.ap?'ic-ap':'ic-router')}
 function draw(){svg.textContent='';const d=el('defs',{},svg);
  d.innerHTML='<symbol id="ic-router" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="12" width="18" height="7" rx="2"/><path d="M7 15.5h.01M11 15.5h.01M8 12 6 5M16 12l2-7"/></symbol>'+
  '<symbol id="ic-ap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 9.5a10 10 0 0 1 15 0M7.5 12.8a6 6 0 0 1 9 0"/><circle cx="12" cy="17" r="1.4" fill="currentColor"/></symbol>'+
+ '<symbol id="ic-cloud" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M7.2 18.5a4.3 4.3 0 0 1-.7-8.55A6 6 0 0 1 18 9.2a4.7 4.7 0 0 1-.7 9.3z"/><path d="M9.5 14.2h5M12 11.8v4.8" opacity=".0"/><path d="M8.6 13.6a5 5 0 0 1 6.8 0M10.4 15.6a2.4 2.4 0 0 1 3.2 0"/><circle cx="12" cy="17.2" r=".7" fill="currentColor" stroke="none"/></symbol>'+
  '<symbol id="ic-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>'+
  '<symbol id="ic-phone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2.2"/><path d="M11 18.5h2"/></symbol>'+
  '<symbol id="ic-tablet" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="3" width="15" height="18" rx="2.2"/><path d="M11 18h2"/></symbol>'+
@@ -121,7 +122,7 @@ function draw(){svg.textContent='';const d=el('defs',{},svg);
   l.el=el('path',{class:cl.join(' '),'stroke-width':w},lg)}
  for(const n of G.nodes){const g=el('g',{class:'tnode '+n.type+(n.status?' '+n.status:'')+(n.qc?' '+n.qc:'')+(n.failed?' failed':'')},ng);n.el=g;g.dataset.id=n.id;
   if(n.type==='client'){const r=R(n);el('circle',{class:'bg',r:r},g);el('use',{href:'#'+icon(n),x:-r*.58,y:-r*.58,width:r*1.16,height:r*1.16},g);if(n.failed){el('circle',{class:'fb',cx:r*.8,cy:-r*.8,r:7},g);const b=el('text',{class:'fbt',x:r*.8,y:-r*.8+3.5},g);b.textContent='!'}}
-  else{const r=R(n);el('circle',{class:'bg',r:r},g);el('use',{href:'#'+icon(n),x:-r*.55,y:-r*.55,width:r*1.1,height:r*1.1},g);
+  else{const r=R(n);el('circle',{class:'bg',r:r},g);el('use',n.type==='inet'?{href:'#'+icon(n),x:-r*.68,y:-r*.74,width:r*1.36,height:r*1.36}:{href:'#'+icon(n),x:-r*.55,y:-r*.55,width:r*1.1,height:r*1.1},g);
    const t1=el('text',{y:r+15},g);t1.textContent=n.name;if(n.sub&&n.type!=='nbr'){const t2=el('text',{y:r+28,class:'sub'},g);t2.textContent=n.sub}
    if(n.nc){el('circle',{class:'badge',cx:r*.72,cy:-r*.72,r:9},g);const b=el('text',{class:'bt',x:r*.72,y:-r*.72+3.5},g);b.textContent=n.nc}}
   g.addEventListener('pointerenter',e=>{if(e.pointerType==='mouse')hover(n,e)});g.addEventListener('pointermove',e=>{if(e.pointerType==='mouse'&&!drag)moveTip(e)});
