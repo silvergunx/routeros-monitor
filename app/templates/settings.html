@@ -1,6 +1,15 @@
 {% extends "base.html" %}{% block c %}
-<div class="card"><h2>{{ t('set.https.title') }}</h2>
 {% if msg %}<p class="{{'ok' if ok else 'err'}}">{{msg}}</p>{% endif %}
+<div id="stabs" data-tab="gen">
+<div class="tabs rt">
+<button type="button" data-t="gen" onclick="sTab('gen')">{{ t('set.tab.gen') }}</button>
+<button type="button" data-t="sec" onclick="sTab('sec')">{{ t('set.tab.sec') }}</button>
+<button type="button" data-t="not" onclick="sTab('not')">{{ t('set.tab.not') }}</button>
+<button type="button" data-t="spd" onclick="sTab('spd')">{{ t('set.tab.spd') }}</button>
+<button type="button" data-t="bak" onclick="sTab('bak')">{{ t('set.tab.bak') }}</button>
+</div>
+<div class="sp sp-gen">
+<div class="card"><h2>{{ t('set.https.title') }}</h2>
 <p>{{ t('set.https.now') }} {% if domain %}<b>https://{{domain}}</b>{% else %}{{ t('set.https.http_only') }}{% endif %}</p>
 <form method="post"><p><input name="domain" value="{{domain}}" placeholder="monitor.example.com" style="width:280px"></p>
 <p><input name="email" value="{{email}}" placeholder="{{ t('set.https.email_ph') }}" style="width:280px"></p>
@@ -16,7 +25,26 @@
 f.addEventListener('submit',e=>{if(!ok&&(s.value==='1'||s.value==='5')){e.preventDefault();d.showModal()}});
 document.getElementById('ivyes').onclick=()=>{ok=true;d.close();f.submit()};
 document.getElementById('ivno').onclick=()=>{s.value=cur;d.close()};})();</script>
-<p><small>{{ t('set.iv.after') }}</small></p></div>
+<p><small>{{ t('set.iv.after') }}</small></p>
+<h3 style="margin:14px 0 4px">{{ t('set.off.title') }}</h3>
+<form method="post" action="/settings/offline" class="row">{{ t('set.off.mult') }} <input name="mult" value="{{ ('%g' % off_mult)|replace('.', ',') }}" inputmode="decimal" style="width:80px" aria-label="{{ t('set.off.mult') }}"> <button class="p">{{ t('common.save') }}</button></form>
+{% macro f(v) %}{{ ('%g' % (v|round(1)))|replace('.', ',') }}{% endmacro %}
+<form method="post" action="/settings/offline/routers">
+<div class="scroll"><table class="small" style="margin-top:8px"><tr><th>{{ t('set.off.col_router') }}</th><th>{{ t('set.off.col_gap') }}</th><th>{{ t('set.off.col_nr') }}</th><th>{{ t('set.off.col_off') }}</th></tr>
+{% for x in thr_rows %}<tr><td><b>{{ x.name }}</b></td><td>{% if x.gap %}{{ f(x.gap) }} s{% else %}-{% endif %}</td>
+<td><input name="nr_{{ x.id }}" value="{{ f(x.own_nr) if x.own_nr else '' }}" placeholder="{{ f(x.auto_nr) }}" inputmode="decimal" style="width:70px"> <span class="mut">{{ t('set.off.in_effect') }} {{ f(x.eff_nr) }} s</span></td>
+<td><input name="off_{{ x.id }}" value="{{ f(x.own_off) if x.own_off else '' }}" placeholder="{{ f(x.auto_off) }}" inputmode="decimal" style="width:70px"> <span class="mut">{{ t('set.off.in_effect') }} {{ f(x.eff_off) }} s</span></td></tr>
+{% else %}<tr><td colspan="4" class="mut">{{ t('rt.none') }}</td></tr>{% endfor %}</table></div>
+<p style="margin:8px 0 0"><button class="p">{{ t('set.off.save_routers') }}</button></p></form>
+<p><small class="mut">{{ t('set.off.help') }}</small></p></div>
+<div class="card" id="order"><h2>{{ t('set.order.title') }}</h2>
+<table>{% for x in routers %}<tr><td style="width:40px" class="mut">{{loop.index}}.</td><td><b>{{x.name}}</b></td><td style="text-align:right">
+<form class="i" method="post" action="/routers/{{x.id}}/move"><input type="hidden" name="dir" value="up"><button {{'disabled' if loop.first}} title="{{ t('set.order.up') }}">▲</button></form>
+<form class="i" method="post" action="/routers/{{x.id}}/move"><input type="hidden" name="dir" value="down"><button {{'disabled' if loop.last}} title="{{ t('set.order.down') }}">▼</button></form></td></tr>
+{% else %}<tr><td class="mut">{{ t('rt.none') }}</td></tr>{% endfor %}</table>
+<p><small class="mut">{{ t('set.order.help') }}</small></p></div>
+</div>
+<div class="sp sp-sec">
 <div class="card" id="wlset"><h2>{{ t('set.wl.title') }}</h2>
 <form method="post" action="/settings/whitelist" class="row"><label class="row" style="gap:6px"><input type="checkbox" name="on" value="1" {{'checked' if wl_enabled}}> {{ t('set.wl.on') }}</label><button class="p">{{ t('common.save') }}</button></form>
 <p><small class="mut">{{ t('set.wl.help') }}</small></p></div>
@@ -31,12 +59,42 @@ document.getElementById('ivno').onclick=()=>{s.value=cur;d.close()};})();</scrip
 {% if not bl_enabled %}<p class="small mut">{{ t('set.ab.needs_bl') }}</p>{% endif %}
 <script>(function(){const f=document.getElementById('abform'),c=f.querySelector('[name=on]'),was=c.checked;
 f.onsubmit=()=>{if(c.checked&&!was)return confirm({{ t('set.ab.confirm')|tojson }});return true}})();</script></div>
+</div>
+<div class="sp sp-not">
+<div class="card" id="nfset"><h2>{{ t('set.nf.title') }}</h2>
+<p><small class="mut">{{ t('set.nf.help') }}</small></p>
+<p class="small" style="border-left:3px solid var(--warn);padding-left:10px">{{ t('set.nf.privacy') }}</p>
+<form method="post" action="/settings/notify">
+<p><label class="row" style="gap:6px"><input type="checkbox" name="on" value="1" {{'checked' if nf.on}}> <b>{{ t('set.nf.on') }}</b></label></p>
+<h3 style="margin-bottom:4px">ntfy</h3>
+<div class="row"><input name="ntfy_url" value="{{ nf.ntfy_url }}" placeholder="https://ntfy.sh" style="width:230px" aria-label="{{ t('set.nf.ntfy_url') }}">
+<input name="ntfy_topic" value="{{ nf.ntfy_topic }}" placeholder="{{ t('set.nf.topic_ph') }}" style="width:200px" aria-label="{{ t('set.nf.topic') }}"></div>
+<div class="row" style="margin-top:6px"><input type="password" name="ntfy_token" autocomplete="new-password" placeholder="{{ t('set.nf.token_saved') if nf.token_set else t('set.nf.token_ph') }}" style="width:230px">
+{% if nf.token_set %}<label class="row" style="gap:6px"><input type="checkbox" name="clear_token" value="1"> {{ t('set.nf.clear') }}</label>{% endif %}</div>
+<h3 style="margin:12px 0 4px">Webhook</h3>
+<div class="row"><input type="password" name="hook_url" autocomplete="new-password" placeholder="{{ (t('set.nf.hook_saved') ~ ' ' ~ nf.hook_host) if nf.hook_set else 'https://...' }}" style="width:330px">
+{% if nf.hook_set %}<label class="row" style="gap:6px"><input type="checkbox" name="clear_hook" value="1"> {{ t('set.nf.clear') }}</label>{% endif %}</div>
+<h3 style="margin:12px 0 4px">{{ t('set.nf.rules') }}</h3>
+<p style="margin:2px 0"><label class="row" style="gap:6px"><input type="checkbox" name="r_offline" value="1" {{'checked' if nf.r_offline}}> {{ t('set.nf.r_offline') }}
+<input type="number" name="offline_min" min="1" max="120" value="{{ nf.offline_min }}" style="width:70px"> min</label></p>
+<p style="margin:2px 0"><label class="row" style="gap:6px"><input type="checkbox" name="r_inet" value="1" {{'checked' if nf.r_inet}}> {{ t('set.nf.r_inet') }}
+<input type="number" name="inet_min" min="1" max="120" value="{{ nf.inet_min }}" style="width:70px"> min</label></p>
+<p style="margin:2px 0"><label class="row" style="gap:6px"><input type="checkbox" name="r_backup" value="1" {{'checked' if nf.r_backup}}> {{ t('set.nf.r_backup') }}</label></p>
+<p style="margin:2px 0"><label class="row" style="gap:6px"><input type="checkbox" name="r_ban" value="1" {{'checked' if nf.r_ban}}> {{ t('set.nf.r_ban') }}</label></p>
+<p style="margin:10px 0 4px"><label class="row" style="gap:6px">{{ t('set.nf.lang') }}
+<select name="lang">{% for code, name, flag in langs %}<option value="{{ code }}" {{'selected' if code == nf.lang}}>{{ name }}</option>{% endfor %}</select></label></p>
+<div class="row" style="margin-top:10px"><button class="p">{{ t('common.save') }}</button>
+<button type="submit" formaction="/settings/notify/test">{{ t('set.nf.test') }}</button></div>
+</form>
+<p><small class="mut">{{ t('set.nf.test_help') }}</small></p></div>
 <div class="card" id="muteset"><h2>{{ t('set.mu.title') }}</h2>
 <p><small class="mut">{{ t('set.mu.help') }}</small></p>
 {% if mutes %}<div class="scroll"><table><tr><th>{{ t('set.mu.router') }}</th><th>{{ t('set.mu.pattern') }}</th><th>{{ t('set.mu.since') }}</th><th></th></tr>
 {% for m in mutes %}<tr><td>{{ m.router }}</td><td class="small"><code>{{ m.pat }}</code></td><td class="small mut">{{ m.ts }}</td>
 <td><form method="post" action="/settings/log-mutes/delete" class="i"><input type="hidden" name="rid" value="{{ m.rid }}"><input type="hidden" name="pat" value="{{ m.pat }}"><button>{{ t('set.mu.remove') }}</button></form></td></tr>{% endfor %}</table></div>
 {% else %}<p class="mut">{{ t('set.mu.empty') }}</p>{% endif %}</div>
+</div>
+<div class="sp sp-spd">
 <div class="card" id="spdset"><h2>{{ t('set.sp.title') }}</h2>
 <form method="post" action="/settings/speed">
 <label class="fl">{{ t('set.sp.router') }}
@@ -80,12 +138,8 @@ async function pollBest(){try{const d=await(await fetch('/api/speedtest/best',{c
  if(d.running){bg.disabled=true;bs.textContent=d.phase;setTimeout(pollBest,2000)}else{bg.disabled=false;bs.textContent=d.error?tf(L.fail,{err:d.error}):''}}catch(x){bg.disabled=false}}
 bg.onclick=async()=>{bg.disabled=true;bs.textContent='\u2026';try{const r=await(await fetch('/api/speedtest/best',{method:'POST'})).json();if(r.busy){bs.textContent=L.busy;bg.disabled=false;return}}catch(x){bg.disabled=false;return}setTimeout(pollBest,800)};
 renderBest();if(e.value==='librespeed')pollBest();})();</script>
-<div class="card" id="order"><h2>{{ t('set.order.title') }}</h2>
-<table>{% for x in routers %}<tr><td style="width:40px" class="mut">{{loop.index}}.</td><td><b>{{x.name}}</b></td><td style="text-align:right">
-<form class="i" method="post" action="/routers/{{x.id}}/move"><input type="hidden" name="dir" value="up"><button {{'disabled' if loop.first}} title="{{ t('set.order.up') }}">▲</button></form>
-<form class="i" method="post" action="/routers/{{x.id}}/move"><input type="hidden" name="dir" value="down"><button {{'disabled' if loop.last}} title="{{ t('set.order.down') }}">▼</button></form></td></tr>
-{% else %}<tr><td class="mut">{{ t('rt.none') }}</td></tr>{% endfor %}</table>
-<p><small class="mut">{{ t('set.order.help') }}</small></p></div>
+</div>
+<div class="sp sp-bak">
 <div class="card" id="backup"><h2>{{ t('set.bk.title') }}</h2>
 {% if not bk.available %}<p class="err">{{ th('set.bk.noaccess.html') }}</p>
 {% else %}
@@ -108,4 +162,15 @@ renderBest();if(e.value==='librespeed')pollBest();})();</script>
 {% else %}<tr><td colspan="4" class="mut">{{ t('set.bk.empty') }}</td></tr>{% endfor %}</table></div>
 <p><small class="mut">{{ th('set.bk.help.html') }}</small></p>
 {% endif %}</div>
+</div>
+</div>
+<script>
+const STABS=['gen','sec','not','spd','bak'];
+function sTab(t){if(!STABS.includes(t))t='gen';document.getElementById('stabs').dataset.tab=t;try{localStorage.setItem('stab',t)}catch(e){}}
+function fromHash(first){let h=location.hash.slice(1),t='',el=null;
+if(STABS.includes(h))t=h;else if(h&&(el=document.getElementById(h))){const sp=el.closest('.sp');if(sp)t=STABS.find(x=>sp.classList.contains('sp-'+x))||''}
+if(!t&&first){try{t=localStorage.getItem('stab')||''}catch(e){}}
+if(t||first)sTab(t||'gen');if(el)setTimeout(()=>el.scrollIntoView(),0)}
+fromHash(true);addEventListener('hashchange',()=>fromHash(false));
+</script>
 {% endblock %}

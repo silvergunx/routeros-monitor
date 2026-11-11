@@ -21,7 +21,7 @@ jobs:
       - name: Python syntax
         run: python -m compileall -q app
       - name: Unit tests
-        run: python tests/test_version.py && python tests/test_speed.py && python tests/test_netguard.py && python tests/test_backups.py
+        run: python tests/test_version.py && python tests/test_speed.py && python tests/test_netguard.py && python tests/test_backups.py && python tests/test_applog.py && python tests/test_notify.py
       - name: Docker image builds
         run: docker build --build-arg OOKLA_VERSION= -t rm-test ./app
       - name: LibreSpeed CLI is in the image

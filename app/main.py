@@ -1,5 +1,7 @@
 import unicodedata
 import platform
+import collections
+import statistics
 import os, re, csv, io, json, math, asyncio, socket, hashlib, hmac, secrets, time, ipaddress, datetime as dt
 from urllib.parse import quote, urlparse, urlencode
 import i18n
@@ -7,6 +9,8 @@ import version as appver
 import speedengines
 import netguard
 import backups as backuplib
+import applog
+import notify
 import httpx
 from fastapi import FastAPI, Request, Form, Depends, HTTPException, Body
 from fastapi.responses import JSONResponse, RedirectResponse, PlainTextResponse, Response, FileResponse, StreamingResponse
@@ -17,6 +21,7 @@ from sqlalchemy.engine import URL
 from sqlalchemy import inspect as sa_inspect, extract, create_engine, Date, Text, UniqueConstraint, String, Float, DateTime, Integer, Boolean, BigInteger, ForeignKey, Index, select, delete, func, or_, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
 
+applog.install()  # bufor ostatnich ostrzeżeń i błędów (raport „Zgłoś problem”)
 ADMIN_USER = os.getenv("ADMIN_USER", "admin")
 ADMIN_PASSWORD = os.environ["ADMIN_PASSWORD"]
 SECRET_KEY = os.environ["SECRET_KEY"]
@@ -32,7 +37,7 @@ if os.getenv("DB_PASSWORD"):
                         host=os.getenv("DB_HOST", "db"), database="monitor")
 else:
     DB_URL = os.environ["DATABASE_URL"]
-engine = create_engine(DB_URL, pool_pre_ping=True)
+engine = create_engine(DB_URL, pool_pre_ping=True, pool_size=10, max_overflow=10)  # niezależne zadania w tle + żądania WWW
 app = FastAPI()
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=86400 * 7)
 templates = Jinja2Templates(directory="templates")
@@ -82,10 +87,83 @@ def fm(v, unit="", d=0):
 
 templates.env.globals["fm"] = fm
 templates.env.filters["iso"] = lambda d: d.strftime("%Y-%m-%dT%H:%M:%S") if d else ""
+templates.env.globals["ago"] = lambda d: _age((now() - d).total_seconds()) if d else ""  # np. "5 min", "2 h", "3 d"
 
 
 def now():
     return dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
+
+
+# Status routera zależy od jego zwykłego odstępu między pomiarami (mierzonego na bieżąco z ostatnich pomiarów; do czasu
+# zebrania próbek używamy interwału z ustawień):
+#   "brak odpowiedzi" (żółty) po: odstęp + odstęp/5 + 1 s   (5 s -> 7 s, 10 s -> 13 s, 15 s -> 19 s, 60 s -> 73 s)
+#   "offline" (czerwony) po:      czas "brak odpowiedzi" x mnożnik z ustawień (domyślnie 1,5)
+# Użytkownik może dla każdego routera wpisać własne progi (w sekundach, bez górnego limitu). Jedyne dolne granice:
+# "brak odpowiedzi" nie wcześniej niż zmierzony odstęp + 1 s, "offline" nie wcześniej niż "brak odpowiedzi" + 1 s.
+_GAPS = {}             # id routera -> ostatnie odstępy (s) między kolejnymi pomiarami
+_SEEN = set()          # id routerów, które przysłały pomiar od startu aplikacji (po starcie oceniamy tylko je od razu)
+_INTERVAL_S = [60]     # interwał monitoringu z ustawień (odświeżany w interval())
+_OFFLINE_MULT = [1.5]  # mnożnik czasu "brak odpowiedzi" dający próg offline (odświeżany w interval())
+_THR = {}              # id routera -> {"nr": własny próg "brak odpowiedzi" (s) albo None, "off": własny próg offline albo None}
+# Aktualizacja RouterOS: po stanie pobierania z postępem ("Downloaded 94%") router zaraz się zrestartuje. Przez UPG_WINDOW sekund taki
+# router, gdy zamilknie, ma status "trwa aktualizacja" (zamiast offline), a zamiast alertu "brak łączności" idzie jedno powiadomienie.
+UPG_WINDOW = 900
+_UPG_PENDING = {}      # id routera -> {"ts": czas ostatniego stanu pobierania, "to": wersja docelowa, "from": wersja przed}
+_VER_EVENTS = []       # zmiany wersji RouterOS wykryte przy zapisie pomiaru: {"rid", "name", "from", "to"} (czekają na powiadomienie)
+_UPG_RX = re.compile(r"^(Downloading|Installing)|^Downloaded\s+\d+\s*%", re.I)
+
+
+def upgrade_pending(rid):
+    p = _UPG_PENDING.get(rid)
+    return bool(p and time.time() - p["ts"] < UPG_WINDOW)
+
+
+def reporting_gap(rid):
+    """Zmierzony typowy odstęp między pomiarami routera (s, ułamek) albo None, gdy próbek jest mniej niż trzy."""
+    g = _GAPS.get(rid)
+    return statistics.median(g) if g and len(g) >= 3 else None
+
+
+def _gap(rid):
+    return reporting_gap(rid) or _INTERVAL_S[0]
+
+
+def auto_no_response(rid):
+    return _gap(rid) * 1.2 + 1
+
+
+def auto_offline(rid):
+    """Automatyczny próg offline; bez własnych próbek (tuż po starcie) minimum 90 s, żeby restart nie robił z routerów „offline”."""
+    t = no_response_after(rid) * _OFFLINE_MULT[0]
+    return max(t, 90) if reporting_gap(rid) is None else t
+
+
+def no_response_after(rid):
+    """Po ilu sekundach bez pomiaru router ma status „brak odpowiedzi”: własny próg albo automatyczny, nie mniej niż odstęp + 1 s."""
+    own = _THR.get(rid, {}).get("nr")
+    return max(own if own is not None else auto_no_response(rid), _gap(rid) + 1)
+
+
+def online_after(rid):
+    """Po ilu sekundach bez pomiaru router jest offline: własny próg albo automatyczny, nie mniej niż „brak odpowiedzi” + 1 s."""
+    own = _THR.get(rid, {}).get("off")
+    return max(own if own is not None else auto_offline(rid), no_response_after(rid) + 1)
+
+
+def router_thresholds(s):
+    """Własne progi routerów z ustawień ({id: {"nr":…, "off":…}}); błędne wpisy są pomijane."""
+    out = {}
+    try:
+        raw = json.loads(sget(s, "router_thr", "{}") or "{}")
+    except ValueError:
+        return out
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            if str(k).isdigit() and isinstance(v, dict):
+                nr, off = v.get("nr"), v.get("off")
+                out[int(k)] = {"nr": float(nr) if isinstance(nr, (int, float)) and nr >= 1 else None,
+                               "off": float(off) if isinstance(off, (int, float)) and off >= 1 else None}
+    return out
 
 
 class Base(DeclarativeBase):
@@ -117,7 +195,17 @@ class Router(Base):
 
     @property
     def online(self):
-        return bool(self.last_seen) and (now() - self.last_seen).total_seconds() < 180
+        return bool(self.last_seen) and (now() - self.last_seen).total_seconds() < online_after(self.id)
+
+    @property
+    def upgrading(self):
+        """Router milczy po tym, jak zgłosił pobieranie aktualizacji RouterOS (niebieski status „trwa aktualizacja”)."""
+        return bool(self.last_seen) and upgrade_pending(self.id) and (now() - self.last_seen).total_seconds() >= no_response_after(self.id)
+
+    @property
+    def no_response(self):
+        """Router jeszcze nie jest offline, ale spóźnia się z pomiarem (żółty status „brak odpowiedzi”)."""
+        return self.online and (now() - self.last_seen).total_seconds() >= no_response_after(self.id)
 
 
 class Metric(Base):
@@ -573,7 +661,7 @@ def q(text):
 
 # Wersja skryptów na routerze. Zwiększ ją TYLKO wtedy, gdy zmiana skryptów wymaga ponownego wklejenia komendy konfiguracyjnej:
 # panel pokazuje wtedy administratorowi, że skrypt routera jest nieaktualny. Router podaje swoją wersję w każdym zapytaniu (cv).
-SCRIPT_VERSION = 1
+SCRIPT_VERSION = 2
 _ROUTER_CV = {}  # id routera -> wersja skryptu zgłoszona w ostatnim zapytaniu (0 = skrypt bez znacznika wersji); po restarcie pusto do pierwszego pomiaru
 
 
@@ -728,6 +816,30 @@ BLK = r'''
 '''
 
 
+# Osobny, lekki skrypt (niezależny od app-monitor, więc jego błąd nie zepsuje monitoringu): co kilka sekund odczytuje zapamiętany stan
+# aktualizacji pakietów RouterOS (bez sprawdzania aktualizacji w sieci) i TYLKO przy jego zmianie wysyła go na serwer (jedna próba).
+UPG = r'''
+:global appUpgLast
+:local st ""
+:do {:set st [/system package update get status]} on-error={}
+:if ($st != $appUpgLast && [:len $st] > 0) do={
+  :set appUpgLast $st
+  :local iv ""
+  :local lv ""
+  :do {:set iv [/system package update get installed-version]} on-error={}
+  :do {:set lv [/system package update get latest-version]} on-error={}
+  :local o ""
+  :if ([:len $st] > 0) do={
+    :for k from=0 to=([:len $st] - 1) do={
+      :local ch [:pick $st $k]
+      :if ($ch != "\"" && $ch != "\\") do={:set o ($o . $ch)}
+    }
+  }
+  :do {/tool fetch url="@URL@/api/upgrade?t=@TOKEN@" http-method=post http-data=("{\"st\":\"" . $o . "\",\"iv\":\"" . $iv . "\",\"lv\":\"" . $lv . "\"}") http-header-field="Content-Type: application/json" output=none} on-error={}
+}
+'''
+
+
 def clean(v, default):
     return re.sub(r"[^\w\-.]", "", v)[:30] or default
 
@@ -829,6 +941,7 @@ def setup_rsc(request: Request, t: str, iface: str = "ether1", list: str = "whit
         '/system script add name=app-inv-vpn source="%s"' % q(fill(INV_VPN)),
         '/system script add name=app-inv-sys source="%s"' % q(fill(INV_SYS)),
         '/system script add name=app-inventory source="%s"' % q(fill(INV_MAIN)),
+        '/system script add name=app-upgrade source="%s"' % q(fill(UPG)),
         '/system script add name=app-speed source="%s"' % q(fill(SPEED)),
         '/system script add name=app-live source="%s"' % q(fill(LIVE)),
         '/system scheduler remove [find name~"^app-"]',
@@ -836,6 +949,7 @@ def setup_rsc(request: Request, t: str, iface: str = "ether1", list: str = "whit
     ] + ["/system scheduler add name=app-wl interval=5m on-event=app-whitelist"] * wl + [
         "/system scheduler add name=app-bl interval=5m on-event=app-blacklist"] * bl + [
         "/system scheduler add name=app-inv interval=1m on-event=app-inventory",
+        "/system scheduler add name=app-upg interval=5s on-event=app-upgrade",
     ] + netwatch_lines(r) + [
         "/system scheduler add name=app-spd start-time=%s interval=1d on-event=app-speed" % SPEED_TIME
     ] * bool(r.edge and sget(s, "speed_router") != str(r.id)) + [
@@ -977,7 +1091,25 @@ FAST_INTERVALS = (1, 5)  # wymagają potwierdzenia w panelu
 
 def interval(s):
     v = sget(s, "interval", "60")
-    return int(v) if v.isdigit() and int(v) in INTERVALS else 60
+    iv = int(v) if v.isdigit() and int(v) in INTERVALS else 60
+    _INTERVAL_S[0] = iv
+    _OFFLINE_MULT[0] = offline_mult(s)
+    _THR.clear()
+    _THR.update(router_thresholds(s))
+    return iv
+
+
+def offline_mult(s):
+    """Mnożnik czasu „brak odpowiedzi” dający próg offline: od 1,0 (bez górnego limitu), domyślnie 1,5."""
+    try:
+        return max(1.0, float(sget(s, "offline_mult", "1.5").replace(",", ".")))
+    except ValueError:
+        return 1.5
+
+
+def refresh_interval_cache():
+    with Session(engine) as s:
+        interval(s)
 
 
 def fl(v, f=lambda x: x):
@@ -1047,6 +1179,33 @@ def rate(cur, old, sec):
     if None in (cur[0], cur[1], old[0], old[1]) or sec <= 0 or cur[0] < old[0] or cur[1] < old[1]:
         return None, None
     return (cur[0] - old[0]) * 8 / sec, (cur[1] - old[1]) * 8 / sec
+
+
+_UPG = {}  # id routera -> {"st": stan aktualizacji pakietów RouterOS, "iv": zainstalowana wersja, "lv": najnowsza, "ts": czas zgłoszenia}
+
+
+def store_upgrade(t, raw):
+    with Session(engine) as s:
+        r = get_router(s, t)
+        try:
+            d = json.loads(raw)
+            assert isinstance(d, dict)
+        except Exception:
+            raise HTTPException(400, "bad body")  # uszkodzone zapytanie nie nadpisuje ostatniego znanego stanu
+        st, iv, lv = (str(d.get(k, ""))[:80] for k in ("st", "iv", "lv"))
+        _UPG[r.id] = {"st": st, "iv": iv, "lv": lv, "ts": time.time()}
+        if _UPG_RX.search(st):
+            _UPG_PENDING[r.id] = {"ts": time.time(), "to": lv, "from": iv}
+        elif st.lower().startswith("system is already up to date") or "new version is available" in st.lower():
+            _UPG_PENDING.pop(r.id, None)
+        print("router update status: %s: %r (installed %s, latest %s)" % (r.name, st, iv or "?", lv or "?"), flush=True)
+        return {"ok": True}
+
+
+@app.post("/api/upgrade")
+async def upgrade_report(request: Request, t: str):
+    raw = (await request.body()).decode("utf-8", "replace")
+    return await run_in_threadpool(store_upgrade, t, raw)
 
 
 @app.post("/api/metrics")
@@ -1178,7 +1337,16 @@ def _store_metrics(s, t, raw, ip=None, cv=0):
                  conns=None if conns is None else int(conns), rx=None if w[0] is None else int(w[0]),
                  tx=None if w[1] is None else int(w[1]), rx_bps=w[2], tx_bps=w[3],
                  dhcp=None if dhcp is None else int(dhcp), **nw_metrics(r, d)))
+    old_v, new_v = (r.ver or "").split(" ")[0], str(d.get("ver", ""))[:40].split(" ")[0]
+    if old_v and new_v and old_v != new_v:  # zmiana wersji RouterOS (kanał w nawiasie, np. "(stable)", nie jest częścią wersji)
+        _VER_EVENTS.append({"rid": r.id, "name": r.name, "from": old_v, "to": new_v})
+        _UPG_PENDING.pop(r.id, None)
     r.ident, r.ver, r.uptime = str(d.get("id", ""))[:80], str(d.get("ver", ""))[:40], str(d.get("up", ""))[:40]
+    _SEEN.add(r.id)
+    if r.last_seen:  # zapamiętujemy rzeczywisty odstęp między pomiarami (dłuższe przerwy to awarie, nie rytm routera)
+        gap = (n - r.last_seen).total_seconds()
+        if 0.5 < gap < 600:
+            _GAPS.setdefault(r.id, collections.deque(maxlen=7)).append(gap)
     r.last_seen = n
     cutoff = n - dt.timedelta(days=RETENTION)
     s.execute(delete(Metric).where(Metric.router_id == r.id, Metric.ts < cutoff))
@@ -1549,12 +1717,45 @@ TS_RE = re.compile(r"^(?:[A-Z][a-z]{2}\s+\d{1,2}\s+\d\d:\d\d:\d\d|\d{4}-\d\d-\d\
 _log_buf = []
 _log_ipmap = {}
 _log_rejected = {}
-_log_task = None
+_BG_TASKS = []  # referencje do zadań w tle (żeby nie zostały sprzątnięte przez GC)
 
 
 def is_topics(tok):
     parts = tok.rstrip(":").split(",")
     return all(re.fullmatch(r"[a-z0-9-]+", p) for p in parts) and any(p in TOPIC_WORDS for p in parts)
+
+
+# RouterOS oznacza korektę zegara przez MikroTik Cloud jako "critical", choć zwykle to normalna rzecz po restarcie (router startuje
+# z ostatnio zapisanym czasem). Korekta do CLOCK_JUMP_INFO_S sekund jest zapisywana jako informacja; większy skok zostaje krytyczny.
+CLOCK_JUMP_INFO_S = 900
+_MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
+_CLOCK_RX = re.compile(r"cloud change time (?P<a>[A-Za-z]{3}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}) => (?P<b>[A-Za-z]{3}/\d{2}/\d{4} \d{2}:\d{2}:\d{2})")
+
+
+def clock_jump(msg):
+    """Wartość bezwzględna skoku zegara routera w sekundach z wpisu "cloud change time A => B" albo None."""
+    m = _CLOCK_RX.search(msg or "")
+    if not m:
+        return None
+    try:
+        vals = []
+        for g in (m.group("a"), m.group("b")):
+            mon, day, rest = g.split("/", 2)
+            year, hms = rest.split(" ")
+            h, mi, sec = (int(x) for x in hms.split(":"))
+            vals.append(dt.datetime(int(year), _MONTHS[mon.lower()], int(day), h, mi, sec))
+        return abs((vals[1] - vals[0]).total_seconds())
+    except (KeyError, ValueError):
+        return None
+
+
+def adjust_severity(sev, msg):
+    """Obniża do informacji (6) krytyczną korektę zegara o najwyżej CLOCK_JUMP_INFO_S sekund; resztę zostawia."""
+    if sev <= 3:
+        d = clock_jump(msg)
+        if d is not None and d <= CLOCK_JUMP_INFO_S:
+            return 6
+    return sev
 
 
 def parse_syslog(data):
@@ -1610,6 +1811,7 @@ def flush_logs(batch):
         sev, topics, msg = parse_syslog(data)
         if not msg:
             continue
+        sev = adjust_severity(sev, msg)
         if sev >= 4 and (rid, _mute_norm(msg)) in muted:  # błędy i komunikaty krytyczne nigdy nie są pomijane
             continue
         k = (rid, topics, msg)
@@ -1626,6 +1828,166 @@ def flush_logs(batch):
             autoban_check(fresh)
         except Exception as e:  # auto-ban nie może zatrzymać zapisu logów
             print("autoban: %s" % e, flush=True)
+
+
+# ---------- powiadomienia (ntfy, webhook) ----------
+NOTIF_BAN_EVERY = 600  # zbiorcze powiadomienie o automatycznych banach najczęściej co 10 min
+_PENDING_BANS = {"n": 0, "h": 1, "sent": 0.0}
+_NOTIF_NEXT = {}   # klucz zdarzenia -> czas (time.time()), przed którym nie ponawiamy próby po błędzie wysyłki (tylko to zdarzenie)
+_NOTIF_FAILS = {}  # klucz zdarzenia -> liczba kolejnych błędów (wydłuża przerwę: 15, 30, 60, 120 s)
+_NOTIF_STATS = {"check": 0.0, "sent": 0, "error": "", "error_ts": 0.0}  # do strony „Zgłoś problem”
+
+
+def notif_cfg(s):
+    def g(k, d=""):
+        return sget(s, "notif_" + k, d)
+
+    def num(k, d, lo, hi):
+        v = g(k)
+        return min(hi, max(lo, int(v))) if v.isdigit() else d
+    return {"on": g("on", "0") == "1", "ntfy_url": g("ntfy_url", "https://ntfy.sh"), "ntfy_topic": g("ntfy_topic"),
+            "ntfy_token": g("ntfy_token"), "hook_url": g("hook_url"), "lang": g("lang") if g("lang") in i18n.LOCALES else "en",
+            "offline_min": num("offline_min", 5, 1, 120), "inet_min": num("inet_min", 3, 1, 120),
+            **{"r_" + r: g("r_" + r, "1") == "1" for r in ("offline", "inet", "backup", "ban")}}
+
+
+def notif_event(cfg, kind, severity, tkey, router=None, **kw):
+    """Zdarzenie do wysłania; treść w języku z ustawień. Bez adresów IP, tokenów i haseł."""
+    return {"app": "routeros-monitor", "version": appver.current(), "kind": kind, "severity": severity,
+            "title": i18n.translate(cfg["lang"], "notif.%s.title" % tkey, **kw),
+            "message": i18n.translate(cfg["lang"], "notif.%s.msg" % tkey, **kw),
+            "router": router, "time": now().isoformat(timespec="seconds") + "Z"}
+
+
+def _notif_state(s):
+    try:
+        d = json.loads(sget(s, "notif_state", "{}") or "{}")
+        return d if isinstance(d, dict) else {}
+    except ValueError:
+        return {}
+
+
+def _mins(a, b):
+    return max(1, int((b - a).total_seconds() // 60))
+
+
+def _send_event(cfg, ek, ev):
+    """Wysyła jedno zdarzenie. Po błędzie ustawia przerwę (15, 30, 60, 120 s) tylko dla tego zdarzenia. Zwraca True, gdy wysłano."""
+    if time.time() < _NOTIF_NEXT.get(ek, 0):
+        return False  # to zdarzenie czeka na ponowienie po błędzie; pozostałe idą normalnie
+    errs = notify.dispatch(cfg, ev)
+    if errs:
+        fails = _NOTIF_FAILS[ek] = _NOTIF_FAILS.get(ek, 0) + 1
+        wait = min(120, 15 * 2 ** (fails - 1))
+        _NOTIF_NEXT[ek] = time.time() + wait
+        _NOTIF_STATS.update(error="; ".join(errs), error_ts=time.time())
+        print("notify: sending %s failed (%s), retry in %d s" % (ev["kind"], "; ".join(errs), wait), flush=True)
+        return False
+    _NOTIF_FAILS.pop(ek, None)
+    _NOTIF_NEXT.pop(ek, None)
+    _NOTIF_STATS["sent"] += 1
+    print("notify: sent %s: %s" % (ev["kind"], ev["message"]), flush=True)
+    return True
+
+
+def notify_check():
+    """Co 15 s: sprawdza routery, internet i kopie i wysyła powiadomienie przy zmianie stanu (jedno na zdarzenie).
+    Błąd wysyłki jednego zdarzenia nie wstrzymuje pozostałych: to zdarzenie jest ponawiane po krótkiej, rosnącej przerwie."""
+    _NOTIF_STATS["check"] = time.time()
+    with Session(engine) as s:
+        cfg = notif_cfg(s)
+        if not cfg["on"]:
+            _VER_EVENTS.clear()
+            return
+        state = _notif_state(s)
+        before = json.dumps(state, sort_keys=True)
+        events = []  # (klucz stanu, nowa wartość albo None = usuń, zdarzenie)
+        # Tuż po starcie czas ostatniego kontaktu w bazie jest stary, więc router, który jeszcze się nie zgłosił od startu, nie jest
+        # oceniany jako offline do końca krótkiej rozgrzewki (ok. 2 interwały). Router, który już się zgłosił, jest oceniany od razu.
+        warmup = time.time() - _STARTED < min(300, max(30, 2 * _INTERVAL_S[0] + 15))
+        for r in ordered_routers(s):
+            if r.last_seen is None:
+                continue
+            gap = (now() - r.last_seen).total_seconds()
+            k, st = "router:%d" % r.id, state.get("router:%d" % r.id)
+            upg = r.upgrading  # router zgłosił pobieranie aktualizacji RouterOS i zamilkł (restart po aktualizacji)
+            if cfg["r_offline"] and not st and upg:
+                to = _UPG_PENDING.get(r.id, {}).get("to") or "?"
+                events.append((k, {"t": r.last_seen.isoformat(timespec="seconds"), "upg": 1},
+                               notif_event(cfg, "router_upgrading", "info", "upgrading", r.name, name=r.name, to=to)))
+            elif cfg["r_offline"] and (not warmup or r.id in _SEEN) and gap >= cfg["offline_min"] * 60 and not st:
+                events.append((k, {"t": r.last_seen.isoformat(timespec="seconds")},
+                               notif_event(cfg, "router_offline", "critical", "offline", r.name, name=r.name, min=int(gap // 60))))
+            elif st and st.get("upg") and not r.online and not upg:
+                # aktualizacja trwa dłużej niż UPG_WINDOW: nie maskujemy awarii, wraca zwykły alert „brak łączności”
+                events.append((k, {"t": st.get("t") or r.last_seen.isoformat(timespec="seconds")},
+                               notif_event(cfg, "router_offline", "critical", "offline", r.name, name=r.name, min=int(gap // 60))))
+            elif r.online and st:
+                since = dt.datetime.fromisoformat(st["t"]) if st.get("t") else r.last_seen
+                if st.get("upg") and any(v["rid"] == r.id for v in _VER_EVENTS):
+                    events.append((k, None, None))  # wróciła po aktualizacji: powiadomienie „zaktualizowany” wyśle zdarzenie zmiany wersji
+                else:
+                    events.append((k, None, notif_event(cfg, "router_online", "info", "online", r.name, name=r.name, min=_mins(since, now()))))
+            if cfg["r_inet"] and r.edge and r.online:
+                ik = "inet:%d" % r.id
+                ist = state.get(ik)
+                rows = s.execute(select(Metric.ts, Metric.inet_up).where(
+                    Metric.router_id == r.id, Metric.inet_up.is_not(None), Metric.ts > now() - dt.timedelta(hours=2))
+                    .order_by(Metric.ts.desc()).limit(2000)).all()
+                if rows and (now() - rows[0][0]).total_seconds() < 300:
+                    down_since = None
+                    for ts, up in rows:  # od najnowszego: jak długo trwa ciągła przerwa
+                        if up is not False:
+                            break
+                        down_since = ts
+                    if down_since and not ist and (now() - down_since).total_seconds() >= cfg["inet_min"] * 60:
+                        events.append((ik, {"t": down_since.isoformat(timespec="seconds")},
+                                       notif_event(cfg, "internet_down", "critical", "inet", r.name, name=r.name,
+                                                   min=_mins(down_since, now()))))
+                    elif not down_since and ist:
+                        t0 = dt.datetime.fromisoformat(ist["t"]) if ist.get("t") else now()
+                        events.append((ik, None, notif_event(cfg, "internet_up", "info", "inet_ok", r.name, name=r.name,
+                                                             min=_mins(t0, now()))))
+        if cfg["r_backup"]:
+            b = backups_info()
+            problem = ""
+            if b.get("error"):
+                problem = " ".join(b["error"].split())[:120]
+            elif b.get("available") and b.get("files") and b.get("stale"):
+                problem = i18n.translate(cfg["lang"], "notif.backup.stale")
+            if problem and "backup" not in state:
+                events.append(("backup", {"d": problem[:60]}, notif_event(cfg, "backup_failed", "warning", "backup", detail=problem)))
+            elif not problem and "backup" in state:
+                events.append(("backup", None, notif_event(cfg, "backup_ok", "info", "backup_ok")))
+        if cfg["r_ban"] and _PENDING_BANS["n"] and time.time() - _PENDING_BANS["sent"] >= NOTIF_BAN_EVERY:
+            events.append((None, None, notif_event(cfg, "auto_ban", "warning", "ban", n=_PENDING_BANS["n"], h=_PENDING_BANS["h"])))
+        for key, new, ev in events:
+            ek = key or "ban"
+            if ev is None:  # tylko zmiana stanu, bez powiadomienia
+                if new is None:
+                    state.pop(key, None)
+                else:
+                    state[key] = new
+                continue
+            if not _send_event(cfg, ek, ev):
+                continue
+            if key is None:
+                _PENDING_BANS.update(n=0, sent=time.time())
+            elif new is None:
+                state.pop(key, None)
+            else:
+                state[key] = new
+        if cfg["r_offline"]:  # zmiany wersji RouterOS (aktualizacja albo downgrade): jedno powiadomienie na zdarzenie
+            for ve in list(_VER_EVENTS):
+                ev = notif_event(cfg, "router_updated", "info", "updated", ve["name"], name=ve["name"], a=ve["from"], b=ve["to"])
+                if _send_event(cfg, "ver:%d:%s" % (ve["rid"], ve["to"]), ev):
+                    _VER_EVENTS.remove(ve)
+        else:
+            _VER_EVENTS.clear()
+        del _VER_EVENTS[:-50]
+        if json.dumps(state, sort_keys=True) != before:
+            sset(s, "notif_state", json.dumps(state))
+            s.commit()
 
 
 # ---------- wyciszanie komunikatów logu: wybrane powtarzające się wpisy routera nie są zapisywane ----------
@@ -1655,14 +2017,21 @@ def muted_set():
     return _MUTE_CACHE[1]
 
 
+def unmutable(msg, topics=""):
+    """Komunikaty, których nie wolno wyciszyć: próby logowania (liczone przez auto-ban) i wpisy oceniane jako problem."""
+    if _FAIL_RX.search(msg or ""):
+        return True
+    res = translate_log(msg or "", topics or "")
+    return bool(res and res["level"] == "bad")
+
+
 @app.post("/api/routers/{rid}/logs/mute", dependencies=[Depends(admin)])
 def log_mute(rid: int, msg: str = Form(), s: Session = Depends(db)):
     row = s.scalars(select(LogEntry).where(LogEntry.router_id == rid, LogEntry.msg == msg[:1000])
                     .order_by(LogEntry.id.desc()).limit(1)).first()
     if not row or row.sev <= 3:
         return JSONResponse({"ok": False, "msg": tr("msg.mu_err")}, 400)
-    res = translate_log(row.msg, row.topics)
-    if _FAIL_RX.search(row.msg) or (res and res["level"] == "bad"):  # ataki i problemy muszą zostać widoczne (i liczone przez auto-ban)
+    if unmutable(row.msg, row.topics):  # ataki i problemy muszą zostać widoczne (i liczone przez auto-ban)
         return JSONResponse({"ok": False, "msg": tr("msg.mu_bad")}, 400)
     pat = _mute_norm(row.msg)
     lst = mutes_get(s)
@@ -1791,6 +2160,8 @@ def autoban_check(rows):
             s.add(Whitelist(kind="black", ip=net, comment=cmt("auto-ban %d failed logins" % n_hits),
                             expires=now() + dt.timedelta(hours=cfg["h"]), router_id=None))
             log(s, "blacklist+ (auto)", "%s: %d nieudanych logowan w %d min, ban na %d h" % (net, n_hits, cfg["min"], cfg["h"]))
+            _PENDING_BANS["n"] += 1  # zbiorcze powiadomienie wysyła notify_check
+            _PENDING_BANS["h"] = cfg["h"]
         s.commit()
 
 
@@ -1867,34 +2238,89 @@ def update_traffic():
         s.commit()
 
 
-async def log_loop():
-    n = 0
+async def _run_timed(fn, *args):
+    """Uruchamia zadanie w puli wątków i zapisuje w logu aplikacji te, które trwają dłużej niż 10 s (blokują pętlę zadań w tle)."""
+    t0 = time.monotonic()
+    try:
+        return await run_in_threadpool(fn, *args)
+    finally:
+        d = time.monotonic() - t0
+        if d > 10:
+            print("slow background task: %s took %.0f s" % (fn.__name__, d), flush=True)
+
+
+async def notify_loop():
+    """Powiadomienia mają własną pętlę, żeby ciężkie zadania (czyszczenie, statystyki) nie opóźniały alertów."""
+    await asyncio.sleep(10)
     while True:
         try:
-            if n % 15 == 0:
-                await run_in_threadpool(refresh_ipmap)
+            await _run_timed(notify_check)
+        except Exception as e:
+            print("notify loop error: %s" % e, flush=True)
+        await asyncio.sleep(15)
+
+
+_HEAVY = None  # kolejka ciężkich zadań bazodanowych (po jednym naraz); lekkie zadania i powiadomienia nigdy na nią nie czekają
+
+
+async def _periodic(name, fn, every, first=0.0, heavy=False):
+    """Własna, niezależna pętla jednego zadania w tle: nie czeka na inne zadania, a samo nie nakłada się na siebie
+    (kolejne uruchomienie dopiero `every` sekund po zakończeniu poprzedniego). Ciężkie zadania idą pojedynczo przez _HEAVY."""
+    await asyncio.sleep(first)
+    while True:
+        try:
+            if heavy:
+                async with _HEAVY:
+                    await _run_timed(fn)
+            else:
+                await _run_timed(fn)
+        except Exception as e:
+            print("background task %s error: %s" % (name, e), flush=True)
+        await asyncio.sleep(every)
+
+
+async def _ingest_loop():
+    """Zapis logów z routerów (syslog): co 2 s, niezależnie od pozostałych zadań."""
+    while True:
+        try:
             if _log_buf:
                 batch = _log_buf[:]
                 del _log_buf[:len(batch)]
-                await run_in_threadpool(flush_logs, batch)
-            if n % 1800 == 0:
-                await run_in_threadpool(purge_logs)
-            if n % 30 == 5:
-                await run_in_threadpool(record_clients)
-            if n % 300 == 10:
-                await run_in_threadpool(update_traffic)
-            if n % 150 == 20:
-                await run_in_threadpool(enforce_backup_limit)
-            if n % 150 == 30:
-                await run_in_threadpool(purge_iface_metrics)
-            if n % 15 == 7:
-                rid = await run_in_threadpool(speed_due)
-                if rid:
-                    asyncio.create_task(server_speedtest(rid))
+                await _run_timed(flush_logs, batch)
         except Exception as e:
-            print("log loop error: %s" % e, flush=True)
-        n += 1
+            print("log ingest error: %s" % e, flush=True)
         await asyncio.sleep(2)
+
+
+async def _speed_loop():
+    """Co 30 s sprawdza, czy pora na nocny test prędkości z serwera, i uruchamia go jako osobne zadanie."""
+    await asyncio.sleep(14)
+    while True:
+        try:
+            rid = await _run_timed(speed_due)
+            if rid:
+                asyncio.create_task(server_speedtest(rid))
+        except Exception as e:
+            print("background task speed_due error: %s" % e, flush=True)
+        await asyncio.sleep(30)
+
+
+def start_background_tasks():
+    """Uruchamia niezależne zadania w tle z własnymi harmonogramami (pierwsze uruchomienia rozłożone w czasie)."""
+    global _HEAVY
+    _HEAVY = asyncio.Semaphore(1)
+    jobs = [  # (nazwa, funkcja, co ile s, opóźnienie pierwszego uruchomienia, ciężkie)
+        ("refresh_ipmap", refresh_ipmap, 30, 0, False),
+        ("refresh_interval_cache", refresh_interval_cache, 60, 1, False),
+        ("record_clients", record_clients, 60, 10, False),
+        ("update_traffic", update_traffic, 600, 20, True),
+        ("enforce_backup_limit", enforce_backup_limit, 300, 40, True),
+        ("purge_iface_metrics", purge_iface_metrics, 300, 60, True),
+        ("purge_logs", purge_logs, 3600, 90, True),
+    ]
+    tasks = [asyncio.create_task(_periodic(*j[:4], heavy=j[4])) for j in jobs]
+    tasks += [asyncio.create_task(_ingest_loop()), asyncio.create_task(_speed_loop()), asyncio.create_task(notify_loop())]
+    return tasks
 
 
 async def push_caddy_config():
@@ -1919,12 +2345,11 @@ async def start_caddy_cfg():
 
 @app.on_event("startup")
 async def start_syslog():
-    global _log_task
     try:
         await asyncio.get_running_loop().create_datagram_endpoint(SyslogProto, local_addr=("0.0.0.0", SYSLOG_LISTEN))
     except OSError as e:
         print("syslog: nie można nasłuchiwać na UDP %d: %s" % (SYSLOG_LISTEN, e), flush=True)
-    _log_task = asyncio.create_task(log_loop())
+    _BG_TASKS[:] = start_background_tasks()
 
 
 LOG_CATS = {"error": (0, 1, 2, 3), "warning": (4,), "info": (5, 6), "debug": (7,)}
@@ -1964,10 +2389,12 @@ def logs_api(request: Request, rid: int, sev: str = "", topic: str = "", q: str 
                                                          LogEntry.ts > now() - dt.timedelta(days=7))
                            .distinct().limit(1000)).all():
         words.update(w for w in (tp or "").split(",") if w and w not in SEV_WORDS)
-    mset = muted_set() if request.state.user.is_admin else set()
+    admin_ = request.state.user.is_admin
+    mset = muted_set() if admin_ else set()
     return {"items": [{"t": x.ts.isoformat(timespec="seconds"), "cls": sev_cls(x.sev), "label": tr(SEV_LABEL[sev_cls(x.sev)]),
                        "topics": [w for w in x.topics.split(",") if w and w not in SEV_WORDS], "msg": x.msg,
-                       "muted": x.sev >= 4 and (rid, _mute_norm(x.msg)) in mset}
+                       "muted": x.sev >= 4 and (rid, _mute_norm(x.msg)) in mset,
+                       "nomute": bool(admin_ and x.sev >= 4 and unmutable(x.msg, x.topics))}  # bez przycisku wyciszania
                       for x in rows],
             "counts": counts, "topics": sorted(words),
             "ack": (log_ack_time(request.state.user, rid) or dt.datetime(2000, 1, 1)).isoformat(timespec="seconds"),
@@ -2888,6 +3315,14 @@ def _reboot(m, tp):
             "advice": tr("an.074"), "det": {}}
 
 
+def _reboot_upgrade(m, tp):
+    return {"id": "reboot_upgrade", "level": "info", "title": tr("an.190"), "explain": tr("an.191"), "advice": tr("an.192"), "det": {}}
+
+
+def _pkg_channel(m, tp):
+    return {"id": "pkg_channel", "level": "info", "title": tr("an.197"), "explain": tr("an.198"), "advice": "", "det": {}}
+
+
 def _script_fail(m, tp):
     txt = m.group(0).lower()
     if "502" in txt or "bad gateway" in txt:
@@ -3089,6 +3524,7 @@ def _pkg(m, tp):
 
 LOG_RULES = [
     (_r(r"\\; ?\\n|\\5B|on-error=\{\}|\$send u=\$url|\$buf \.|\[:len \\?\$buf\]"), _script_fragment),
+    (_r(r"rebooted by .*upgrade"), _reboot_upgrade),  # przed ogólną regułą „zmiana przez klienta/użytkownika”, która by ją przechwyciła
     (_r(r"^(?P<what>.+?) by (?P<client>[^\s:]+):(?P<user>[^@\s]+)@(?P<addr>[0-9a-f:.]+?)/(?P<path>\S*)(?:\s+\((?P<cmd>.*)\))?\s*$"), _cfg_by),
     (_r(r"(?:download from|upload to) (?P<host>\S+) (?P<res>finished|failed)"), _fetch),
     (_r(r"bad command name (?P<cmd>\S+) \(line (?P<line>\d+) column (?P<col>\d+)\)"), _bad_cmd),
@@ -3104,6 +3540,7 @@ LOG_RULES = [
     (_r(r"user (?P<user>\S+) logged in from (?P<ip>[0-9a-f.:]+) via (?P<svc>[\w-]+)"), _login_ok),
     (_r(r"user (?P<user>\S+) logged out from (?P<ip>[0-9a-f.:]+) via (?P<svc>[\w-]+)"), _logout),
     (_r(r"rebooted without proper shutdown|unexpected (reboot|shutdown)|kernel failure|watchdog"), _reboot_bad),
+    (_r(r"package channel changed"), _pkg_channel),
     (_r(r"router rebooted|system rebooted|rebooted by"), _reboot),
     (_r(r"out of memory|memory (is )?low"), _memory),
     (_r(r"(?P<iface>\S+?):? excessive (broadcasts|multicasts)|loop detected|probably a loop"), _loop),
@@ -3551,6 +3988,15 @@ def _diag_routers(s):
             p.append("firmware " + si["fw"])
         p.append("online" if r.online else "offline")
         p.append("last contact %s ago" % _age((now() - r.last_seen).total_seconds()) if r.last_seen else "never contacted")
+        if upgrade_pending(r.id):
+            p.append("RouterOS update in progress (restart expected)")
+        u = _UPG.get(r.id)
+        if u:
+            p.append("RouterOS update status %r (%s ago)" % (u["st"][:60], _age(time.time() - u["ts"])))
+        gap = reporting_gap(r.id)
+        own = " (own thresholds)" if any(v is not None for v in _THR.get(r.id, {}).values()) else ""
+        p.append("reports every ~%.1f s, no response after %.0f s, offline after %.0f s%s" % (gap, no_response_after(r.id), online_after(r.id), own)
+                 if gap else "reporting rhythm not measured yet (offline after %.0f s%s)" % (online_after(r.id), own))
         if r.edge:
             p.append("edge")
         if si["manager"]:
@@ -3597,11 +4043,54 @@ def _diag_features(s):
     return out
 
 
+def _diag_applog(s):
+    """Końcówka logu aplikacji (ostrzeżenia, błędy i komunikaty print) z wyciętymi tokenami, adresami IP, e-mailami,
+    nazwami routerów, użytkowników i domeny. Wycinanie nie jest nieomylne, dlatego strona raportu pozwala przejrzeć i poprawić tekst."""
+    names = {}
+    for i, r in enumerate(ordered_routers(s), 1):
+        for n in (r.name, r.ident):
+            if n:
+                names[n] = "router %d" % i
+    for u in s.scalars(select(User)):
+        names[u.username] = "user"
+    domain = sget(s, "domain")
+    if domain:
+        names[domain] = "<domain>"
+    out = ["- Application started %s ago; entries below are warnings, errors and printed messages since then (newest last)"
+           % _age(time.time() - _STARTED)]
+    items = applog.recent()
+    if not items:
+        out.append("- (none)")
+    for ts, text in items:
+        stamp = dt.datetime.fromtimestamp(ts, dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        out.append("[%s UTC] %s" % (stamp, applog.scrub(text, names)))
+    return out
+
+
+def _diag_notify(s):
+    c = notif_cfg(s)
+    ago = lambda ts: _age(time.time() - ts) + " ago" if ts else "never"
+    out = ["- Notifications: %s; channels: ntfy %s, webhook %s" % (
+        "on" if c["on"] else "off", "configured" if c["ntfy_url"] and c["ntfy_topic"] else "not configured",
+        "configured" if c["hook_url"] else "not configured")]
+    out.append("- Rules: router offline %s (after %d min), internet down %s (after %d min), backup %s, auto-ban %s" % (
+        "on" if c["r_offline"] else "off", c["offline_min"], "on" if c["r_inet"] else "off", c["inet_min"],
+        "on" if c["r_backup"] else "off", "on" if c["r_ban"] else "off"))
+    out.append("- Last check: %s; sent since start: %d; last error: %s" % (
+        ago(_NOTIF_STATS["check"]), _NOTIF_STATS["sent"],
+        ("%s (%s)" % (_NOTIF_STATS["error"][:80], ago(_NOTIF_STATS["error_ts"]))) if _NOTIF_STATS["error"] else "none"))
+    waiting = [k for k, v in _NOTIF_NEXT.items() if v > time.time()]
+    st = _notif_state(s)
+    out.append("- Events waiting for a retry: %d; open states (routers offline, internet down, backup problem): %d" % (len(waiting), len(st)))
+    return out
+
+
 def report_data(s):
     """Dane diagnostyczne do zgłoszenia błędu. Celowo bez haseł, tokenów, adresów IP, nazw i identyfikatorów routerów."""
     parts = []
     for title, fn in (("Environment", _diag_env), ("Database", _diag_db), ("Routers", _diag_routers),
-                      ("Backups", _diag_backups), ("Features", _diag_features)):
+                      ("Backups", _diag_backups), ("Features", _diag_features), ("Notifications", _diag_notify),
+                      ("Application log", _diag_applog)):
         try:
             lines = fn(s)
         except Exception as e:  # jedna sekcja nie może zepsuć całej strony
@@ -3861,6 +4350,10 @@ def settings_view(request, s, msg="", ok=True):
         "domain": sget(s, "domain"), "email": sget(s, "email"), "msg": msg, "ok": ok,
         "interval": interval(s), "intervals": INTERVALS, "routers": ordered_routers(s), "bk": backups_view(s),
         "wl_enabled": whitelist_on(s), "bl_enabled": blacklist_on(s), "ab": autoban_cfg(s), "ab_hours": AUTOBAN_HOURS,
+        "off_mult": offline_mult(s),
+        "thr_rows": [{"id": r.id, "name": r.name, "gap": reporting_gap(r.id), "auto_nr": auto_no_response(r.id),
+                      "auto_off": auto_offline(r.id), "own_nr": _THR.get(r.id, {}).get("nr"), "own_off": _THR.get(r.id, {}).get("off"),
+                      "eff_nr": no_response_after(r.id), "eff_off": online_after(r.id)} for r in ordered_routers(s)], "nf": notif_view(s), "langs": i18n.languages(),
         "mutes": [{"pat": m["pat"], "rid": m.get("rid"), "ts": m.get("ts", ""),
                    "router": next((r.name for r in ordered_routers(s) if r.id == m.get("rid")), "?")} for m in mutes_get(s)],
         "speed_router": sget(s, "speed_router"), "speed_time": SPEED_TIME[:5],
@@ -3885,6 +4378,50 @@ def settings_blacklist(request: Request, on: str = Form(""), s: Session = Depend
     s.commit()
     _BL_ON[1] = 0
     return settings_view(request, s, (tr("msg.bl_on") if on == "1" else tr("msg.bl_off")) + " " + tr("msg.wl_paste"), True)
+
+
+def notif_view(s):
+    """Ustawienia powiadomień do formularza: bez sekretów (token ntfy i adres webhooka są tylko oznaczone jako zapisane)."""
+    c = notif_cfg(s)
+    hook = urlparse(c["hook_url"]).hostname if c["hook_url"] else ""
+    return {**{k: v for k, v in c.items() if k not in ("ntfy_token", "hook_url")},
+            "token_set": bool(c["ntfy_token"]), "hook_set": bool(c["hook_url"]), "hook_host": hook or ""}
+
+
+@app.post("/settings/notify", dependencies=[Depends(admin)])
+def settings_notify(request: Request, on: str = Form(""), ntfy_url: str = Form(""), ntfy_topic: str = Form(""),
+                    ntfy_token: str = Form(""), clear_token: str = Form(""), hook_url: str = Form(""), clear_hook: str = Form(""),
+                    lang: str = Form("en"), offline_min: str = Form("5"), inet_min: str = Form("3"),
+                    r_offline: str = Form(""), r_inet: str = Form(""), r_backup: str = Form(""), r_ban: str = Form(""),
+                    s: Session = Depends(db)):
+    ntfy_url, ntfy_topic, hook_url = ntfy_url.strip(), ntfy_topic.strip(), hook_url.strip()
+    if ntfy_topic and (not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", ntfy_topic) or not notify.valid_url(ntfy_url)):
+        return settings_view(request, s, tr("msg.nf_bad_ntfy"), False)
+    if hook_url and not notify.valid_url(hook_url):
+        return settings_view(request, s, tr("msg.nf_bad_hook"), False)
+    old = notif_cfg(s)
+    sset(s, "notif_on", "1" if on == "1" else "0")
+    sset(s, "notif_ntfy_url", ntfy_url or "https://ntfy.sh")
+    sset(s, "notif_ntfy_topic", ntfy_topic)
+    sset(s, "notif_ntfy_token", "" if clear_token == "1" else (ntfy_token.strip() or old["ntfy_token"]))
+    sset(s, "notif_hook_url", "" if clear_hook == "1" else (hook_url or old["hook_url"]))
+    sset(s, "notif_lang", lang if lang in i18n.LOCALES else "en")
+    for k, v, lo, hi in (("offline_min", offline_min, 1, 120), ("inet_min", inet_min, 1, 120)):
+        sset(s, "notif_" + k, str(min(hi, max(lo, int(v)))) if v.isdigit() else str(old[k]))
+    for k, v in (("offline", r_offline), ("inet", r_inet), ("backup", r_backup), ("ban", r_ban)):
+        sset(s, "notif_r_" + k, "1" if v == "1" else "0")
+    log(s, "powiadomienia", "włączone" if on == "1" else "wyłączone")  # bez adresów i tokenów w dzienniku
+    s.commit()
+    _NOTIF_NEXT.clear()
+    _NOTIF_FAILS.clear()
+    return settings_view(request, s, tr("msg.nf_saved"), True)
+
+
+@app.post("/settings/notify/test", dependencies=[Depends(admin)])
+def settings_notify_test(request: Request, s: Session = Depends(db)):
+    cfg = notif_cfg(s)
+    errs = notify.dispatch(cfg, notif_event(cfg, "test", "info", "test"), force=True)
+    return settings_view(request, s, tr("msg.nf_test_ok") if not errs else tr("msg.nf_test_err") + " " + "; ".join(errs), not errs)
 
 
 @app.post("/settings/autoban", dependencies=[Depends(admin)])
@@ -3957,6 +4494,60 @@ def backup_delete(request: Request, name: str, s: Session = Depends(db)):
         log(s, "usunięto kopię", name)
         s.commit()
     return RedirectResponse("/settings#backup", 303)
+
+
+def _save_router_thresholds(request, form):
+    """Zapisuje własne progi routerów z formularza (pola nr_<id> i off_<id>, puste = automatycznie, nie mniej niż 1 s)."""
+    with Session(engine) as s:
+        s.info["who"] = request.state.user.username
+        thr, bad = {}, False
+        for r in ordered_routers(s):
+            item = {}
+            for key, field in (("nr", "nr_%d" % r.id), ("off", "off_%d" % r.id)):
+                raw = str(form.get(field, "")).strip().replace(",", ".")
+                if not raw:
+                    continue
+                try:
+                    v = float(raw)
+                except ValueError:
+                    bad = True
+                    continue
+                if v < 1:
+                    bad = True
+                    continue
+                item[key] = round(v, 2)
+            if item:
+                thr[str(r.id)] = item
+        if bad:
+            return settings_view(request, s, tr("msg.off_routers_bad"), False)
+        sset(s, "router_thr", json.dumps(thr))
+        log(s, "progi routerów", "własne progi: %d routerów" % len(thr))
+        s.commit()
+        _THR.clear()
+        _THR.update(router_thresholds(s))
+        return settings_view(request, s, tr("msg.off_routers_ok"), True)
+
+
+@app.post("/settings/offline/routers", dependencies=[Depends(admin)])
+async def settings_offline_routers(request: Request):
+    form = dict(await request.form())
+    return await run_in_threadpool(_save_router_thresholds, request, form)
+
+
+@app.post("/settings/offline", dependencies=[Depends(admin)])
+def settings_offline(request: Request, mult: str = Form("1.5"), s: Session = Depends(db)):
+    try:
+        v = float(mult.strip().replace(",", "."))
+    except ValueError:
+        return settings_view(request, s, tr("msg.off_bad"), False)
+    if not 1.0 <= v <= 100000:
+        return settings_view(request, s, tr("msg.off_bad"), False)
+    txt = ("%.2f" % v).rstrip("0").rstrip(".")
+    sset(s, "offline_mult", txt)
+    log(s, "próg offline", "mnożnik %s" % txt)
+    s.commit()
+    _OFFLINE_MULT[0] = v
+    return settings_view(request, s, tr("msg.off_ok", x=txt.replace(".", ",")), True)
 
 
 @app.post("/settings/interval", dependencies=[Depends(admin)])

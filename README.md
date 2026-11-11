@@ -220,6 +220,7 @@ More languages are added with a single JSON file and no code changes: [docs/TRAN
 |---|---|
 | [Releases](https://github.com/silvergunx/routeros-monitor/releases) and [CHANGELOG.md](CHANGELOG.md) | what changed in each version, and what has to be done on the routers or the server after an update |
 | [docs/ROUTERY.md](docs/ROUTERY.md) (Polish) | what the configuration command installs on a router, firewall rules for the whitelist and the blacklist, routers outside the local network |
+| [docs/NTFY.md](docs/NTFY.md) (Polish) | notifications through your own ntfy server: how it works, tested versions and minimum requirements, installation, accounts, phone setup (Android, iPhone), access from outside, troubleshooting |
 | [docs/BEZPIECZENSTWO.md](docs/BEZPIECZENSTWO.md) (Polish) and [SECURITY.md](SECURITY.md) | hardening notes and how to report a vulnerability |
 | [docs/TRANSLATING.md](docs/TRANSLATING.md) | how to add a language |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | branches (`main` stable, `develop` beta), tests, how to release |

@@ -8,7 +8,7 @@
 body{font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;background:var(--bg);color:var(--fg)}
 nav{background:var(--nav);padding:0 16px;display:flex;align-items:center;gap:4px;height:48px;flex-wrap:wrap}
 nav a,nav button{color:#e5e7eb;text-decoration:none;padding:6px 12px;border-radius:6px;background:none;border:0;font:inherit;cursor:pointer}
-nav a:hover,nav button:hover{background:#ffffff1a}nav .sp{flex:1}nav .lg{display:inline-flex;align-items:center;gap:6px;opacity:.7}nav .lg.on{opacity:1;background:#ffffff1a}nav .lg img{border-radius:2px;box-shadow:0 0 0 1px #0004}nav b{color:#fff;margin-right:12px}nav .links{display:flex;align-items:center;gap:4px;flex:1}nav .burger{display:none;margin-left:auto;font-size:20px}
+nav a:hover,nav button:hover{background:#ffffff1a}nav .nr{display:flex;align-items:center;gap:4px;margin-left:auto}nav .lg{display:inline-flex;align-items:center;gap:6px;opacity:.7}nav .lg.on{opacity:1;background:#ffffff1a}nav .lg img{border-radius:2px;box-shadow:0 0 0 1px #0004}nav b{color:#fff;margin-right:12px}nav .links{display:flex;align-items:center;gap:4px;flex:1}nav .burger{display:none;margin-left:auto;font-size:20px}
 main{max-width:1150px;margin:20px auto;padding:0 16px}
 a{color:var(--acc)}h2{margin:0 0 12px;font-size:18px}
 .card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:16px;margin-bottom:16px}
@@ -22,6 +22,7 @@ pre{background:#0b1220;color:#d1d5db;padding:10px;overflow:auto;border-radius:6p
 
 form.i{display:inline}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .badge{padding:1px 9px;border-radius:99px;font-size:12px;border:1px solid currentColor}
+.badge.upg{color:var(--acc)}
 .rc{display:block;text-decoration:none;color:inherit;margin:0}.rc:hover{border-color:var(--acc)}
 .rh{display:flex;justify-content:space-between;align-items:center;margin-bottom:2px}
 .bar{height:6px;background:var(--bd);border-radius:3px;overflow:hidden;margin:3px 0 10px}.bar i{display:block;height:100%}
@@ -100,6 +101,9 @@ tr.lv-dbg td{color:var(--mut)}
 #rtabs[data-tab=vpn] .rp-vpn{display:block}#rtabs[data-tab=vpn] button[data-t=vpn]{color:var(--fg);border-bottom-color:var(--acc)}
 #rtabs[data-tab=logs] .rp-logs{display:block}#rtabs[data-tab=logs] button[data-t=logs]{color:var(--fg);border-bottom-color:var(--acc)}
 #rtabs[data-tab=cfg] .rp-cfg{display:block}#rtabs[data-tab=cfg] button[data-t=cfg]{color:var(--fg);border-bottom-color:var(--acc)}
+.sp{display:none}
+#stabs[data-tab=gen] .sp-gen,#stabs[data-tab=sec] .sp-sec,#stabs[data-tab=not] .sp-not,#stabs[data-tab=spd] .sp-spd,#stabs[data-tab=bak] .sp-bak{display:block}
+#stabs[data-tab=gen] button[data-t=gen],#stabs[data-tab=sec] button[data-t=sec],#stabs[data-tab=not] button[data-t=not],#stabs[data-tab=spd] button[data-t=spd],#stabs[data-tab=bak] button[data-t=bak]{color:var(--fg);border-bottom-color:var(--acc)}
 
 .st{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}.st:before{content:"";width:8px;height:8px;border-radius:50%;background:var(--mut)}
 .st.online:before{background:var(--ok)}.st.idle:before{background:var(--warn)}.st.offline:before,.st.disabled:before{background:var(--bd)}
@@ -121,7 +125,7 @@ tr.lv-dbg td{color:var(--mut)}
  .tiles{grid-template-columns:repeat(3,1fr);gap:8px}.tile{padding:8px 10px}.tile b{font-size:17px}.tile b.txt{font-size:13px}
  nav{height:auto;min-height:48px;padding:0 10px}nav .burger{display:block}
  nav .links{display:none;flex-basis:100%;flex-direction:column;align-items:stretch;padding-bottom:8px}
- nav.open .links{display:flex}nav .links a,nav .links button{padding:10px 12px;text-align:left}nav .sp{display:none}
+ nav.open .links{display:flex}nav .links a,nav .links button{padding:10px 12px;text-align:left}nav .nr{display:contents}
  .tabs.rt,.tabs.ct{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch}.tabs.rt button,.tabs.ct button{white-space:nowrap;font-size:14px;padding:9px 10px}
  .hm{display:none}form.row input,form.row select{max-width:100%}.row input.q{width:100%!important}
  td,th{padding:7px 6px}.grid3{grid-template-columns:1fr}}
@@ -138,7 +142,7 @@ tr.lv-dbg td{color:var(--mut)}
  table.mob td[colspan]{display:block;text-align:left}table.mob td[colspan]::before{content:none}}
 @media(max-width:420px){.tiles{grid-template-columns:repeat(2,1fr)}}
 .lg{display:inline-flex;align-items:center;gap:6px;opacity:.65;text-decoration:none}.lg.on{opacity:1;font-weight:600}.lg img{border-radius:2px;box-shadow:0 0 0 1px #0003}.ltabs{display:flex;gap:6px;margin-bottom:10px}.ltabs a{padding:6px 16px;border:1px solid var(--bd);border-radius:8px;text-decoration:none;color:var(--fg)}.ltabs a.on{background:var(--acc);border-color:var(--acc);color:#fff}nav .updb{background:#f59e0b33;color:#fbbf24}.foot{text-align:center;font-size:12px;color:var(--mut);padding:18px 12px}.foot a{color:inherit}</style></head><body data-refresh="{{ (refresh or 30) * 1000 }}">
-{% import "_lang.html" as lang with context %}{% set me = request.state.user %}{% if me %}<nav id="nav"><b>RouterOS Monitor</b><button class="burger" onclick="document.getElementById('nav').classList.toggle('open')" aria-label="Menu">☰</button><div class="links"><a href="/">{{ t('nav.routers') }}</a>{% if wl_on() or bl_on() %}<a href="{{ '/whitelist' if wl_on() else '/blacklist' }}">{{ t('nav.lists') }}</a>{% endif %}{% if wifi_any() %}<a href="/live">{{ t('nav.live') }}</a>{% endif %}{% if me.is_admin %}<a href="/log">{{ t('nav.log') }}</a><a href="/users">{{ t('nav.users') }}</a><a href="/settings">{{ t('nav.settings') }}</a>{% endif %}<span class="sp"></span>{% set app_upd = update_info() if me.is_admin else none %}{% if app_upd %}<a class="updb" href="{{app_upd.url}}" target="_blank" rel="noopener" title="{{ t('nav.update_title') }}">⬆ {{ t('nav.update', v=app_upd.v) }}</a>{% endif %}<a href="/account" title="{{ t('nav.account') }}">{{me.username}}{% if not me.is_admin %} {{ t('nav.viewer') }}{% endif %}</a><button onclick="toggleTheme()" title="{{ t('nav.theme') }}">◐</button>{{ lang.switcher() }}<a href="/logout">{{ t('nav.logout') }}</a></div></nav>{% endif %}
+{% import "_lang.html" as lang with context %}{% set me = request.state.user %}{% if me %}<nav id="nav"><b>RouterOS Monitor</b><button class="burger" onclick="document.getElementById('nav').classList.toggle('open')" aria-label="Menu">☰</button><div class="links"><a href="/">{{ t('nav.routers') }}</a>{% if wl_on() or bl_on() %}<a href="{{ '/whitelist' if wl_on() else '/blacklist' }}">{{ t('nav.lists') }}</a>{% endif %}{% if wifi_any() %}<a href="/live">{{ t('nav.live') }}</a>{% endif %}{% if me.is_admin %}<a href="/log">{{ t('nav.log') }}</a><a href="/users">{{ t('nav.users') }}</a><a href="/settings">{{ t('nav.settings') }}</a>{% endif %}<div class="nr">{% set app_upd = update_info() if me.is_admin else none %}{% if app_upd %}<a class="updb" href="{{app_upd.url}}" target="_blank" rel="noopener" title="{{ t('nav.update_title') }}">⬆ {{ t('nav.update', v=app_upd.v) }}</a>{% endif %}<a href="/account" title="{{ t('nav.account') }}">{{me.username}}{% if not me.is_admin %} {{ t('nav.viewer') }}{% endif %}</a><button onclick="toggleTheme()" title="{{ t('nav.theme') }}">◐</button>{{ lang.switcher() }}<a href="/logout">{{ t('nav.logout') }}</a></div></div></nav>{% endif %}
 <main>{% block c %}{% endblock %}</main>
 <footer class="foot">RouterOS Monitor v{{ app_version }} · <a href="https://github.com/silvergunx/routeros-monitor" target="_blank" rel="noopener">GitHub</a>{% if me and me.is_admin %} · <a href="/report">{{ t('nav.report') }}</a>{% endif %}</footer>
 <script>
