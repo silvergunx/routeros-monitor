@@ -1725,6 +1725,39 @@ def is_topics(tok):
     return all(re.fullmatch(r"[a-z0-9-]+", p) for p in parts) and any(p in TOPIC_WORDS for p in parts)
 
 
+# RouterOS oznacza korektę zegara przez MikroTik Cloud jako "critical", choć zwykle to normalna rzecz po restarcie (router startuje
+# z ostatnio zapisanym czasem). Korekta do CLOCK_JUMP_INFO_S sekund jest zapisywana jako informacja; większy skok zostaje krytyczny.
+CLOCK_JUMP_INFO_S = 900
+_MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
+_CLOCK_RX = re.compile(r"cloud change time (?P<a>[A-Za-z]{3}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}) => (?P<b>[A-Za-z]{3}/\d{2}/\d{4} \d{2}:\d{2}:\d{2})")
+
+
+def clock_jump(msg):
+    """Wartość bezwzględna skoku zegara routera w sekundach z wpisu "cloud change time A => B" albo None."""
+    m = _CLOCK_RX.search(msg or "")
+    if not m:
+        return None
+    try:
+        vals = []
+        for g in (m.group("a"), m.group("b")):
+            mon, day, rest = g.split("/", 2)
+            year, hms = rest.split(" ")
+            h, mi, sec = (int(x) for x in hms.split(":"))
+            vals.append(dt.datetime(int(year), _MONTHS[mon.lower()], int(day), h, mi, sec))
+        return abs((vals[1] - vals[0]).total_seconds())
+    except (KeyError, ValueError):
+        return None
+
+
+def adjust_severity(sev, msg):
+    """Obniża do informacji (6) krytyczną korektę zegara o najwyżej CLOCK_JUMP_INFO_S sekund; resztę zostawia."""
+    if sev <= 3:
+        d = clock_jump(msg)
+        if d is not None and d <= CLOCK_JUMP_INFO_S:
+            return 6
+    return sev
+
+
 def parse_syslog(data):
     """Zwraca (waga 0-7, tematy 'system,info', treść). Obsługuje format BSD i domyślny RouterOS."""
     s = data.decode("utf-8", "replace").strip()
@@ -1778,6 +1811,7 @@ def flush_logs(batch):
         sev, topics, msg = parse_syslog(data)
         if not msg:
             continue
+        sev = adjust_severity(sev, msg)
         if sev >= 4 and (rid, _mute_norm(msg)) in muted:  # błędy i komunikaty krytyczne nigdy nie są pomijane
             continue
         k = (rid, topics, msg)
