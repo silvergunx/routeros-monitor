@@ -191,6 +191,13 @@ def build(s):
         inv(rs[0], "brh", mac(i + 1), {"if": "ether%d" % (3 + k % 4)})
     if len(wired_idx) > 7:
         inv(rs[1], "brh", mac(wired_idx[7] + 1), {"if": "ether2"})
+    # inne rodzaje VPN na Masterze: sesje serwera (L2TP, SSTP, OpenVPN), tunel wychodzący i IPsec
+    inv(rs[0], "ppp", "ola-laptop/l2tp", dict(name="ola-laptop", service="l2tp", address="10.20.0.5", uptime="2h14m", caller="203.0.113.7"))
+    inv(rs[0], "ppp", "jan-tablet/sstp", dict(name="jan-tablet", service="sstp", address="10.20.0.6", uptime="41m", caller="198.51.100.44"))
+    inv(rs[0], "ppp", "ovpn-tv-user/ovpn", dict(name="serwis-ovpn", service="ovpn", address="10.20.0.7", uptime="12m", caller="192.0.2.15"))
+    inv(rs[0], "ppp", "sstp-out/out", dict(name="sstp-out-biuro", service="sstp-client", address="", uptime="", caller="vpn.biuro.example", out="1"))
+    inv(rs[0], "ppp", "janek/pppoe", dict(name="janek", service="pppoe", address="10.30.0.2", uptime="9h", caller="AA:BB:CC:00:00:01"))
+    inv(rs[0], "ipsec", "peers", dict(txt="198.51.100.20,site-warszawa,established;203.0.113.99,site-gdansk,connecting;"))
     for ri, plist in PORTS.items():
         for n, run, dis, rate, dup, br, cm in plist:
             inv(rs[ri], "eth", n, dict(run=run, dis=dis, rate=rate, dup=dup, ld="0", br=br, cm=cm))

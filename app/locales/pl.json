@@ -878,8 +878,11 @@
   "topo.wired_h": "Kabel: {n}",
   "topo.port": "Port",
   "topo.leg_wired": "połączenie kablowe",
-  "topo.vpn_client": "Klient VPN (WireGuard)",
+  "topo.vpn_client": "Zdalny koniec VPN",
   "topo.hs": "Ostatni handshake",
   "topo.endpoint": "Adres",
-  "topo.vpn_h": "Klienci VPN: {n}"
+  "topo.vpn_h": "Klienci VPN: {n}",
+  "topo.uptime": "Czas połączenia",
+  "topo.tunnel_out": "tunel wychodzący z tego routera",
+  "topo.k_vpn": "Połączenie VPN"
 }
