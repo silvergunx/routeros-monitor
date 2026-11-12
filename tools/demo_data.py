@@ -166,6 +166,41 @@ def build(s):
         s.add(main.Inv(router_id=r.id, kind=kind, key=key, data=json.dumps(dict(data, key=key)), seq="1", updated=now))
     for r, spec in zip(rs, ROUTERS):
         inv(r, "sys", "sys", spec["sys"])
+    # porty Ethernet (zakładka Porty): nazwa -> (running, disabled, rate, full-duplex, bridge, komentarz)
+    PORTS = {
+        0: [("ether1", "true", "false", "1Gbps", "true", "", "ISP"), ("ether2", "true", "false", "1Gbps", "true", "bridge", "Office switch"),
+            ("ether3", "true", "false", "100Mbps", "true", "bridge", "Printer (bad cable?)"), ("ether4", "false", "false", "", "", "bridge", ""),
+            ("ether5", "true", "false", "1Gbps", "true", "bridge", "NAS"), ("ether6", "true", "false", "2.5Gbps", "true", "bridge", "Workstation"),
+            ("ether7", "false", "true", "", "", "", "unused"), ("ether8", "false", "false", "", "", "bridge", ""),
+            ("sfp-sfpplus1", "true", "false", "10Gbps", "true", "bridge", "Uplink to rack")],
+        1: [("ether1", "true", "false", "1Gbps", "true", "bridge", "")],
+        2: [("ether1", "true", "false", "1Gbps", "true", "bridge", "")],
+        3: [("ether1", "true", "false", "1Gbps", "true", "", ""), ("ether2", "true", "false", "100Mbps", "false", "bridge", "Old phone"),
+            ("ether3", "false", "false", "", "", "bridge", "")]}
+    # sąsiedzi MNDP/LLDP (karta Topologia): router -> (port lokalny, identity, model, adres)
+    NBR = {0: [("ether2", "ap-upstairs", "hAP ax3", "192.168.88.2"), ("ether5", "ap-garage", "cAP ac", "192.168.88.3"),
+               ("sfp-sfpplus1", "switch-office", "CRS326-24G-2S+", "192.168.88.9"), ("ether6", "nas-synology", "", "192.168.88.40")],
+           1: [("ether1", "master", "RB5009UG+S+IN", "192.168.88.1")], 2: [("ether1", "master", "RB5009UG+S+IN", "192.168.88.1")]}
+    for ri, nl_ in NBR.items():
+        for k, (port, ident, board, ip) in enumerate(nl_):
+            m = "48:A9:8A:%02X:%02X:%02X" % (ri, k, 7)
+            inv(rs[ri], "nbr", m + "|" + port, dict(mac=m, id=ident, ip=ip, pl="MikroTik" if board else "", bd=board, **{"if": port}))
+    # urządzenia na kablu (tabela hostów bridge): 7 na Masterze i jedno na AP
+    wired_idx = [i for i, d in enumerate(DEVICES) if not d[3]]
+    for k, i in enumerate(wired_idx[:7]):
+        inv(rs[0], "brh", mac(i + 1), {"if": "ether%d" % (3 + k % 4)})
+    if len(wired_idx) > 7:
+        inv(rs[1], "brh", mac(wired_idx[7] + 1), {"if": "ether2"})
+    # inne rodzaje VPN na Masterze: sesje serwera (L2TP, SSTP, OpenVPN), tunel wychodzący i IPsec
+    inv(rs[0], "ppp", "ola-laptop/l2tp", dict(name="ola-laptop", service="l2tp", address="10.20.0.5", uptime="2h14m", caller="203.0.113.7"))
+    inv(rs[0], "ppp", "jan-tablet/sstp", dict(name="jan-tablet", service="sstp", address="10.20.0.6", uptime="41m", caller="198.51.100.44"))
+    inv(rs[0], "ppp", "ovpn-tv-user/ovpn", dict(name="serwis-ovpn", service="ovpn", address="10.20.0.7", uptime="12m", caller="192.0.2.15"))
+    inv(rs[0], "ppp", "sstp-out/out", dict(name="sstp-out-biuro", service="sstp-client", address="", uptime="", caller="vpn.biuro.example", out="1"))
+    inv(rs[0], "ppp", "janek/pppoe", dict(name="janek", service="pppoe", address="10.30.0.2", uptime="9h", caller="AA:BB:CC:00:00:01"))
+    inv(rs[0], "ipsec", "peers", dict(txt="198.51.100.20,site-warszawa,established;203.0.113.99,site-gdansk,connecting;"))
+    for ri, plist in PORTS.items():
+        for n, run, dis, rate, dup, br, cm in plist:
+            inv(rs[ri], "eth", n, dict(run=run, dis=dis, rate=rate, dup=dup, ld="0", br=br, cm=cm))
     LEASES = {}
     for i, (comment, host, last, wifi, static) in enumerate(DEVICES):
         ip = "192.168.88.%d" % last
@@ -194,7 +229,8 @@ def build(s):
     inv(rs[0], "wg", "k1" + "A" * 20, dict(name="phone-anna", iface="wireguard1", endpoint="100.64.12.8:51820", hs="34s", rx="184532991", tx="92311034", disabled="false"))
     inv(rs[0], "wg", "k2" + "B" * 20, dict(name="laptop-work", iface="wireguard1", endpoint="100.64.40.17:51820", hs="1m12s", rx="9845321", tx="5134213", disabled="false"))
     inv(rs[0], "wg", "k3" + "C" * 20, dict(name="tom-tablet", iface="wireguard1", endpoint="", hs="", rx="0", tx="0", disabled="true"))
-    inv(rs[3], "wg", "k4" + "D" * 20, dict(name="hq-tunnel", iface="wireguard1", endpoint="100.64.1.1:51820", hs="19s", rx="3421091845", tx="1209384112", disabled="false"))
+    inv(rs[0], "wg", "k5" + "E" * 20, dict(name="branch-hex-tunnel", iface="wireguard1", endpoint="100.64.20.9:51820", hs="19s", rx="1209384112", tx="3421091845", disabled="false"))
+    inv(rs[3], "wg", "k4" + "D" * 20, dict(name="master-tunnel", iface="wireguard1", endpoint="100.64.1.1:51820", hs="19s", rx="3421091845", tx="1209384112", disabled="false"))
 
     # ---------------------------------------------------------------- logi z routerów (ostatnie 24 h)
     log_rows = []
@@ -259,7 +295,7 @@ def build(s):
                        {"id": "105", "name": "Frankfurt, Germany (FS IT-Systeme GmbH)", "ping": 19.0, "down": 255.4},
                        {"id": "85", "name": "Prague, Czech Republic (Turris)", "ping": 21.0, "down": 134.2}]}
     for k, v in (("speed_router", str(master.id)), ("speed_engine", "librespeed"), ("speed_server_librespeed", "best"),
-                 ("speed_ls_best", json.dumps(best)), ("interval", "60")):
+                 ("speed_ls_best", json.dumps(best)), ("interval", "60"), ("topo_on", "1")):
         main.sset(s, k, v)
     s.add(main.LiveSpot(ts=ago(hours=3), mac=mac(2), label="Living room by the window", device="Anna iPhone", iface="wifi2", signal=-54.0, rate=866.0, quality=3))
     s.add(main.LiveSpot(ts=ago(hours=3, minutes=-12), mac=mac(2), label="Kitchen", device="Anna iPhone", iface="wifi1", signal=-66.0, rate=144.0, quality=2))

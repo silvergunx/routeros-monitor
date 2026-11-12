@@ -33,6 +33,8 @@ The interface is available in Polish and English, works in light and dark mode a
 - DHCP clients with device names and online state
 - Wi-Fi clients (wifi-qcom / CAPsMAN and the older wireless package) with signal, SNR, speed and a connection quality rating
 - VPN tunnels (WireGuard and others)
+- Ethernet ports of each router drawn as a row: link state, speed, duplex, traffic, bridge and WAN mark
+- network topology (optional, off by default): a map and a tree of routers, access points, wired and Wi-Fi devices and VPN connections, built from the routers' own neighbour lists
 
 **Link quality**
 - Netwatch probes: latency, jitter and packet loss to the gateway and, on the edge router, also DNS, HTTP and internet availability in %

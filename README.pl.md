@@ -33,6 +33,8 @@ Interfejs jest dostępny po polsku i angielsku, działa w trybie jasnym i ciemny
 - klienci DHCP z nazwami urządzeń i stanem online
 - klienci Wi-Fi (wifi-qcom / CAPsMAN i starszy wireless) z sygnałem, SNR, prędkością i oceną jakości połączenia
 - tunele VPN (WireGuard i inne)
+- porty Ethernet każdego routera narysowane w rzędzie: stan łącza, prędkość, dupleks, ruch, bridge i oznaczenie WAN
+- topologia sieci (opcjonalna, domyślnie wyłączona): mapa i drzewo routerów, access pointów, urządzeń kablowych i Wi-Fi oraz połączeń VPN, zbudowane z list sąsiadów samych routerów
 
 **Jakość łącza**
 - sondy Netwatch: opóźnienie, jitter i utrata pakietów do bramy, a na routerze brzegowym także DNS, HTTP i dostępność internetu w %
