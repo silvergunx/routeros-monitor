@@ -23,7 +23,7 @@ Wszystkie elementy mają nazwy zaczynające się od `app-`, dzięki czemu łatwo
 | Element | Nazwa | Zadanie |
 |---|---|---|
 | skrypt + harmonogram | `app-monitor` / `app-mon` | parametry systemu i interfejsów co interwał (domyślnie 60 s) |
-| skrypty + harmonogram | `app-inventory` (`app-inv-dhcp`, `app-inv-wifi`, `app-inv-wireless`, `app-inv-vpn`, `app-inv-sys`) / `app-inv` | klienci DHCP, Wi-Fi, VPN, informacje o systemie co minutę |
+| skrypty + harmonogram | `app-inventory` (`app-inv-dhcp`, `app-inv-wifi`, `app-inv-wireless`, `app-inv-vpn`, `app-inv-sys`, `app-inv-eth`, `app-inv-topo`) / `app-inv` | klienci DHCP (oraz urządzenia ze stałym adresem z tablicy ARP), Wi-Fi, VPN (WireGuard, L2TP, SSTP, OpenVPN, PPTP, IPsec), informacje o systemie, porty Ethernet, a przy włączonej topologii sąsiedzi i hosty bridge, co minutę |
 | skrypt + harmonogram | `app-whitelist` / `app-wl` | pobranie whitelisty co 5 min (tylko gdy moduł włączony) |
 | skrypt + harmonogram | `app-blacklist` / `app-bl` | pobranie blacklisty co 5 min (tylko gdy moduł włączony) |
 | skrypt + harmonogram | `app-speed` / `app-spd` | test prędkości na routerze (router brzegowy, gdy serwer aplikacji nie stoi w jego sieci) |
@@ -34,6 +34,20 @@ Wszystkie elementy mają nazwy zaczynające się od `app-`, dzięki czemu łatwo
 | lista adresów | `blacklist`, komentarz `bl:` | wpisy blacklisty; inne wpisy na tej liście nie są ruszane |
 
 Skrypty, które nie mają sensu na danym urządzeniu (Wi-Fi bez interfejsów Wi-Fi, DHCP bez serwera DHCP), nie są instalowane.
+
+## Topologia sieci
+
+Karta **Topologia** (Ustawienia → Ogólne → „Topologia sieci”) jest domyślnie wyłączona, żeby nie obciążać słabych routerów. Po włączeniu na routerach pojawia się skrypt `app-inv-topo`, który raz na minutę czyta listę sąsiadów (`/ip neighbor`, MNDP/LLDP) i tabelę hostów bridge. Po zmianie ustawienia **wklej ponownie komendę konfiguracyjną** na routerach (panel oznaczy skrypt jako nieaktualny).
+
+Co panel rysuje i skąd to wie:
+
+- **Połączenia między routerami i AP** pochodzą z listy sąsiadów, więc switche niezarządzalne i sprzęt bez MNDP/LLDP nie są widoczne. Router bez znanego połączenia jest łączony z Internetem tylko wtedy, gdy jest brzegowy albo ma serwer DHCP.
+- **Klienci Wi-Fi** są rysowani pod AP, z którym są połączeni. Gdy klientów zgłasza tylko kontroler CAPsMAN (AP-y mają pustą tabelę rejestracji), panel czyta na kontrolerze tabelę radiów (`/interface/wifi/radio`) i z pola `cap="Identity@adres"` ustala, który interfejs `cap-wifiN` należy do którego AP. Router musi się w panelu nazywać (lub mieć identity) tak jak identity AP.
+- **Urządzenia kablowe** pochodzą z tabeli hostów bridge (bez Wi-Fi, bez routerów i bez portów, na których widać sąsiada, żeby nie dublować urządzeń zza trunków).
+- **VPN**: aktywne sesje WireGuard (świeży handshake), L2TP, SSTP, OpenVPN i PPTP, działające tunele wychodzące oraz połączenia IPsec w stanie „established”. Tunel między dwoma monitorowanymi routerami panel rozpoznaje po **nazwie peera lub sesji, która zawiera nazwę (albo identity) routera po drugiej stronie**; nazwij tak peery, jeśli chcesz zobaczyć zielony tunel router–router.
+- **Urządzenie, które ciągle nie może dołączyć do Wi-Fi** (co najmniej 3 nieudane uwierzytelnienia w 15 minut, z logów) jest pokazane z czerwoną obwódką; panel odróżnia urządzenie znane z DHCP od nieznanego.
+
+Adres publiczny klienta VPN w dymku widzi tylko administrator.
 
 ## Whitelista w firewallu
 

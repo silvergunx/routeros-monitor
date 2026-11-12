@@ -7,7 +7,7 @@ Notes marked **Routers** mean the configuration command has to be pasted again o
 
 ## [Unreleased]
 
-Work in progress on `develop` (version 1.6.0).
+## [1.6.0] - 2026-11-12
 
 ### Added
 - **Your own device names show everywhere**: a name given with the ✎ button now also appears in Wi-Fi setup / analysis mode (the client list and the saved spots, including spots saved earlier) and next to the MAC address in the log analysis of DHCP assignments, not only on the Devices and Wi-Fi tabs.

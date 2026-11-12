@@ -8,7 +8,7 @@ Uwagi oznaczone **Routery** oznaczają, że trzeba ponownie wkleić komendę kon
 
 ## [Unreleased]
 
-Prace w toku na gałęzi `develop` (wersja 1.6.0).
+## [1.6.0] - 2026-11-12
 
 ### Dodano
 - **Własne nazwy urządzeń widać wszędzie**: nazwa nadana przyciskiem ✎ pojawia się teraz także w trybie ustawiania / analizy Wi-Fi (lista klientów i zapisane miejsca, także zapisane wcześniej) oraz obok adresu MAC w analizie logów przy przydziałach DHCP, a nie tylko w zakładkach Urządzenia i Wi-Fi.
