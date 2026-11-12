@@ -2793,9 +2793,10 @@ def live_state(mac: str = "", s: Session = Depends(db)):
             continue
         leases[row.key.upper()] = d
     out = []
+    custom = device_names(s)  # własne nazwy z panelu mają pierwszeństwo przed DHCP
     for c in clients.values():
         l = leases.get(c["mac"], {})
-        c["name"] = l.get("comment") or l.get("host") or c["mac"]
+        c["name"] = custom.get(oui.normalize(c["mac"])) or l.get("comment") or l.get("host") or c["mac"]
         c["ip"] = l.get("ip", "")
         c.pop("_u")
         out.append(c)
@@ -2805,7 +2806,7 @@ def live_state(mac: str = "", s: Session = Depends(db)):
     if mac in LIVE_HIST:
         hist = [{"t": h[0].isoformat(timespec="seconds"), "s": h[1], "r": h[2], "q": h[3], "i": h[4]}
                 for h in LIVE_HIST[mac] if (n - h[0]).total_seconds() < 1800]
-    spots = [{"id": x.id, "t": x.ts.isoformat(timespec="seconds"), "label": x.label, "device": x.device, "iface": x.iface,
+    spots = [{"id": x.id, "t": x.ts.isoformat(timespec="seconds"), "label": x.label, "device": custom.get(oui.normalize(x.mac)) or x.device, "iface": x.iface,
               "signal": x.signal, "rate": x.rate, "q": x.quality, "qlabel": tr(QLABEL[x.quality]) if x.quality in QLABEL else "-"}
              for x in s.scalars(select(LiveSpot).order_by(LiveSpot.id.desc()).limit(30)).all()]
     return {"routers": rts, "clients": out, "hist": hist, "spots": spots}
@@ -2827,6 +2828,7 @@ def live_spot(mac: str = Form(), label: str = Form(), s: Session = Depends(db)):
             dev = ld.get("comment") or ld.get("host") or mac
         except ValueError:
             pass
+    dev = device_names(s).get(oui.normalize(mac)) or dev
     s.add(LiveSpot(ts=now(), mac=mac, label=re.sub(r"[^\w .,\-/]", "", label)[:60] or "miejsce", device=dev[:80],
                    iface=h[-1][4], signal=round(avg(sigs), 1) if sigs else None, rate=round(avg(rts)) if rts else None,
                    quality=round(avg(qs)) if qs else None))
@@ -3443,7 +3445,8 @@ def _cfg_change(m, tp):
 def _dhcp_assigned(m, tp):
     return {"id": "dhcp_assigned", "level": "info", "title": tr("an.033"),
             "explain": tr("an.034"),
-            "advice": "", "det": {tr("an.035"): (m.group("host") or "").strip() or m.group("mac"), tr("an.015"): m.group("ip")}}
+            "advice": "", "det": {tr("an.035"): (m.group("host") or "").strip() or m.group("mac"), tr("an.015"): m.group("ip"),
+                                   tr("an.038"): m.group("mac")}}
 
 
 def _dhcp_deassigned(m, tp):
