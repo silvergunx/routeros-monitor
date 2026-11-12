@@ -877,5 +877,9 @@
   "topo.leg_wifi": "połączenie Wi-Fi urządzenia",
   "topo.wired_h": "Kabel: {n}",
   "topo.port": "Port",
-  "topo.leg_wired": "połączenie kablowe"
+  "topo.leg_wired": "połączenie kablowe",
+  "topo.vpn_client": "Klient VPN (WireGuard)",
+  "topo.hs": "Ostatni handshake",
+  "topo.endpoint": "Adres",
+  "topo.vpn_h": "Klienci VPN: {n}"
 }

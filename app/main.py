@@ -4664,7 +4664,7 @@ def _nbr_port(d):
     return next((x for x in parts if not x.startswith("bridge")), parts[0] if parts else "")
 
 
-def topology_view(s):
+def topology_view(s, admin=False):
     """Drzewo połączeń: Internet -> router brzegowy -> sąsiedzi (MNDP/LLDP) -> klienci Wi-Fi pod swoim AP."""
     routers = ordered_routers(s)
     if not routers:
@@ -4845,10 +4845,10 @@ def topology_view(s):
     orphans = [node(r) for r in routers if r.id not in visited]
     root = {"type": "inet", "children": trees}
     return {"root": root, "orphans": orphans, "has_nbr": any(inv[r.id]["nbr"] for r in routers),
-            "graph": topology_graph(s, root, orphans)}
+            "graph": topology_graph(s, root, orphans, admin)}
 
 
-def topology_graph(s, root, orphans):
+def topology_graph(s, root, orphans, admin=False):
     """Płaska lista węzłów i połączeń do rysowania mapy w przeglądarce (układ liczy przeglądarka)."""
     bps = {}
     for rid in {n for n in _tree_router_ids(root) | _tree_router_ids({"children": orphans})}:
@@ -4916,15 +4916,25 @@ def topology_graph(s, root, orphans):
             continue
         txt = ("%s %s" % (d.get("name") or "", d.get("comment") or "")).lower()
         ep = (d.get("endpoint") or "").rsplit(":", 1)[0]
+        ms = parse_rtt(d.get("hs"))
+        up = d.get("disabled") != "true" and ms is not None and ms <= 180_000
+        is_router = False
         for oid, o in routers.items():
             if oid == x.router_id:
                 continue
             keys = [k.lower() for k in (o.name, o.ident or "") if k and len(k) >= 3]
             if any(k in txt for k in keys) or (ep and ep == o.log_ip):
-                ms = parse_rtt(d.get("hs"))
-                up = d.get("disabled") != "true" and ms is not None and ms <= 180_000
+                is_router = True
                 key = tuple(sorted((x.router_id, oid)))
                 pairs[key] = pairs.get(key, False) or up
+        if not is_router and up:  # klient VPN (telefon, laptop): tylko aktywny (świeży handshake)
+            cid = "v%d_%s" % (x.router_id, re.sub(r"[^A-Za-z0-9]", "", d.get("key") or "")[:14])
+            nm = d.get("name") or d.get("comment") or (d.get("key") or "")[:8]
+            nodes.append({"id": cid, "type": "client", "vpn": True, "name": nm, "kind": device_kind(nm, ""), "qc": "ok", "signal": None,
+                          "hs": d.get("hs") or "", "rx": bytes_h(d.get("rx")), "tx": bytes_h(d.get("tx")), "ep": ep if admin else "",
+                          "depth": 1})
+            links.append({"s": "inet", "t": cid, "weak": True})                         # niewidoczna: tylko trzyma ikonę blisko Internetu
+            links.append({"s": cid, "t": "r%d" % x.router_id, "vpn": True, "up": True})  # klient -> Internet -> router z serwerem WireGuard
     for (a, b), up in pairs.items():  # tunel biegnie przez Internet: jedna ciągła linia router A -> węzeł Internet -> router B
         links.append({"s": "r%d" % a, "t": "r%d" % b, "vpn": True, "up": up})
     return {"nodes": nodes, "links": links}
@@ -4941,7 +4951,7 @@ def _tree_router_ids(n):
 def topology_page(request: Request, s: Session = Depends(db)):
     if not topo_on(s):
         return RedirectResponse("/", 303)
-    return templates.TemplateResponse(request, "topology.html", {"topo": topology_view(s)})
+    return templates.TemplateResponse(request, "topology.html", {"topo": topology_view(s, request.state.user.is_admin)})
 
 
 @app.post("/settings/topology", dependencies=[Depends(admin)])

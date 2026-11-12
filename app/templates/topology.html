@@ -25,7 +25,7 @@
 .tnode use{color:var(--fg);pointer-events:none}.tnode.router.down use{color:var(--mut)}
 .tnode text{fill:var(--fg);font-size:12px;text-anchor:middle;pointer-events:none;paint-order:stroke;stroke:var(--bg);stroke-width:3px}.tnode text.sub{fill:var(--mut);font-size:10px}
 .tnode .badge{fill:var(--acc);stroke:var(--card);stroke-width:2}.tnode text.bt{fill:#fff;font-size:10px;font-weight:700;stroke:none}
-.tnode.client circle.bg{stroke-width:2.2;stroke:var(--mut)}.tnode.client.ok circle.bg{stroke:var(--ok)}.tnode.client.warn circle.bg{stroke:var(--warn)}.tnode.client.bad circle.bg{stroke:var(--bad)}.tnode.client:hover circle.bg{fill:color-mix(in srgb,var(--acc) 18%,var(--card))}
+.tnode.client circle.bg{stroke-width:2.2;stroke:var(--mut)}.tnode.client.ok circle.bg{stroke:var(--ok)}.tnode.client.warn circle.bg{stroke:var(--warn)}.tnode.client.bad circle.bg{stroke:var(--bad)}.tnode.client.vpn circle.bg{stroke:var(--ok);filter:drop-shadow(0 0 5px color-mix(in srgb,var(--ok) 55%,transparent))}.tnode.client:hover circle.bg{fill:color-mix(in srgb,var(--acc) 18%,var(--card))}
 .tlink{fill:none;stroke:color-mix(in srgb,var(--mut) 55%,transparent);stroke-linecap:round}.tlink.wifi{stroke:var(--acc);stroke-width:1.5;stroke-dasharray:2 6;opacity:.85;animation:tflow 1.8s linear infinite}
 .tlink.flow{stroke:color-mix(in srgb,var(--acc) 80%,var(--mut));stroke-dasharray:7 9;animation:tflow 1.4s linear infinite}.tlink.down{stroke:var(--bad);stroke-dasharray:3 7}.tnode.failed circle.bg{stroke:var(--bad);stroke-dasharray:3 3;animation:tpulse 1.6s ease-in-out infinite}.tnode .fb{fill:var(--bad);stroke:var(--card);stroke-width:2}.tnode text.fbt{fill:#fff;font-size:10px;font-weight:700;stroke:none}
 .tlink.failed{stroke:var(--bad);stroke-dasharray:2 6;opacity:.85;animation:tflow 1.8s linear infinite}@keyframes tpulse{50%{opacity:.45}}
@@ -44,6 +44,7 @@
 <div class="ttreeview"><div class="tree"><ul>{{ tree(topo.root) }}</ul></div>
 {% if topo.orphans %}<h3 style="margin:18px 0 6px">{{ t('topo.orphans') }}</h3><div class="tree"><ul>{% for o in topo.orphans %}{{ tree(o) }}{% endfor %}</ul></div>{% endif %}</div>
 <script type="application/json" id="tgraph">{{ topo.graph|tojson }}</script>
+{% set vc = topo.graph.nodes|selectattr('vpn')|list %}{% if vc %}<h3 style="margin:14px 0 6px" class="ttreeview">{{ t('topo.vpn_h', n=vc|length) }}</h3><div class="ttreeview">{% for c in vc %}<div class="tc"><span class="qd ok"></span><span class="tcn">{{c.name}}</span><span class="mut tcs">{{c.hs}}</span></div>{% endfor %}</div>{% endif %}
 <div class="tmleg"><span><svg width="26" height="8"><path d="M1 4h24" class="tlink flow" stroke-width="3"/></svg> {{ t('topo.leg_flow') }}</span><span><svg width="26" height="8"><path d="M1 4h24" class="tlink wifi"/></svg> {{ t('topo.leg_wifi') }}</span><span><svg width="26" height="8"><path d="M1 4h24" class="tlink wired"/></svg> {{ t('topo.leg_wired') }}</span><span><svg width="30" height="10"><path d="M1 5h28" class="tlink vpn" /></svg> {{ t('topo.leg_vpn') }}</span><span><span class="qd ok"></span> {{ t('topo.leg_good') }}</span><span><span class="qd bad" style="outline:2px dotted var(--bad);outline-offset:1px;background:none"></span> {{ t('topo.leg_failed') }}</span><span><span class="qd warn"></span> {{ t('topo.leg_mid') }}</span><span><span class="qd bad"></span> {{ t('topo.leg_bad') }}</span></div>
 {% endif %}</div>
 <p class="mut small" style="margin-top:12px">{{ t('topo.help') }}</p></div>
@@ -51,7 +52,7 @@
 (function(){
 const NS='http://www.w3.org/2000/svg',svg=document.getElementById('tmap'),wrap=document.getElementById('tmapwrap'),tip=document.getElementById('ttip');
 const T={router:{{ t('topo.t_router')|tojson }},ap:{{ t('topo.t_ap')|tojson }},inet:{{ t('topo.internet')|tojson }},nbr:{{ t('topo.t_nbr')|tojson }},client:{{ t('topo.t_client')|tojson }},
- up:{{ t('rt.online')|tojson }},down:{{ t('rt.offline')|tojson }},upg:{{ t('rt.upgrading')|tojson }},open:{{ t('topo.open')|tojson }},sig:{{ t('topo.signal')|tojson }},port:{{ t('topo.port')|tojson }},ftries:{{ t('topo.failed_tries')|tojson }},fknown:{{ t('topo.failed_known')|tojson }},funknown:{{ t('topo.failed_unknown')|tojson }},kind:{{ {'phone':t('topo.k_phone'),'tablet':t('topo.k_tablet'),'laptop':t('topo.k_laptop'),'tv':t('topo.k_tv'),'printer':t('topo.k_printer'),'camera':t('topo.k_camera'),'iot':t('topo.k_iot'),'server':t('topo.k_server'),'other':t('topo.t_client')}|tojson }}};
+ up:{{ t('rt.online')|tojson }},down:{{ t('rt.offline')|tojson }},upg:{{ t('rt.upgrading')|tojson }},open:{{ t('topo.open')|tojson }},sig:{{ t('topo.signal')|tojson }},vpnc:{{ t('topo.vpn_client')|tojson }},hs:{{ t('topo.hs')|tojson }},ep:{{ t('topo.endpoint')|tojson }},port:{{ t('topo.port')|tojson }},ftries:{{ t('topo.failed_tries')|tojson }},fknown:{{ t('topo.failed_known')|tojson }},funknown:{{ t('topo.failed_unknown')|tojson }},kind:{{ {'phone':t('topo.k_phone'),'tablet':t('topo.k_tablet'),'laptop':t('topo.k_laptop'),'tv':t('topo.k_tv'),'printer':t('topo.k_printer'),'camera':t('topo.k_camera'),'iot':t('topo.k_iot'),'server':t('topo.k_server'),'other':t('topo.t_client')}|tojson }}};
 let G={nodes:[],links:[],byId:{},parent:{}},S={k:1,x:0,y:0},sig='',pins={},hint='';
 try{pins=JSON.parse(localStorage.getItem('topoPins')||'{}')}catch(e){pins={}}
 const R=n=>n.type==='inet'?52:n.type==='router'?28:n.type==='nbr'?21:13;
@@ -134,7 +135,7 @@ function draw(){svg.textContent='';const d=el('defs',{},svg);
  for(const l of G.links){const q=G.byId[l.t],cl=['tlink'];if(l.wifi)cl.push('wifi');if(l.weak)cl.push('weak');if(l.down)cl.push('down');
   const w=l.wifi?1:(l.vpn?5:1.1+Math.min(2.1,Math.log10((l.bps||0)/1e5+1)*.9));if(!l.wifi&&!l.down&&!l.vpn&&l.bps>2e4)cl.push('flow');if(l.vpn){cl.push('vpn');if(!l.up)cl.push('down')}if(l.failed)cl.push('failed');if(l.wired)cl.push('wired');
   l.el=el('path',{class:cl.join(' '),'stroke-width':w},lg)}
- for(const n of G.nodes){const g=el('g',{class:'tnode '+n.type+(n.status?' '+n.status:'')+(n.qc?' '+n.qc:'')+(n.failed?' failed':'')+(n.wired?' wired':'')},ng);n.el=g;g.dataset.id=n.id;
+ for(const n of G.nodes){const g=el('g',{class:'tnode '+n.type+(n.status?' '+n.status:'')+(n.qc?' '+n.qc:'')+(n.failed?' failed':'')+(n.wired?' wired':'')+(n.vpn?' vpn':'')},ng);n.el=g;g.dataset.id=n.id;
   if(n.type==='inet'){globe(g,n)}
   else if(n.type==='client'){const r=R(n);el('circle',{class:'bg',r:r},g);el('use',{href:'#'+icon(n),x:-r*.58,y:-r*.58,width:r*1.16,height:r*1.16},g);if(n.failed){el('circle',{class:'fb',cx:r*.8,cy:-r*.8,r:7},g);const b=el('text',{class:'fbt',x:r*.8,y:-r*.8+3.5},g);b.textContent='!'}}
   else{const r=R(n);el('circle',{class:'bg',r:r},g);el('use',n.type==='inet'?{href:'#'+icon(n),x:-r*.74,y:-r*.74,width:r*1.48,height:r*1.48}:{href:'#'+icon(n),x:-r*.55,y:-r*.55,width:r*1.1,height:r*1.1},g);
@@ -147,6 +148,7 @@ function line(par,t,c){const d=document.createElement('div');if(c)d.style.cssTex
 function hover(n,e){tip.textContent='';const b=document.createElement('b');b.textContent=n.name;tip.appendChild(b);
  if(n.type==='router'){line(tip,(n.ap?T.ap:T.router)+(n.edge?' · WAN':''));if(n.sub)line(tip,n.sub);line(tip,T[n.status]);if(n.nc)line(tip,'Wi-Fi: '+n.nc);line(tip,'↗ '+T.open)}
  else if(n.type==='client'&&n.failed){line(tip,T.kind[n.kind]||T.kind.other);if(n.sub)line(tip,n.sub);line(tip,n.mac);line(tip,T.ftries.replace('{n}',n.tries).replace('{t}',new Date(n.last+'Z').toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})),'color:var(--bad)');line(tip,n.known?T.fknown:T.funknown)}
+ else if(n.type==='client'&&n.vpn){line(tip,T.vpnc);line(tip,T.kind[n.kind]||T.kind.other);line(tip,T.hs+': '+(n.hs||'-'));if(n.ep)line(tip,T.ep+': '+n.ep);line(tip,'rx '+n.rx+' / tx '+n.tx)}
  else if(n.type==='client'&&n.wired){line(tip,T.kind[n.kind]||T.kind.other);if(n.sub)line(tip,n.sub);if(n.ip)line(tip,n.ip);line(tip,n.mac);if(n.port)line(tip,T.port+': '+n.port)}
  else if(n.type==='client'){line(tip,T.kind[n.kind]||T.kind.other);if(n.sub)line(tip,n.sub);if(n.ip)line(tip,n.ip);line(tip,n.mac);line(tip,T.sig+': '+(n.signal==null?'-':n.signal+' dBm')+' · '+n.q);if(n.iface)line(tip,n.iface)}
  else if(n.type==='nbr'){line(tip,T.nbr);if(n.sub)line(tip,n.sub);if(n.ip)line(tip,n.ip)}else line(tip,T.inet);
