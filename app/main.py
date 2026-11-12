@@ -4939,6 +4939,7 @@ def topology_graph(s, root, orphans, admin=False):
                 if len(f) >= 3 and f[0]:
                     sess.append((x.router_id, "IPsec", f[0], f[1] or f[0], f[1], f[0], "established" in f[2].lower(), f[2], "", ""))
     pairs = {}
+    vpn_clients, vpn_links = {}, {}  # to samo dla widoku Drzewo: lista pod routerem
     for rid, proto, key, nm, txt, ep, up, info, rx, tx in sess:
         txt = (txt or "").lower()
         is_router = False
@@ -4950,7 +4951,12 @@ def topology_graph(s, root, orphans, admin=False):
                 is_router = True
                 k2 = tuple(sorted((rid, oid)))
                 pairs[k2] = pairs.get(k2, False) or up
+                for a_id, b_id in ((rid, oid), (oid, rid)):
+                    lst = vpn_links.setdefault(a_id, [])
+                    if not any(v["peer"] == routers[b_id].name and v["proto"] == proto for v in lst):
+                        lst.append({"peer": routers[b_id].name, "proto": proto, "up": up})
         if not is_router and up:  # zdalna strona: telefon, laptop, serwer, druga lokalizacja (tylko aktywne)
+            vpn_clients.setdefault(rid, []).append({"name": nm or proto, "proto": proto, "info": info, "ep": ep if admin else ""})
             cid = "v%d_%s_%s" % (rid, proto, re.sub(r"[^A-Za-z0-9]", "", key)[:14])
             kind = device_kind(nm, "")
             nodes.append({"id": cid, "type": "client", "vpn": True, "proto": proto, "name": nm or proto, "kind": kind if kind != "other" else "vpn",
@@ -4959,6 +4965,16 @@ def topology_graph(s, root, orphans, admin=False):
             links.append({"s": cid, "t": "r%d" % rid, "vpn": True, "up": True})       # zdalna strona -> Internet -> router z serwerem/klientem VPN
     for (a, b), up in pairs.items():  # tunel biegnie przez Internet: jedna ciągła linia router A -> węzeł Internet -> router B
         links.append({"s": "r%d" % a, "t": "r%d" % b, "vpn": True, "up": up})
+
+    def annotate(n):  # widok Drzewo: VPN-y pod routerem, do którego należą
+        if n.get("type") == "router":
+            n["vpn_clients"] = vpn_clients.get(n["id"], [])
+            n["vpn_links"] = vpn_links.get(n["id"], [])
+        for c in n.get("children", []):
+            annotate(c)
+    annotate(root)
+    for o in orphans:
+        annotate(o)
     return {"nodes": nodes, "links": links}
 
 

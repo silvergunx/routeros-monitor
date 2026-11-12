@@ -884,5 +884,6 @@
   "topo.vpn_h": "Klienci VPN: {n}",
   "topo.uptime": "Czas połączenia",
   "topo.tunnel_out": "tunel wychodzący z tego routera",
-  "topo.k_vpn": "Połączenie VPN"
+  "topo.k_vpn": "Połączenie VPN",
+  "topo.vpn_router_h": "VPN: {n}"
 }

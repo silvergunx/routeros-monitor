@@ -883,5 +883,6 @@
   "topo.vpn_h": "VPN clients: {n}",
   "topo.uptime": "Connected for",
   "topo.tunnel_out": "outgoing tunnel from this router",
-  "topo.k_vpn": "VPN connection"
+  "topo.k_vpn": "VPN connection",
+  "topo.vpn_router_h": "VPN: {n}"
 }
