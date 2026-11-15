@@ -885,5 +885,10 @@
   "topo.uptime": "Czas połączenia",
   "topo.tunnel_out": "tunel wychodzący z tego routera",
   "topo.k_vpn": "Połączenie VPN",
-  "topo.vpn_router_h": "VPN: {n}"
+  "topo.vpn_router_h": "VPN: {n}",
+  "topo.group_server": "Serwer",
+  "topo.group_switch": "Przełącznik · %s",
+  "topo.vlan": "VLAN",
+  "topo.rename_group": "Nazwa grupy (puste = domyślna):",
+  "topo.rename_hint": "dwuklik: zmień nazwę grupy"
 }

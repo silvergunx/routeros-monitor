@@ -884,5 +884,10 @@
   "topo.uptime": "Connected for",
   "topo.tunnel_out": "outgoing tunnel from this router",
   "topo.k_vpn": "VPN connection",
-  "topo.vpn_router_h": "VPN: {n}"
+  "topo.vpn_router_h": "VPN: {n}",
+  "topo.group_server": "Server",
+  "topo.group_switch": "Switch · %s",
+  "topo.vlan": "VLAN",
+  "topo.rename_group": "Group name (empty = default):",
+  "topo.rename_hint": "double-click: rename the group"
 }

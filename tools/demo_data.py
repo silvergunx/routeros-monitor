@@ -188,7 +188,7 @@ def build(s):
     # urządzenia na kablu (tabela hostów bridge): 7 na Masterze i jedno na AP
     wired_idx = [i for i, d in enumerate(DEVICES) if not d[3]]
     for k, i in enumerate(wired_idx[:7]):
-        inv(rs[0], "brh", mac(i + 1), {"if": "ether%d" % (3 + k % 4)})
+        inv(rs[0], "brh", mac(i + 1), {"if": "ether%d" % (3 + k), "vid": "10"})
     if len(wired_idx) > 7:
         inv(rs[1], "brh", mac(wired_idx[7] + 1), {"if": "ether2"})
     # inne rodzaje VPN na Masterze: sesje serwera (L2TP, SSTP, OpenVPN), tunel wychodzący i IPsec
@@ -198,6 +198,13 @@ def build(s):
     inv(rs[0], "ppp", "sstp-out/out", dict(name="sstp-out-biuro", service="sstp-client", address="", uptime="", caller="vpn.biuro.example", out="1"))
     inv(rs[0], "ppp", "janek/pppoe", dict(name="janek", service="pppoe", address="10.30.0.2", uptime="9h", caller="AA:BB:CC:00:00:01"))
     inv(rs[0], "ipsec", "peers", dict(txt="198.51.100.20,site-warszawa,established;203.0.113.99,site-gdansk,connecting;"))
+    # serwer Proxmox na porcie ether10: host i maszyny wirtualne w kilku VLAN-ach, lista VLAN-ów z routera
+    PVE = [("pve-host", "BC:24:11:00:00:01", "30"), ("vm-nextcloud", "BC:24:11:00:00:02", "30"), ("vm-homeassistant", "BC:24:11:00:00:03", "10"),
+           ("vm-docker", "BC:24:11:00:00:04", "30"), ("vm-pihole", "BC:24:11:00:00:05", "10"), ("vm-guest-portal", "BC:24:11:00:00:06", "20")]
+    for k, (nm, vm_mac, vid) in enumerate(PVE):
+        inv(rs[0], "brh", vm_mac, {"if": "ether10", "vid": vid})
+        inv(rs[0], "dhcp", vm_mac, dict(ip="192.168.88.%d" % (150 + k), host=nm, comment="", status="bound", arp="reachable", bh="1", last="1m", dyn="false"))
+    inv(rs[0], "vlan", "list", {"txt": "10=vlan10-HOME;20=vlan20-GUEST;30=vlan30-SERWERY;"})
     for ri, plist in PORTS.items():
         for n, run, dis, rate, dup, br, cm in plist:
             inv(rs[ri], "eth", n, dict(run=run, dis=dis, rate=rate, dup=dup, ld="0", br=br, cm=cm))
@@ -221,6 +228,7 @@ def build(s):
     cap_names = {1: "cap-upstairs", 2: "cap-garage"}
     for i, ri, ifc, sig, tx, rxr, snr, up in wifi_clients:
         data = {"interface": ifc, "signal": str(sig), "tx-rate": tx, "rx-rate": rxr, "signal-to-noise": str(snr), "uptime": up}
+        data["vlan-id"] = "20" if i % 5 == 4 else "10"          # sieć gości (VLAN 20) i domowa (VLAN 10)
         if ifc == "wifi1":
             data["band"] = "2ghz-n"                                 # radio 2,4 GHz
         inv(rs[ri], "wifi", mac(i + 1), data)                       # klient widziany przez swój AP (nazwę zna z dzierżawy DHCP kontrolera)
