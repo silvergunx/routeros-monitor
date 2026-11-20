@@ -30,3 +30,38 @@ def check_ban(entry, my_ips, host=""):
         except ValueError:
             continue
     return ""
+
+
+_CGNAT = ipaddress.ip_network("100.64.0.0/10")
+
+
+def is_local_addr(ip):
+    """True dla adresu z sieci prywatnej, lokalnej (link-local), pętli zwrotnej i CGNAT (100.64.0.0/10, np. tunele VPN dostawców)."""
+    try:
+        a = ipaddress.ip_address(str(ip).split("%")[0])
+    except ValueError:
+        return False
+    if a.version == 6 and a.ipv4_mapped:
+        a = a.ipv4_mapped
+    return a.is_private or a.is_loopback or a.is_link_local or (a.version == 4 and a in _CGNAT)
+
+
+def target_allowed(host, private_only=True, resolver=None):
+    """Czy serwer panelu może samodzielnie połączyć się z urządzeniem `host` (sondy, SNMP). Przy private_only wszystkie adresy,
+    na które host się rozwiązuje, muszą być lokalne; nierozwiązywalna nazwa jest odrzucana. Zwraca (True/False, powód)."""
+    host = (host or "").strip()
+    if not host:
+        return False, "empty"
+    if not private_only:
+        return True, ""
+    import socket
+    try:
+        infos = (resolver or socket.getaddrinfo)(host, None)
+    except OSError:
+        return False, "unresolved"
+    ips = {i[4][0] for i in infos}
+    if not ips:
+        return False, "unresolved"
+    if all(is_local_addr(x) for x in ips):
+        return True, ""
+    return False, "public address"

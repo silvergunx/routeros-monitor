@@ -9,6 +9,7 @@
 - **Panel w internecie:** najlepiej udostępniaj go tylko w sieci lokalnej lub przez VPN. Jeśli musi być publiczny, włącz HTTPS
   i używaj silnych haseł.
 - **Panel administracyjny Caddy** (port 2019) działa tylko w wewnętrznej sieci Dockera i nie jest wystawiony na zewnątrz.
+- **Zasięg sieci** (Ustawienia → Bezpieczeństwo → Zasięg sieci): panel tylko słucha routerów i nigdy nie łączy się z nimi ani niczego na nich nie zmienia. Możesz dodatkowo zamknąć przyjmowanie danych od routerów do sieci prywatnych i VPN (domyślnie wyłączone, bo routery poza siecią lokalną przestałyby raportować) oraz zabronić modułom, w których serwer sam łączy się z urządzeniami (sondy, SNMP), sięgania pod adresy publiczne (domyślnie włączone). Nie wystawiaj SNMP do internetu.
 - **Syslog (UDP 514)** nie ma uwierzytelniania; ogranicz port w firewallu serwera do adresów routerów, np.:
   ```
   sudo ufw allow from 192.168.88.0/24 to any port 514 proto udp

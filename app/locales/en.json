@@ -962,5 +962,14 @@
   "hint.backups": "Backups of the panel's database (not of the routers' configuration). You can download them and restore them on another server.",
   "hint.roles": "An administrator changes settings and sees sensitive data (such as addresses). A \"view only\" account sees charts and lists and cannot change anything.",
   "hint.audit": "The change log records what the panel's users and the panel itself did (for example setting changes, bans, ntfy server outages).",
-  "hint.routers_list": "A green status means the router sent data recently. Offline is silence longer than the threshold in Settings. A router that is updating has its own status so that it does not cause a false alarm."
+  "hint.routers_list": "A green status means the router sent data recently. Offline is silence longer than the threshold in Settings. A router that is updating has its own status so that it does not cause a false alarm.",
+  "set.scope.title": "Network scope",
+  "set.scope.local": "Accept router data only from private networks and VPN",
+  "set.scope.local_help": "When on, the panel rejects data (readings, inventory, logs, configuration commands) from routers that connect from public addresses. It closes the system to the local network and VPN tunnels. Off by default, because routers outside the local network would stop reporting.",
+  "set.scope.targets": "Connections from the server to devices (probes, SNMP) only to private addresses",
+  "set.scope.targets_help": "Applies to modules in which the panel server itself connects to a device (availability probes, SNMP). Recommended: do not expose SNMP to the internet. The panel never connects to RouterOS routers and never changes anything on them.",
+  "set.scope.blocked": "Requests rejected from public addresses since start: {n}.",
+  "set.scope.confirm": "Routers that connect from public addresses will stop reporting to the panel. Turn it on?",
+  "msg.scope_saved": "Network scope saved.",
+  "hint.scope": "The panel only listens to routers: it does not connect to them and does not change their settings. This choice additionally lets you close it to the local network and VPN and forbid modules that connect to devices from reaching into the internet."
 }

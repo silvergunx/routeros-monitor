@@ -963,5 +963,14 @@
   "hint.backups": "Kopie zapasowe bazy panelu (nie konfiguracji routerów). Możesz je pobrać i przywrócić na innym serwerze.",
   "hint.roles": "Administrator zmienia ustawienia i widzi dane wrażliwe (np. adresy). Konto „tylko podgląd” widzi wykresy i listy, bez możliwości zmian.",
   "hint.audit": "Dziennik zmian zapisuje, co robili użytkownicy panelu i sam panel (np. zmiany ustawień, bany, awarie serwera ntfy).",
-  "hint.routers_list": "Zielony status oznacza, że router niedawno wysłał dane. Offline to cisza dłuższa niż próg z Ustawień. Router w trakcie aktualizacji ma osobny status, żeby nie budzić fałszywego alarmu."
+  "hint.routers_list": "Zielony status oznacza, że router niedawno wysłał dane. Offline to cisza dłuższa niż próg z Ustawień. Router w trakcie aktualizacji ma osobny status, żeby nie budzić fałszywego alarmu.",
+  "set.scope.title": "Zasięg sieci",
+  "set.scope.local": "Przyjmuj dane od routerów tylko z sieci prywatnych i VPN",
+  "set.scope.local_help": "Gdy włączone, panel odrzuca dane (pomiary, inwentarz, logi, komendy konfiguracyjne) od routerów łączących się z adresów publicznych. Zamyka system do sieci lokalnej i tuneli VPN. Domyślnie wyłączone, bo routery poza siecią lokalną przestaną wtedy raportować.",
+  "set.scope.targets": "Połączenia z serwera do urządzeń (sondy, SNMP) tylko do adresów prywatnych",
+  "set.scope.targets_help": "Dotyczy modułów, w których serwer panelu sam łączy się z urządzeniem (sondy dostępności, SNMP). Zalecane: nie wystawiaj SNMP do internetu. Panel nigdy nie łączy się z routerami RouterOS ani niczego na nich nie zmienia.",
+  "set.scope.blocked": "Odrzucone żądania od adresów publicznych od startu: {n}.",
+  "set.scope.confirm": "Routery łączące się z adresów publicznych przestaną raportować do panelu. Włączyć?",
+  "msg.scope_saved": "Zasięg sieci zapisany.",
+  "hint.scope": "Panel tylko słucha routerów: nie łączy się z nimi i nie zmienia ich ustawień. Ten wybór pozwala dodatkowo zamknąć go do sieci lokalnej i VPN oraz zabronić modułom łączącym się z urządzeniami sięgania do internetu."
 }

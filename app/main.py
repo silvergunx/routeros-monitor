@@ -69,6 +69,22 @@ templates.env.globals["update_info"] = appver.update_info
 templates.env.globals["languages"] = i18n.languages
 
 
+# zasięg sieci: opcjonalne zamknięcie przyjmowania danych od routerów do sieci prywatnych i VPN (ustawienie w panelu)
+_SCOPE = {"local_only": False, "targets_private": True, "blocked": 0, "last": ""}
+ROUTER_PATHS = {"/api/metrics", "/api/inventory", "/api/upgrade", "/api/live", "/api/speedtest", "/api/whitelist.rsc", "/api/blacklist.rsc", "/api/setup.rsc"}
+
+
+@app.middleware("http")
+async def router_scope(request: Request, call_next):
+    if _SCOPE["local_only"] and request.url.path in ROUTER_PATHS:
+        ip = request.client.host if request.client else ""
+        if not netguard.is_local_addr(ip):
+            _SCOPE["blocked"] += 1
+            _SCOPE["last"] = ip
+            return PlainTextResponse("forbidden: this panel accepts router data only from private networks", status_code=403)
+    return await call_next(request)
+
+
 @app.middleware("http")
 async def set_lang(request: Request, call_next):
     request.state.lang = i18n.pick_lang(request)
@@ -2126,6 +2142,8 @@ class SyslogProto(asyncio.DatagramProtocol):
     def datagram_received(self, data, addr):
         ip = addr[0]
         rid = _log_ipmap.get(ip)
+        if rid is not None and _SCOPE["local_only"] and not netguard.is_local_addr(ip):
+            rid = None  # przy zamkniętym zasięgu logi z adresów publicznych też są odrzucane
         if rid is None:
             c = _log_rejected.setdefault(ip, [0, None])
             c[0], c[1] = c[0] + 1, now()
@@ -2136,9 +2154,15 @@ class SyslogProto(asyncio.DatagramProtocol):
             _log_buf.append((rid, now(), data[:2000]))
 
 
+def scope_load(s):
+    _SCOPE["local_only"] = sget(s, "scope_local_only", "0") == "1"
+    _SCOPE["targets_private"] = sget(s, "scope_targets_private", "1") == "1"
+
+
 def refresh_ipmap():
     global _log_ipmap
     with Session(engine) as s:
+        scope_load(s)
         _log_ipmap = {r.log_ip: r.id for r in s.scalars(select(Router).where(Router.log_ip.is_not(None)))}
 
 
@@ -4538,6 +4562,9 @@ def _diag_notify(s):
     out.append("- Rules: router offline %s (after %d min), internet down %s (after %d min), backup %s, auto-ban %s" % (
         "on" if c["r_offline"] else "off", c["offline_min"], "on" if c["r_inet"] else "off", c["inet_min"],
         "on" if c["r_backup"] else "off", "on" if c["r_ban"] else "off"))
+    out.append("- Network scope: router data %s (blocked %d requests), server-initiated connections %s" % (
+        "from private networks only" if _SCOPE["local_only"] else "from anywhere", _SCOPE["blocked"],
+        "to private addresses only" if _SCOPE["targets_private"] else "unrestricted"))
     out.append("- ntfy server: %s; delayed events waiting: %d" % (
         ("DOWN since %s (%s)" % (ago(_NTFY_H["since"]), _NTFY_H["err"])) if _NTFY_H["down"] else ("ok (checked %s)" % ago(_NTFY_H["checked"]) if _NTFY_H["checked"] else "not checked yet"),
         len(_OUTBOX)))
@@ -4818,7 +4845,7 @@ def settings_view(request, s, msg="", ok=True):
         "off_mult": offline_mult(s), "topo_enabled": topo_on(s),
         "thr_rows": [{"id": r.id, "name": r.name, "gap": reporting_gap(r.id), "auto_nr": auto_no_response(r.id),
                       "auto_off": auto_offline(r.id), "own_nr": _THR.get(r.id, {}).get("nr"), "own_off": _THR.get(r.id, {}).get("off"),
-                      "eff_nr": no_response_after(r.id), "eff_off": online_after(r.id)} for r in ordered_routers(s)], "nf": notif_view(s), "ntfy_h": {"down": _NTFY_H["down"], "err": _NTFY_H["err"], "outbox": len(_OUTBOX),
+                      "eff_nr": no_response_after(r.id), "eff_off": online_after(r.id)} for r in ordered_routers(s)], "nf": notif_view(s), "scope": {"local_only": _SCOPE["local_only"], "targets_private": _SCOPE["targets_private"], "blocked": _SCOPE["blocked"]}, "ntfy_h": {"down": _NTFY_H["down"], "err": _NTFY_H["err"], "outbox": len(_OUTBOX),
                  "since": dt.datetime.utcfromtimestamp(_NTFY_H["since"]).strftime("%Y-%m-%dT%H:%M:%S") if _NTFY_H["since"] else "",
                  "checked": dt.datetime.utcfromtimestamp(_NTFY_H["checked"]).strftime("%Y-%m-%dT%H:%M:%S") if _NTFY_H["checked"] else ""}, "langs": i18n.languages(),
         "mutes": [{"pat": m["pat"], "rid": m.get("rid"), "ts": m.get("ts", ""),
@@ -5297,6 +5324,17 @@ def settings_topology(request: Request, on: str = Form(""), s: Session = Depends
     s.commit()
     _TOPO_ON[1] = 0
     return settings_view(request, s, (tr("msg.topo_on") if on == "1" else tr("msg.topo_off")) + " " + tr("msg.wl_paste"), True)
+
+
+@app.post("/settings/scope", dependencies=[Depends(admin)])
+def settings_scope(request: Request, local_only: str = Form(""), targets_private: str = Form(""), s: Session = Depends(db)):
+    sset(s, "scope_local_only", "1" if local_only == "1" else "0")
+    sset(s, "scope_targets_private", "1" if targets_private == "1" else "0")
+    log(s, "zasięg sieci", "dane od routerów: %s; połączenia z serwera: %s" % (
+        "tylko sieci prywatne" if local_only == "1" else "bez ograniczeń", "tylko adresy prywatne" if targets_private == "1" else "bez ograniczeń"))
+    s.commit()
+    scope_load(s)
+    return settings_view(request, s, tr("msg.scope_saved"), True)
 
 
 @app.post("/settings/blacklist", dependencies=[Depends(admin)])
