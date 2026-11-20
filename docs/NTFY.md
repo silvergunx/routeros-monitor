@@ -206,15 +206,15 @@ Panel co 2 minuty sprawdza serwer ntfy (`/v1/health`). Po dwóch nieudanych pró
 - jeśli masz webhook, dostaje on od razu zdarzenie „ntfy nie odpowiada” (to jedyny kanał niezależny od zepsutego serwera),
 - zdarzenia, których nie dało się wysłać, czekają w kolejce w pamięci panelu (do 20, nie starsze niż 6 godzin; po restarcie panelu kolejka znika). Po powrocie serwera dostajesz je z dopiskiem „(opóźnione)” i godziną zdarzenia, a potem krótkie podsumowanie.
 
-Najczęstsza przyczyna na małym urządzeniu (Raspberry Pi Zero W) to zawieszenie się systemu albo zerwane połączenie Wi-Fi. Co pomaga:
+Najczęstsza przyczyna na małym, słabym komputerze to zawieszenie się systemu albo zerwane połączenie Wi-Fi. Co pomaga:
 
-1. **Sprzętowy watchdog**: zawieszony Pi sam się zrestartuje. Zamiast edytować `/etc/systemd/system.conf` (niektóre wersje systemd nie mają tam wszystkich linii) dodaj osobny plik: `sudo mkdir -p /etc/systemd/system.conf.d`, potem `printf '[Manager]
+1. **Sprzętowy watchdog**: zawieszony komputer sam się zrestartuje. Zamiast edytować `/etc/systemd/system.conf` (niektóre wersje systemd nie mają tam wszystkich linii) dodaj osobny plik: `sudo mkdir -p /etc/systemd/system.conf.d`, potem `printf '[Manager]
 RuntimeWatchdogSec=15
 ShutdownWatchdogSec=2min
-' | sudo tee /etc/systemd/system.conf.d/watchdog.conf` i `sudo systemctl daemon-reexec`. Sprawdzenie: `systemctl show -p RuntimeWatchdogUSec` powinno pokazać `15s`. Jeśli pokazuje `0`, sprawdź `ls /dev/watchdog*`; gdy urządzenia nie ma, `sudo modprobe bcm2835_wdt` i dopisz `bcm2835_wdt` do `/etc/modules`.
+' | sudo tee /etc/systemd/system.conf.d/watchdog.conf` i `sudo systemctl daemon-reexec`. Sprawdzenie: `systemctl show -p RuntimeWatchdogUSec` powinno pokazać `15s`. Jeśli pokazuje `0`, sprawdź `ls /dev/watchdog*`; gdy urządzenia nie ma, trzeba załadować sterownik watchdoga swojej płyty (na Raspberry Pi: `sudo modprobe bcm2835_wdt` i wpis `bcm2835_wdt` w `/etc/modules`).
 2. **Wyłączone oszczędzanie energii Wi-Fi** (częsta przyczyna znikającej sieci): `sudo iw dev wlan0 set power_save off`; na stałe w NetworkManager plik `/etc/NetworkManager/conf.d/wifi-powersave.conf` z treścią `[connection]` i `wifi.powersave = 2`, albo polecenie `iw` w `@reboot` w crontabie.
-3. **Samonaprawa sieci**: skrypt, który co 5 minut pinguje bramę, restartuje `wlan0`, a gdy to nie pomoże, restartuje Pi (patrz niżej).
-4. **Zasilanie i karta**: zasilacz 5 V / 2,5 A i dobra karta SD. Niedobór napięcia pokazuje `vcgencmd get_throttled` (powinno być `0x0`) i `dmesg | grep -i under-voltage`.
+3. **Samonaprawa sieci**: skrypt, który co 5 minut pinguje bramę, restartuje `wlan0`, a gdy to nie pomoże, restartuje komputer (patrz niżej).
+4. **Zasilanie i nośnik**: mocny, stabilny zasilacz i dobra karta pamięci (te dwie rzeczy najczęściej powodują zawieszenia). Na Raspberry Pi niedobór napięcia pokazuje `vcgencmd get_throttled` (powinno być `0x0`) i `dmesg | grep -i under-voltage`.
 5. **Trwały dziennik systemowy**, żeby po restarcie było widać przyczynę: `sudo mkdir -p /var/log/journal && sudo systemctl restart systemd-journald`, a potem `journalctl -b -1` pokaże poprzedni rozruch.
 
 Skrypt samonaprawy sieci:
