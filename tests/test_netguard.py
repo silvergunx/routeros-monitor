@@ -32,7 +32,7 @@ assert check_ban("2001:db8::5", []) == "bad"
 # --- niepoprawne wpisy nie wywołują wyjątku
 assert check_ban("", []) == "" and check_ban(None, []) == ""
 # --- adresy lokalne i cele połączeń z serwera (sondy, SNMP)
-for ip in ("192.168.1.5", "10.0.20.25", "172.16.0.9", "127.0.0.1", "169.254.1.1", "100.64.12.8", "fd00::1", "::ffff:192.168.1.7", "fe80::1%eth0"):
+for ip in ("192.168.1.5", "10.1.2.3", "172.16.0.9", "127.0.0.1", "169.254.1.1", "100.64.12.8", "fd00::1", "::ffff:192.168.1.7", "fe80::1%eth0"):
     assert N.is_local_addr(ip), ip
 for ip in ("8.8.8.8", "93.184.216.34", "2001:4860:4860::8888", "100.128.0.1", "", "nie-adres"):
     assert not N.is_local_addr(ip), ip

@@ -1875,7 +1875,7 @@ def ports_view(s, r, rows, wan):
 
 
 def parse_vlan_txt(txt):
-    """'10=vlan10-HOME|10.0.10.1/24;20=vlan20-GUEST;' -> ({10: 'HOME', 20: 'GUEST'}, [(sieć, id VLAN), ...])."""
+    """'10=vlan10-LAN|192.168.10.1/24;20=vlan20-GUEST;' -> ({10: 'LAN', 20: 'GUEST'}, [(sieć, id VLAN), ...])."""
     names, nets = {}, []
     for part in (txt or "").split(";"):
         vid, _, rest = part.partition("=")
@@ -4959,7 +4959,7 @@ def topology_view(s, admin=False):
                 slot["dhcp"][(d.get("key") or "").upper()] = d
         else:
             slot["wifi"].append((x.updated, d))
-    vlan_names, vlan_nets = {}, []  # id VLAN -> nazwa z /interface vlan ("vlan10-HOME" -> "HOME"); sieci IP interfejsów VLAN
+    vlan_names, vlan_nets = {}, []  # id VLAN -> nazwa z /interface vlan ("vlan10-LAN" -> "LAN"); sieci IP interfejsów VLAN
     for r in routers:
         n1, n2 = parse_vlan_txt(inv[r.id]["vlan"])
         for k, v in n1.items():
@@ -5013,7 +5013,7 @@ def topology_view(s, admin=False):
     def base_if(d):
         return re.sub(r"-virtual\d+$", "", d.get("interface") or d.get("iface") or "")
 
-    radio_ap = {}  # tabela radiów kontrolera CAPsMAN: interfejs "cap-wifi1" -> AP (pole cap="Parter@10.12.12.13": identity@adres)
+    radio_ap = {}  # tabela radiów kontrolera CAPsMAN: interfejs "cap-wifi1" -> AP (pole cap="Garage@192.168.88.3": identity@adres)
     for r in routers:
         for part in (inv[r.id]["cap"] or "").split(";"):
             if "=" not in part:

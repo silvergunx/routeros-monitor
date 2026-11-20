@@ -8,8 +8,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
 import applog as A
 
 # --- wycinanie danych wrażliwych
-s = A.scrub('POST /api/metrics?t=xNWb3nAHXI2bg9SwySFrJvvYzKikdF5W HTTP/1.1 from 10.12.12.13:5000')
-assert "xNWb3" not in s and "10.12.12.13" not in s and "t=***" in s and "<ip>" in s, s
+s = A.scrub('POST /api/metrics?t=demoTOKENaaaaBBBBccccDDDDeeeeFFFF HTTP/1.1 from 192.168.88.2:5000')
+assert "demoT" not in s and "192.168.88.2" not in s and "t=***" in s and "<ip>" in s, s
 assert A.scrub("password=hunter2 ok") == "password=*** ok"
 assert A.scrub("token: abcDEF123") == "token: ***", A.scrub("token: abcDEF123")
 assert A.scrub("mail admin@example.com done") == "mail <email> done"
@@ -82,18 +82,18 @@ cap.setFormatter(logging.Formatter("%(message)s"))
 acc.addHandler(cap)
 acc.addFilter(A.MaskTokens())
 FMT = '%s - "%s %s HTTP/%s" %d'
-acc.info(FMT, "10.0.10.1:0", "POST", "/api/metrics?t=xNWb3nAHXI2bg9SwySFrJvvYzKikdF5W&cv=2", "1.1", 200)
-acc.info(FMT, "10.0.10.1:0", "POST", "/api/inventory?t=U7mPabV25OivKZKqhb1ODaK0MW_CJ2LO", "1.1", 200)
-acc.info(FMT, "10.0.10.19:0", "GET", "/api/blacklist.rsc?list=blacklist&t=SECRETtoken123", "1.1", 200)
-acc.info(FMT, "10.0.10.19:0", "GET", "/routers/1?tab=logs", "1.1", 200)   # parametr "tab" to nie token
-acc.info(FMT, "10.0.10.19:0", "GET", "/login", "1.1", 200)
+acc.info(FMT, "192.168.88.1:0", "POST", "/api/metrics?t=demoTOKENaaaaBBBBccccDDDDeeeeFFFF&cv=2", "1.1", 200)
+acc.info(FMT, "192.168.88.1:0", "POST", "/api/inventory?t=demoTOKEN2ggggHHHHiiiiJJJJkkkk_L", "1.1", 200)
+acc.info(FMT, "192.168.88.19:0", "GET", "/api/blacklist.rsc?list=blacklist&t=SECRETtoken123", "1.1", 200)
+acc.info(FMT, "192.168.88.19:0", "GET", "/routers/1?tab=logs", "1.1", 200)   # parametr "tab" to nie token
+acc.info(FMT, "192.168.88.19:0", "GET", "/login", "1.1", 200)
 acc.info("plain message with ?t=ABC123 inside")
-assert seen[0] == '10.0.10.1:0 - "POST /api/metrics?t=***&cv=2 HTTP/1.1" 200', seen[0]
-assert seen[1] == '10.0.10.1:0 - "POST /api/inventory?t=*** HTTP/1.1" 200', seen[1]
-assert seen[2] == '10.0.10.19:0 - "GET /api/blacklist.rsc?list=blacklist&t=*** HTTP/1.1" 200', seen[2]
-assert seen[3] == '10.0.10.19:0 - "GET /routers/1?tab=logs HTTP/1.1" 200', seen[3]
-assert seen[4] == '10.0.10.19:0 - "GET /login HTTP/1.1" 200', seen[4]
+assert seen[0] == '192.168.88.1:0 - "POST /api/metrics?t=***&cv=2 HTTP/1.1" 200', seen[0]
+assert seen[1] == '192.168.88.1:0 - "POST /api/inventory?t=*** HTTP/1.1" 200', seen[1]
+assert seen[2] == '192.168.88.19:0 - "GET /api/blacklist.rsc?list=blacklist&t=*** HTTP/1.1" 200', seen[2]
+assert seen[3] == '192.168.88.19:0 - "GET /routers/1?tab=logs HTTP/1.1" 200', seen[3]
+assert seen[4] == '192.168.88.19:0 - "GET /login HTTP/1.1" 200', seen[4]
 assert seen[5] == "plain message with ?t=*** inside", seen[5]
-assert not any("xNWb3" in s or "U7mPab" in s or "SECRETtoken" in s for s in seen)
+assert not any("demoT" in s or "demoTOKEN2" in s or "SECRETtoken" in s for s in seen)
 
 print("test_applog: OK")
