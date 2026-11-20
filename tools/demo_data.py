@@ -164,8 +164,9 @@ def build(s):
     # ---------------------------------------------------------------- inwentarz
     def inv(r, kind, key, data):
         s.add(main.Inv(router_id=r.id, kind=kind, key=key, data=json.dumps(dict(data, key=key)), seq="1", updated=now))
-    for r, spec in zip(rs, ROUTERS):
-        inv(r, "sys", "sys", spec["sys"])
+    HW = [("arm64", 4, 1400, 18, 24), ("arm64", 4, 1800, 0, 12), ("arm", 4, 716, 0, 9), ("arm", 2, 880, 5, 14)]  # architektura, rdzenie, MHz, DHCP, ARP
+    for (r, spec), (ar, cp, mh, dn, an) in zip(zip(rs, ROUTERS), HW):
+        inv(r, "sys", "sys", dict(spec["sys"], arch=ar, cpus=str(cp), mhz=str(mh), dhn=str(dn), arpn=str(an)))
     # porty Ethernet (zakładka Porty): nazwa -> (running, disabled, rate, full-duplex, bridge, komentarz)
     PORTS = {
         0: [("ether1", "true", "false", "1Gbps", "true", "", "ISP"), ("ether2", "true", "false", "1Gbps", "true", "bridge", "Office switch"),

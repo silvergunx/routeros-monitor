@@ -150,6 +150,17 @@ o.querySelector('summary').addEventListener('click',e=>{if(o.classList.contains(
 </div>
 </div>
 {% if me.is_admin %}<div class="rp rp-cfg card"><h2>{{ t('rp.cfg_title') }}</h2>
+{% if hw %}<div class="hwc"><h3 style="margin:0 0 6px">{{ t('hw.title') }}</h3>
+<p class="small" style="margin:0 0 6px"><span class="badge {{ 'ok' if hw.klass=='strong' else ('warn' if hw.klass=='light' else '') }}">{{ t('hw.class.' ~ hw.klass) }}</span>
+{% if hw.known %}<span class="mut">{{ hw.model or '' }}{% if hw.arch %} · {{ hw.arch }}{% endif %} · {{ hw.cores or '?' }}×{{ hw.mhz or '?' }} MHz · {{ hw.mem_mb or '?' }} MB RAM{% if hw.points %} · {{ t('hw.points', n=hw.points) }}{% endif %}</span>{% else %}<span class="mut">{{ t('hw.unknown_help') }}</span>{% endif %}</p>
+<div class="scroll"><table class="small"><tr><th>{{ t('hw.m.what') }}</th><th>{{ t('hw.m.value') }}</th></tr>
+<tr><td>{{ t('hw.m.cpu') }}</td><td>{% if hw.cpu_avg is not none %}{{ hw.cpu_avg|string|replace('.', ',') }}% ({{ t('hw.m.max') }} {{ hw.cpu_max|string|replace('.', ',') }}%){% else %}-{% endif %}</td></tr>
+<tr><td>{{ t('hw.m.gather') }}</td><td>{% if hw.gms is not none %}{{ hw.gms|string|replace('.', ',') }} ms{% else %}-{% endif %}</td></tr>
+<tr><td>{{ t('hw.m.interval') }}</td><td>{% if hw.gap %}{{ hw.gap|string|replace('.', ',') }} s{% else %}-{% endif %}{% if hw.rec_min %} <span class="mut">({{ t('hw.m.rec', n=hw.rec_min) }})</span>{% endif %}</td></tr>
+<tr><td>{{ t('hw.m.wan') }}</td><td>{% if hw.wan is not none %}{{ hw.wan|string|replace('.', ',') }} Mb/s{% else %}-{% endif %}</td></tr>
+<tr><td>{{ t('hw.m.tables') }}</td><td>{{ t('hw.m.tables_v', l=hw.leases, a=hw.arp) }}</td></tr></table></div>
+{% if hw.verdict != 'none' %}<p class="small {{ 'warn' if hw.verdict=='busy' else ('ok' if hw.verdict=='ok' else '') }}">{{ t('hw.v.' ~ hw.verdict) }}{% if hw.faster %} {{ t('hw.v.faster', n=hw.rec_min) }}{% endif %}</p>{% endif %}
+<p class="mut small">{{ t('hw.help') }}</p></div><hr style="border:0;border-top:1px solid var(--bd);margin:12px 0">{% endif %}
 <p>{{ th('rp.cfg_paste.html') }}</p>
 <pre>{{cmd}}</pre>
 <p><b>{{ t('rp.cfg_remove') }}</b> ({{ t('rp.cfg_remove_sub') }}):</p>

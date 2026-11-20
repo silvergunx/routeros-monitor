@@ -45,6 +45,8 @@ for i in range(7, 0, -1):
     t = dt.datetime(ts.year, ts.month, ts.day, 3, 0).timestamp()
     os.utime(p, (t, t))
 main.BACKUP_DIR = BACKUPS
+for _rid, _ms in ((1, 11.0), (2, 14.0), (3, 18.0), (4, 9.0)):
+    main._ROUTER_COST[_rid] = [_ms - 1, _ms, _ms + 2]   # czas zbierania danych przez skrypt monitora (profil sprzętu)
 if not main.LS_BIN:
     main.LS_BIN = "librespeed-cli"          # tylko żeby ustawienia pokazywały silnik jako dostępny; w demo nie uruchamiamy testów
 
