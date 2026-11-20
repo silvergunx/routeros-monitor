@@ -689,7 +689,7 @@ def q(text):
 
 # Wersja skryptów na routerze. Zwiększ ją TYLKO wtedy, gdy zmiana skryptów wymaga ponownego wklejenia komendy konfiguracyjnej:
 # panel pokazuje wtedy administratorowi, że skrypt routera jest nieaktualny. Router podaje swoją wersję w każdym zapytaniu (cv).
-SCRIPT_VERSION = 10
+SCRIPT_VERSION = 11
 _ROUTER_COST = {}  # id routera -> ostatnie czasy zbierania danych przez skrypt monitora (ms), do profilu sprzetowego
 _ROUTER_CV = {}  # id routera -> wersja skryptu zgłoszona w ostatnim zapytaniu (0 = skrypt bez znacznika wersji); po restarcie pusto do pierwszego pomiaru
 
@@ -786,7 +786,7 @@ INV_MAIN = '\n:if ([:len [/system script find where name="app-inv-dhcp"]] > 0) d
 
 INV_ETH = INV_DHCP[:INV_DHCP.index(':local buf ""')].rstrip('\n') + '\n' + '\n:local buf ""\n:foreach i in=[/interface ethernet find] do={\n  :do {\n    :local n [/interface ethernet get $i name]\n    :local dis [/interface ethernet get $i disabled]\n    :local run [/interface ethernet get $i running]\n    :local cm ""\n    :do {:set cm [/interface ethernet get $i comment]} on-error={}\n    :local ce [$esc s=$cm]\n    :local rate ""\n    :local dup ""\n    :do {\n      :local mo [/interface ethernet monitor $i once as-value]\n      :set rate ($mo->"rate")\n      :set dup ($mo->"full-duplex")\n    } on-error={}\n    :local ld ""\n    :do {:set ld [/interface ethernet get $i link-downs]} on-error={}\n    :local br ""\n    :do {:set br [/interface bridge port get [find where interface=$n] bridge]} on-error={}\n    :if ([:len $buf] > 0) do={:set buf ($buf . ",")}\n    :set buf ($buf . "{\\"key\\":\\"$n\\",\\"run\\":\\"$run\\",\\"dis\\":\\"$dis\\",\\"rate\\":\\"$rate\\",\\"dup\\":\\"$dup\\",\\"ld\\":\\"$ld\\",\\"br\\":\\"$br\\",\\"cm\\":\\"$ce\\"}")\n  } on-error={}\n  :if ([:len $buf] > 3000) do={\n    $send u=$url d=("{\\"k\\":\\"eth\\",\\"seq\\":\\"$seq\\",\\"done\\":false,\\"items\\":\\5B" . $buf . "\\5D}")\n    :set buf ""\n  }\n}\n$send u=$url d=("{\\"k\\":\\"eth\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B" . $buf . "\\5D}")'
 
-INV_TOPO = INV_DHCP[:INV_DHCP.index(':local buf ""')].rstrip('\n') + '\n' + '\n:local buf ""\n:local n 0\n:local trunk ";"\n:foreach i in=[/ip neighbor find] do={\n  :if ($n < 80) do={\n    :set n ($n + 1)\n    :do {\n      :local m [/ip neighbor get $i mac-address]\n      :local ifc [:tostr [/ip neighbor get $i interface]]\n      :set trunk ($trunk . $ifc . ";")\n      :if ([:len $ifc] > 30) do={:set ifc [:pick $ifc 0 30]}\n      :local idn ""\n      :do {:set idn [/ip neighbor get $i identity]} on-error={}\n      :if ([:len $idn] > 40) do={:set idn [:pick $idn 0 40]}\n      :local ide [$esc s=$idn]\n      :local ad ""\n      :do {:set ad [:tostr [/ip neighbor get $i address]]} on-error={}\n      :if ([:len $ad] > 40) do={:set ad [:pick $ad 0 40]}\n      :local pl ""\n      :do {:set pl [/ip neighbor get $i platform]} on-error={}\n      :if ([:len $pl] > 20) do={:set pl [:pick $pl 0 20]}\n      :local ple [$esc s=$pl]\n      :local bd ""\n      :do {:set bd [/ip neighbor get $i board]} on-error={}\n      :if ([:len $bd] > 24) do={:set bd [:pick $bd 0 24]}\n      :local bde [$esc s=$bd]\n      :if ([:len $buf] > 0) do={:set buf ($buf . ",")}\n      :set buf ($buf . "{\\"key\\":\\"" . $m . "|" . $ifc . "\\",\\"mac\\":\\"" . $m . "\\",\\"if\\":\\"" . $ifc . "\\",\\"id\\":\\"" . $ide . "\\",\\"ip\\":\\"" . $ad . "\\",\\"pl\\":\\"" . $ple . "\\",\\"bd\\":\\"" . $bde . "\\"}")\n    } on-error={}\n    :if ([:len $buf] > 1200) do={\n      $send u=$url d=("{\\"k\\":\\"nbr\\",\\"seq\\":\\"$seq\\",\\"done\\":false,\\"items\\":\\5B" . $buf . "\\5D}")\n      :set buf ""\n    }\n  }\n}\n$send u=$url d=("{\\"k\\":\\"nbr\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B" . $buf . "\\5D}")\n:local hb ""\n:local hn 0\n:foreach h in=[/interface bridge host find where local=no] do={\n  :if ($hn < 150) do={\n    :do {\n      :local oi [/interface bridge host get $h on-interface]\n      :if ([:typeof [:find $trunk (";" . $oi . ";")]] = "nil" && [:typeof [:find $trunk (";" . $oi . ",")]] = "nil" && [:typeof [:find $trunk ("," . $oi . ";")]] = "nil" && [:typeof [:find $trunk ("," . $oi . ",")]] = "nil") do={\n        :set hn ($hn + 1)\n        :local hm [/interface bridge host get $h mac-address]\n        :if ([:len $oi] > 30) do={:set oi [:pick $oi 0 30]}\n        :if ([:len $hb] > 0) do={:set hb ($hb . ",")}\n        :local hv ""\n        :do {:set hv [/interface bridge host get $h vid]} on-error={}\n        :set hb ($hb . "{\\"key\\":\\"" . $hm . "\\",\\"if\\":\\"" . $oi . "\\",\\"vid\\":\\"" . $hv . "\\"}")\n      }\n    } on-error={}\n    :if ([:len $hb] > 1200) do={\n      $send u=$url d=("{\\"k\\":\\"brh\\",\\"seq\\":\\"$seq\\",\\"done\\":false,\\"items\\":\\5B" . $hb . "\\5D}")\n      :set hb ""\n    }\n  }\n}\n$send u=$url d=("{\\"k\\":\\"brh\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B" . $hb . "\\5D}")\n:global appRad\n:set appRad ""\n:do {:local f [:parse ":global appRad; :foreach r in=\\5B/interface wifi radio find\\5D do={:do {:set appRad (\\$appRad . \\5B/interface wifi radio get \\$r interface\\5D . \\"=\\" . \\5B/interface wifi radio get \\$r cap\\5D . \\";\\")} on-error={}}"]; $f} on-error={}\n:if ([:len $appRad] > 900) do={:set appRad [:pick $appRad 0 900]}\n:if ([:len $appRad] > 0) do={\n  $send u=$url d=("{\\"k\\":\\"cap\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B{\\"key\\":\\"radios\\",\\"txt\\":\\"" . [$esc s=$appRad] . "\\"}\\5D}")\n}\n:local vt ""\n:foreach v in=[/interface vlan find] do={\n  :do {\n    :local vn [/interface vlan get $v name]\n    :if ([:len $vn] > 24) do={:set vn [:pick $vn 0 24]}\n    :set vt ($vt . [/interface vlan get $v vlan-id] . "=" . $vn . ";")\n  } on-error={}\n}\n:if ([:len $vt] > 900) do={:set vt [:pick $vt 0 900]}\n:if ([:len $vt] > 0) do={\n  $send u=$url d=("{\\"k\\":\\"vlan\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B{\\"key\\":\\"list\\",\\"txt\\":\\"" . [$esc s=$vt] . "\\"}\\5D}")\n}'
+INV_TOPO = INV_DHCP[:INV_DHCP.index(':local buf ""')].rstrip('\n') + '\n' + '\n:local buf ""\n:local n 0\n:local trunk ";"\n:foreach i in=[/ip neighbor find] do={\n  :if ($n < 80) do={\n    :set n ($n + 1)\n    :do {\n      :local m [/ip neighbor get $i mac-address]\n      :local ifc [:tostr [/ip neighbor get $i interface]]\n      :set trunk ($trunk . $ifc . ";")\n      :if ([:len $ifc] > 30) do={:set ifc [:pick $ifc 0 30]}\n      :local idn ""\n      :do {:set idn [/ip neighbor get $i identity]} on-error={}\n      :if ([:len $idn] > 40) do={:set idn [:pick $idn 0 40]}\n      :local ide [$esc s=$idn]\n      :local ad ""\n      :do {:set ad [:tostr [/ip neighbor get $i address]]} on-error={}\n      :if ([:len $ad] > 40) do={:set ad [:pick $ad 0 40]}\n      :local pl ""\n      :do {:set pl [/ip neighbor get $i platform]} on-error={}\n      :if ([:len $pl] > 20) do={:set pl [:pick $pl 0 20]}\n      :local ple [$esc s=$pl]\n      :local bd ""\n      :do {:set bd [/ip neighbor get $i board]} on-error={}\n      :if ([:len $bd] > 24) do={:set bd [:pick $bd 0 24]}\n      :local bde [$esc s=$bd]\n      :if ([:len $buf] > 0) do={:set buf ($buf . ",")}\n      :set buf ($buf . "{\\"key\\":\\"" . $m . "|" . $ifc . "\\",\\"mac\\":\\"" . $m . "\\",\\"if\\":\\"" . $ifc . "\\",\\"id\\":\\"" . $ide . "\\",\\"ip\\":\\"" . $ad . "\\",\\"pl\\":\\"" . $ple . "\\",\\"bd\\":\\"" . $bde . "\\"}")\n    } on-error={}\n    :if ([:len $buf] > 1200) do={\n      $send u=$url d=("{\\"k\\":\\"nbr\\",\\"seq\\":\\"$seq\\",\\"done\\":false,\\"items\\":\\5B" . $buf . "\\5D}")\n      :set buf ""\n    }\n  }\n}\n$send u=$url d=("{\\"k\\":\\"nbr\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B" . $buf . "\\5D}")\n:local hb ""\n:local hn 0\n:foreach h in=[/interface bridge host find where local=no] do={\n  :if ($hn < 150) do={\n    :do {\n      :local oi [/interface bridge host get $h on-interface]\n      :if ([:typeof [:find $trunk (";" . $oi . ";")]] = "nil" && [:typeof [:find $trunk (";" . $oi . ",")]] = "nil" && [:typeof [:find $trunk ("," . $oi . ";")]] = "nil" && [:typeof [:find $trunk ("," . $oi . ",")]] = "nil") do={\n        :set hn ($hn + 1)\n        :local hm [/interface bridge host get $h mac-address]\n        :if ([:len $oi] > 30) do={:set oi [:pick $oi 0 30]}\n        :if ([:len $hb] > 0) do={:set hb ($hb . ",")}\n        :local hv ""\n        :do {:set hv [/interface bridge host get $h vid]} on-error={}\n        :set hb ($hb . "{\\"key\\":\\"" . $hm . "\\",\\"if\\":\\"" . $oi . "\\",\\"vid\\":\\"" . $hv . "\\"}")\n      }\n    } on-error={}\n    :if ([:len $hb] > 1200) do={\n      $send u=$url d=("{\\"k\\":\\"brh\\",\\"seq\\":\\"$seq\\",\\"done\\":false,\\"items\\":\\5B" . $hb . "\\5D}")\n      :set hb ""\n    }\n  }\n}\n$send u=$url d=("{\\"k\\":\\"brh\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B" . $hb . "\\5D}")\n:global appRad\n:set appRad ""\n:do {:local f [:parse ":global appRad; :foreach r in=\\5B/interface wifi radio find\\5D do={:do {:set appRad (\\$appRad . \\5B/interface wifi radio get \\$r interface\\5D . \\"=\\" . \\5B/interface wifi radio get \\$r cap\\5D . \\";\\")} on-error={}}"]; $f} on-error={}\n:if ([:len $appRad] > 900) do={:set appRad [:pick $appRad 0 900]}\n:if ([:len $appRad] > 0) do={\n  $send u=$url d=("{\\"k\\":\\"cap\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B{\\"key\\":\\"radios\\",\\"txt\\":\\"" . [$esc s=$appRad] . "\\"}\\5D}")\n}\n:local vt ""\n:foreach v in=[/interface vlan find] do={\n  :do {\n    :local vn [/interface vlan get $v name]\n    :local va ""\n    :foreach a in=[/ip address find where interface=$vn and !disabled] do={:set va ($va . [/ip address get $a address] . ",")}\n    :if ([:len $va] > 0) do={:set va ("|" . [:pick $va 0 ([:len $va] - 1)])}\n    :if ([:len $vn] > 24) do={:set vn [:pick $vn 0 24]}\n    :set vt ($vt . [/interface vlan get $v vlan-id] . "=" . $vn . $va . ";")\n  } on-error={}\n}\n:if ([:len $vt] > 1500) do={:set vt [:pick $vt 0 1500]}\n:if ([:len $vt] > 0) do={\n  $send u=$url d=("{\\"k\\":\\"vlan\\",\\"seq\\":\\"$seq\\",\\"done\\":true,\\"items\\":\\5B{\\"key\\":\\"list\\",\\"txt\\":\\"" . [$esc s=$vt] . "\\"}\\5D}")\n}'
 
 
 LIVE = r'''
@@ -1858,11 +1858,43 @@ def ports_view(s, r, rows, wan):
     return out
 
 
+def parse_vlan_txt(txt):
+    """'10=vlan10-HOME|10.0.10.1/24;20=vlan20-GUEST;' -> ({10: 'HOME', 20: 'GUEST'}, [(sieć, id VLAN), ...])."""
+    names, nets = {}, []
+    for part in (txt or "").split(";"):
+        vid, _, rest = part.partition("=")
+        if not vid.strip().isdigit() or not rest:
+            continue
+        vid = int(vid)
+        nm, _, adr = rest.partition("|")
+        names.setdefault(vid, re.sub(r"^vlan[-_ ]?\d*[-_ ]*", "", nm, flags=re.I).strip("-_ "))
+        for a in adr.split(","):
+            try:
+                nets.append((ipaddress.ip_interface(a.strip()).network, vid))
+            except ValueError:
+                pass
+    return names, nets
+
+
+def vlan_by_ip(nets, ip):
+    """VLAN urządzenia z jego adresu IP: sieć interfejsu VLAN routera, do której adres należy (najdłuższy prefiks wygrywa).
+    Działa dla każdego urządzenia, także gdy sterownik Wi-Fi nie podaje vlan-id w tabeli rejestracji."""
+    try:
+        a = ipaddress.ip_address((ip or "").strip())
+    except ValueError:
+        return None
+    best = None
+    for net, vid in nets:
+        if a in net and (best is None or net.prefixlen > best[0]):
+            best = (net.prefixlen, vid)
+    return best[1] if best else None
+
+
 def site_vlans(s):
     """(nazwy VLAN-ów {id: nazwa}, VLAN urządzeń kablowych {MAC: id}) ze wszystkich routerów; liczone raz na sesję bazy."""
     c = s.info.get("site_vlans")
     if c is None:
-        vn, mv = {}, {}
+        vn, mv, nets = {}, {}, []
         for x in s.scalars(select(Inv).where(Inv.kind.in_(("vlan", "brh")))):
             if x.kind == "brh" and (now() - x.updated).total_seconds() > 300:
                 continue
@@ -1871,13 +1903,13 @@ def site_vlans(s):
             except ValueError:
                 continue
             if x.kind == "vlan":
-                for part in (d.get("txt") or "").split(";"):
-                    vid, _, nm = part.partition("=")
-                    if vid.strip().isdigit() and nm:
-                        vn.setdefault(int(vid), re.sub(r"^vlan[-_ ]?\d*[-_ ]*", "", nm, flags=re.I).strip("-_ "))
+                n1, n2 = parse_vlan_txt(d.get("txt"))
+                for k, v in n1.items():
+                    vn.setdefault(k, v)
+                nets.extend(n2)
             elif (d.get("vid") or "").strip().isdigit():
                 mv.setdefault((d.get("key") or "").upper(), int(d["vid"]))
-        c = s.info["site_vlans"] = (vn, mv)
+        c = s.info["site_vlans"] = (vn, mv, nets)
     return c
 
 
@@ -1929,7 +1961,7 @@ def hw_profile(s, r):
 
 def inventory_view(s, r):
     names = device_names(s)
-    vnames, mvlan = site_vlans(s)
+    vnames, mvlan, vnets = site_vlans(s)
     # adresy monitorowanych routerów/AP, które są online - jeśli występują w DHCP tego routera, to na pewno są aktywne
     online_ips = {x.log_ip for x in s.scalars(select(Router)).all() if x.log_ip and x.online}
     rows = s.scalars(select(Inv).where(Inv.router_id == r.id)).all()
@@ -1958,7 +1990,8 @@ def inventory_view(s, r):
         wifi.append({"mac": mac, "name": wname, "sub": wsub, "custom": oui.normalize(mac) in names,
                      "ip": l.get("ip") or d.get("last-ip") or d.get("lastip") or "-",
                      "iface": d.get("interface") or d.get("iface", ""), "uptime": d.get("uptime") or "-",
-                     "vlan": int(num(d.get("vlan-id"))) if num(d.get("vlan-id")) else None, **wq})
+                     "vlan": (int(num(d.get("vlan-id"))) if num(d.get("vlan-id")) else None)
+                     or vlan_by_ip(vnets, l.get("ip") or d.get("last-ip") or d.get("lastip")), **wq})
     for w in wifi:
         w["vname"] = vnames.get(w["vlan"], "") if w["vlan"] else ""
     wifi.sort(key=lambda w: (-(w["q"] if w["q"] is not None else -1), -(w["signal"] if w["signal"] is not None else -999)))
@@ -1985,7 +2018,7 @@ def inventory_view(s, r):
         devices.append({"state": state, "name": dname, "host": dsub, "custom": oui.normalize(mac) in names, "ip": d.get("ip") or "-", "mac": mac,
                         "nodhcp": d.get("src") == "arp", "static": d.get("dyn") == "false", "last": d.get("last") or "-",
                         "signal": w["signal"] if w else None, "sc": w["sc"] if w else "",
-                        "vlan": (w["vlan"] if w else None) or mvlan.get(oui.normalize(mac))})
+                        "vlan": (w["vlan"] if w else None) or mvlan.get(oui.normalize(mac)) or vlan_by_ip(vnets, d.get("ip"))})
     for dv in devices:
         dv["vname"] = vnames.get(dv.get("vlan"), "") if dv.get("vlan") else ""
     order = {"online": 0, "idle": 1, "offline": 2}
@@ -4879,6 +4912,12 @@ def topology_view(s, admin=False):
                 slot["dhcp"][(d.get("key") or "").upper()] = d
         else:
             slot["wifi"].append((x.updated, d))
+    vlan_names, vlan_nets = {}, []  # id VLAN -> nazwa z /interface vlan ("vlan10-HOME" -> "HOME"); sieci IP interfejsów VLAN
+    for r in routers:
+        n1, n2 = parse_vlan_txt(inv[r.id]["vlan"])
+        for k, v in n1.items():
+            vlan_names.setdefault(k, v)
+        vlan_nets.extend(n2)
     # sąsiedzi -> połączenia między monitorowanymi routerami albo niemonitorowane urządzenia
     adj, other = {r.id: {} for r in routers}, {r.id: [] for r in routers}
     for r in routers:
@@ -4966,16 +5005,10 @@ def topology_view(s, admin=False):
         clients[rid].append({"mac": mac, "name": name if name != "-" else mac, "sub": sub, "ip": l.get("ip") or d.get("last-ip") or "",
                              "iface": d.get("interface") or d.get("iface", ""), "q": wq["q"], "qc": wq["qc"], "qlabel": wq["qlabel"],
                              "kind": device_kind(name, OUI.lookup(mac)),
-                             "signal": wq["signal"], "sc": wq["sc"], "vlan": num(d.get("vlan-id"))})
+                             "signal": wq["signal"], "sc": wq["sc"],
+                             "vlan": num(d.get("vlan-id")) or vlan_by_ip(vlan_nets, l.get("ip") or d.get("last-ip"))})
     for lst in clients.values():
         lst.sort(key=lambda c: (-(c["q"] if c["q"] is not None else -1), c["name"].lower()))
-    vlan_names = {}  # id VLAN -> nazwa z /interface vlan ("vlan10-HOME" -> "HOME")
-    for r in routers:
-        for part in (inv[r.id]["vlan"] or "").split(";"):
-            vid, _, nm = part.partition("=")
-            if vid.strip().isdigit() and nm:
-                short = re.sub(r"^vlan[-_ ]?\d*[-_ ]*", "", nm, flags=re.I).strip("-_ ") or ""
-                vlan_names.setdefault(int(vid), short)
     # urządzenia na kablu: tabela hostów bridge (bez Wi-Fi, bez portów z sąsiadami/trunków i bez samych routerów)
     skip = set(pick) | {m for r in routers for m in inv[r.id]["nbr"]}
     wired = {r.id: [] for r in routers}
@@ -4988,7 +5021,8 @@ def topology_view(s, admin=False):
             l = leases.get(mac, {})
             name, sub = device_label(mac, l.get("comment"), l.get("host"), names.get(oui.normalize(mac)))
             wired[r.id].append({"mac": mac, "name": name if name != "-" else mac, "sub": sub, "ip": l.get("ip") or "", "port": port,
-                                "kind": device_kind(name, OUI.lookup(mac)), "vlan": num(d.get("vid"))})
+                                "kind": device_kind(name, OUI.lookup(mac)),
+                                "vlan": num(d.get("vid")) or vlan_by_ip(vlan_nets, l.get("ip"))})
         wired[r.id].sort(key=lambda c: c["name"].lower())
     # grupy: kilka urządzeń na jednym porcie (serwer z maszynami wirtualnymi, switch) rysujemy jako jedno pudełko z nazwą do zmiany
     VM_OUI = ("BC:24:11", "52:54:00", "00:50:56", "00:0C:29", "00:15:5D", "08:00:27", "00:16:3E")
