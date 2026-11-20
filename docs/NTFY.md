@@ -197,6 +197,40 @@ HTTP przez internet ujawnia token i treść wiadomości.
 | Alert przychodzi dopiero po kilku minutach | Sprawdź w monitorze **Zgłoś problem → Notifications** (stan, ostatni błąd, oczekujące ponowienia) i **Application log** (wiersze `notify:`). Alert przychodzi po progu z ustawień (domyślnie 5 min) plus do 15 s. |
 | iPhone pokazuje tylko ogólny komunikat | Telefon nie ma dostępu do serwera ntfy w chwili otrzymania sygnału (brak VPN lub sieci domowej). |
 
+## Gdy serwer ntfy przestaje odpowiadać
+
+Panel co 2 minuty sprawdza serwer ntfy (`/v1/health`). Po dwóch nieudanych próbach z rzędu:
+
+- w **Dzienniku** pojawia się wpis „ntfy niedostępny” z przyczyną (np. `No route to host`), a po powrocie „ntfy znowu działa” z czasem przerwy,
+- w Ustawieniach → Powiadomienia jest czerwony pasek, a w menu administratora odznaka „⚠ ntfy”,
+- jeśli masz webhook, dostaje on od razu zdarzenie „ntfy nie odpowiada” (to jedyny kanał niezależny od zepsutego serwera),
+- zdarzenia, których nie dało się wysłać, czekają w kolejce w pamięci panelu (do 20, nie starsze niż 6 godzin; po restarcie panelu kolejka znika). Po powrocie serwera dostajesz je z dopiskiem „(opóźnione)” i godziną zdarzenia, a potem krótkie podsumowanie.
+
+Najczęstsza przyczyna na małym urządzeniu (Raspberry Pi Zero W) to zawieszenie się systemu albo zerwane połączenie Wi-Fi. Co pomaga:
+
+1. **Sprzętowy watchdog**: zawieszony Pi sam się zrestartuje. W `/etc/systemd/system.conf` ustaw `RuntimeWatchdogSec=15` i `ShutdownWatchdogSec=2min` (odkomentuj linie), potem `sudo systemctl daemon-reexec`. Sprawdzenie: `ls /dev/watchdog*` i `systemctl show -p RuntimeWatchdogUSec`.
+2. **Wyłączone oszczędzanie energii Wi-Fi** (częsta przyczyna znikającej sieci): `sudo iw dev wlan0 set power_save off`; na stałe w NetworkManager plik `/etc/NetworkManager/conf.d/wifi-powersave.conf` z treścią `[connection]` i `wifi.powersave = 2`, albo polecenie `iw` w `@reboot` w crontabie.
+3. **Samonaprawa sieci**: skrypt, który co 5 minut pinguje bramę, restartuje `wlan0`, a gdy to nie pomoże, restartuje Pi (patrz niżej).
+4. **Zasilanie i karta**: zasilacz 5 V / 2,5 A i dobra karta SD. Niedobór napięcia pokazuje `vcgencmd get_throttled` (powinno być `0x0`) i `dmesg | grep -i under-voltage`.
+5. **Trwały dziennik systemowy**, żeby po restarcie było widać przyczynę: `sudo mkdir -p /var/log/journal && sudo systemctl restart systemd-journald`, a potem `journalctl -b -1` pokaże poprzedni rozruch.
+
+Skrypt samonaprawy sieci:
+
+```bash
+sudo tee /usr/local/bin/net-watchdog.sh >/dev/null <<'EOF'
+#!/bin/sh
+GW=$(ip route | awk '/default/ {print $3; exit}')
+[ -n "$GW" ] || GW=192.168.1.1
+if ! ping -c3 -W2 "$GW" >/dev/null 2>&1; then
+  logger "net-watchdog: gateway unreachable, restarting wlan0"
+  ip link set wlan0 down; sleep 3; ip link set wlan0 up; sleep 30
+  ping -c3 -W2 "$GW" >/dev/null 2>&1 || { logger "net-watchdog: still down, rebooting"; /sbin/reboot; }
+fi
+EOF
+sudo chmod +x /usr/local/bin/net-watchdog.sh
+echo '*/5 * * * * root /usr/local/bin/net-watchdog.sh' | sudo tee /etc/cron.d/net-watchdog
+```
+
 ## Aktualizacja i kopia serwera ntfy
 
 - Aktualizacja: `sudo apt update && sudo apt upgrade` (repozytorium apt) albo ponowna instalacja nowszego pakietu `.deb`.

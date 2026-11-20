@@ -889,5 +889,14 @@
   "topo.group_switch": "Switch · %s",
   "topo.vlan": "VLAN",
   "topo.rename_group": "Group name (empty = default):",
-  "topo.rename_hint": "double-click: rename the group"
+  "topo.rename_hint": "double-click: rename the group",
+  "set.nf.down_h": "The ntfy server is not responding.",
+  "set.nf.down": "ntfy notifications are not delivered ({err}); events wait in a queue ({n}) and will be sent marked \"(delayed)\" when the server is back. Since:",
+  "set.nf.up_ok": "The ntfy server is up. Last check:",
+  "nav.ntfy_down_title": "The ntfy server is not responding; notifications are not delivered",
+  "notif.ntfy_down.title": "The ntfy server is not responding",
+  "notif.ntfy_down.msg": "The panel cannot reach the ntfy server. ntfy notifications are not delivered; events wait in a queue.",
+  "notif.ntfy_up.title": "The ntfy server is back",
+  "notif.ntfy_up.msg": "The ntfy server was down for about {min} min. Delayed events sent: {n}.",
+  "notif.delayed": "(delayed)"
 }

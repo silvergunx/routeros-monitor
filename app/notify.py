@@ -53,6 +53,23 @@ def send_ntfy(server, topic, title, message, severity="info", token=""):
     return ("ntfy: " + err) if err else ""
 
 
+def check_ntfy(server, timeout=8):
+    """Sprawdza, czy serwer ntfy odpowiada (GET /v1/health). Zwraca "" gdy działa albo krótki opis błędu."""
+    if not valid_url(server):
+        return "invalid address"
+    req = urllib.request.Request(server.strip().rstrip("/") + "/v1/health", headers={"User-Agent": "routeros-monitor"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            body = r.read(512).decode("utf-8", "replace").strip()
+        if body.startswith("{") and not json.loads(body).get("healthy", True):
+            return "unhealthy"
+        return ""
+    except urllib.error.HTTPError as e:
+        return "HTTP %d" % e.code
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        return (str(getattr(e, "reason", e)) or type(e).__name__)[:120]
+
+
 def send_webhook(url, event):
     """Wysyła zdarzenie jako JSON POST na dowolny adres (Home Assistant, n8n, Discord przez pośrednika itp.)."""
     if not valid_url(url):

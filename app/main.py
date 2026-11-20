@@ -2048,6 +2048,80 @@ _PENDING_BANS = {"n": 0, "h": 1, "sent": 0.0}
 _NOTIF_NEXT = {}   # klucz zdarzenia -> czas (time.time()), przed którym nie ponawiamy próby po błędzie wysyłki (tylko to zdarzenie)
 _NOTIF_FAILS = {}  # klucz zdarzenia -> liczba kolejnych błędów (wydłuża przerwę: 15, 30, 60, 120 s)
 _NOTIF_STATS = {"check": 0.0, "sent": 0, "error": "", "error_ts": 0.0}  # do strony „Zgłoś problem”
+# stan serwera ntfy (sprawdzany co 2 min) i kolejka zdarzeń, których nie udało się wysłać, bo ntfy nie odpowiadał
+_NTFY_H = {"down": False, "fails": 0, "since": 0.0, "err": "", "checked": 0.0}
+_OUTBOX = []  # {"ek": klucz zdarzenia, "ev": zdarzenie, "ts": czas}; tylko w pamięci (po restarcie panelu znika)
+OUTBOX_MAX, OUTBOX_AGE = 20, 6 * 3600
+
+
+def _outbox_add(ek, ev):
+    _OUTBOX[:] = [x for x in _OUTBOX if x["ek"] != ek]
+    _OUTBOX.append({"ek": ek, "ev": ev, "ts": time.time()})
+    del _OUTBOX[:-OUTBOX_MAX]
+
+
+def _outbox_flush(cfg):
+    """Wysyła zaległe zdarzenia z dopiskiem (opóźnione). Zwraca liczbę wysłanych; przy pierwszym błędzie przerywa."""
+    sent = 0
+    for item in list(_OUTBOX):
+        if time.time() - item["ts"] > OUTBOX_AGE:
+            _OUTBOX.remove(item)
+            continue
+        ev = dict(item["ev"])
+        ev["title"] = i18n.translate(cfg["lang"], "notif.delayed") + " " + ev["title"]
+        ev["message"] = "%s [%s UTC]" % (ev["message"], (ev.get("time") or "")[11:16])
+        if notify.dispatch(cfg, ev):
+            break
+        _OUTBOX.remove(item)
+        sent += 1
+    return sent
+
+
+def ntfy_health():
+    """Co 2 min sprawdza serwer ntfy. Awarię (2 nieudane próby z rzędu) i powrót zapisuje w Dzienniku, awarię zgłasza też webhookiem,
+    a po powrocie wysyła zaległe zdarzenia i krótkie podsumowanie."""
+    h = _NTFY_H
+    with Session(engine) as s:
+        cfg = notif_cfg(s)
+        if not cfg["on"] or not (cfg["ntfy_url"] or "").strip() or not (cfg["ntfy_topic"] or "").strip():
+            h.update(down=False, fails=0, err="")
+            return
+        err = notify.check_ntfy(cfg["ntfy_url"])
+        h["checked"] = time.time()
+        if err:
+            h["fails"] += 1
+            h["err"] = err
+            if h["fails"] == 1:
+                h["since"] = time.time()
+            if h["fails"] >= 2 and not h["down"]:
+                h["down"] = True
+                log(s, "ntfy niedostępny", err[:200])
+                s.commit()
+                print("notify: ntfy server unreachable: %s" % err, flush=True)
+                if (cfg["hook_url"] or "").strip():
+                    ev = notif_event(cfg, "ntfy_down", "critical", "ntfy_down")
+                    e2 = notify.send_webhook(cfg["hook_url"], ev)
+                    if e2:
+                        print("notify: webhook about ntfy outage failed: %s" % e2, flush=True)
+            return
+        was_down, t0 = h["down"], h["since"]
+        h.update(down=False, fails=0, err="")
+        if was_down:
+            mins = max(1, int((time.time() - t0) // 60))
+            log(s, "ntfy znowu działa", "po %d min" % mins)
+            s.commit()
+            n = _outbox_flush(cfg)
+            notify.dispatch(cfg, notif_event(cfg, "ntfy_up", "info", "ntfy_up", min=mins, n=n))
+            print("notify: ntfy server is back after %d min, %d delayed events sent" % (mins, n), flush=True)
+        elif _OUTBOX:
+            _outbox_flush(cfg)
+
+
+def ntfy_down():
+    return _NTFY_H["down"]
+
+
+templates.env.globals["ntfy_down"] = ntfy_down
 
 
 def notif_cfg(s):
@@ -2089,6 +2163,8 @@ def _send_event(cfg, ek, ev):
         return False  # to zdarzenie czeka na ponowienie po błędzie; pozostałe idą normalnie
     errs = notify.dispatch(cfg, ev)
     if errs:
+        if any(e.startswith("ntfy:") for e in errs):
+            _outbox_add(ek, ev)  # ntfy nie przyjął: zdarzenie nie przepadnie, nawet gdy stan zdąży się zmienić przed powrotem serwera
         fails = _NOTIF_FAILS[ek] = _NOTIF_FAILS.get(ek, 0) + 1
         wait = min(120, 15 * 2 ** (fails - 1))
         _NOTIF_NEXT[ek] = time.time() + wait
@@ -2097,6 +2173,7 @@ def _send_event(cfg, ek, ev):
         return False
     _NOTIF_FAILS.pop(ek, None)
     _NOTIF_NEXT.pop(ek, None)
+    _OUTBOX[:] = [x for x in _OUTBOX if x["ek"] != ek]  # wysłane na świeżo: nie wysyłamy drugi raz jako opóźnione
     _NOTIF_STATS["sent"] += 1
     print("notify: sent %s: %s" % (ev["kind"], ev["message"]), flush=True)
     return True
@@ -2530,6 +2607,7 @@ def start_background_tasks():
         ("purge_iface_metrics", purge_iface_metrics, 300, 60, True),
         ("purge_logs", purge_logs, 3600, 90, True),
         ("oui_refresh", oui_refresh, 86400, 30, True),
+        ("ntfy_health", ntfy_health, 120, 45, False),
     ]
     tasks = [asyncio.create_task(_periodic(*j[:4], heavy=j[4])) for j in jobs]
     tasks += [asyncio.create_task(_ingest_loop()), asyncio.create_task(_speed_loop()), asyncio.create_task(notify_loop())]
@@ -4331,6 +4409,9 @@ def _diag_notify(s):
     out.append("- Rules: router offline %s (after %d min), internet down %s (after %d min), backup %s, auto-ban %s" % (
         "on" if c["r_offline"] else "off", c["offline_min"], "on" if c["r_inet"] else "off", c["inet_min"],
         "on" if c["r_backup"] else "off", "on" if c["r_ban"] else "off"))
+    out.append("- ntfy server: %s; delayed events waiting: %d" % (
+        ("DOWN since %s (%s)" % (ago(_NTFY_H["since"]), _NTFY_H["err"])) if _NTFY_H["down"] else ("ok (checked %s)" % ago(_NTFY_H["checked"]) if _NTFY_H["checked"] else "not checked yet"),
+        len(_OUTBOX)))
     out.append("- Last check: %s; sent since start: %d; last error: %s" % (
         ago(_NOTIF_STATS["check"]), _NOTIF_STATS["sent"],
         ("%s (%s)" % (_NOTIF_STATS["error"][:80], ago(_NOTIF_STATS["error_ts"]))) if _NOTIF_STATS["error"] else "none"))
@@ -4608,7 +4689,9 @@ def settings_view(request, s, msg="", ok=True):
         "off_mult": offline_mult(s), "topo_enabled": topo_on(s),
         "thr_rows": [{"id": r.id, "name": r.name, "gap": reporting_gap(r.id), "auto_nr": auto_no_response(r.id),
                       "auto_off": auto_offline(r.id), "own_nr": _THR.get(r.id, {}).get("nr"), "own_off": _THR.get(r.id, {}).get("off"),
-                      "eff_nr": no_response_after(r.id), "eff_off": online_after(r.id)} for r in ordered_routers(s)], "nf": notif_view(s), "langs": i18n.languages(),
+                      "eff_nr": no_response_after(r.id), "eff_off": online_after(r.id)} for r in ordered_routers(s)], "nf": notif_view(s), "ntfy_h": {"down": _NTFY_H["down"], "err": _NTFY_H["err"], "outbox": len(_OUTBOX),
+                 "since": dt.datetime.utcfromtimestamp(_NTFY_H["since"]).strftime("%Y-%m-%dT%H:%M:%S") if _NTFY_H["since"] else "",
+                 "checked": dt.datetime.utcfromtimestamp(_NTFY_H["checked"]).strftime("%Y-%m-%dT%H:%M:%S") if _NTFY_H["checked"] else ""}, "langs": i18n.languages(),
         "mutes": [{"pat": m["pat"], "rid": m.get("rid"), "ts": m.get("ts", ""),
                    "router": next((r.name for r in ordered_routers(s) if r.id == m.get("rid")), "?")} for m in mutes_get(s)],
         "speed_router": sget(s, "speed_router"), "speed_time": SPEED_TIME[:5],

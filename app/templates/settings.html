@@ -70,6 +70,8 @@ f.onsubmit=()=>{if(c.checked&&!was)return confirm({{ t('set.ab.confirm')|tojson 
 </div>
 <div class="sp sp-not">
 <div class="card" id="nfset"><h2>{{ t('set.nf.title') }}</h2>
+{% if ntfy_h.down %}<p class="err" style="border-left:3px solid var(--bad);padding-left:10px"><b>{{ t('set.nf.down_h') }}</b> {{ t('set.nf.down', err=ntfy_h.err, n=ntfy_h.outbox) }} <span class="t" data-t="{{ ntfy_h.since }}Z"></span></p>
+{% elif ntfy_h.checked and nf.on %}<p class="ok small">{{ t('set.nf.up_ok') }} <span class="t" data-t="{{ ntfy_h.checked }}Z"></span></p>{% endif %}
 <p><small class="mut">{{ t('set.nf.help') }}</small></p>
 <p class="small" style="border-left:3px solid var(--warn);padding-left:10px">{{ t('set.nf.privacy') }}</p>
 <form method="post" action="/settings/notify">

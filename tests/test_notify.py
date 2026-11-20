@@ -21,6 +21,11 @@ class H(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"{}")
 
+    def do_GET(self):
+        self.send_response(STATUS["code"])
+        self.end_headers()
+        self.wfile.write(json.dumps({"healthy": STATUS.get("healthy", True)}).encode())
+
     def log_message(self, *a):
         pass
 
@@ -76,5 +81,17 @@ assert not N.allow_send(now=1000.0 + N.MAX_PER_HOUR)
 assert N.dispatch(cfg, EV, force=True) == []                         # test z przycisku omija limit
 assert N.allow_send(now=1000.0 + 3700)                               # po godzinie limit się odnawia
 
+# --- sprawdzanie serwera ntfy (/v1/health)
+assert N.check_ntfy(base) == ""
+STATUS["healthy"] = False
+assert N.check_ntfy(base) == "unhealthy"
+STATUS["healthy"] = True
+STATUS["code"] = 503
+assert N.check_ntfy(base) == "HTTP 503"
+STATUS["code"] = 200
+assert N.check_ntfy("http://127.0.0.1:%d" % port, timeout=2) != ""      # brak połączenia
+assert N.check_ntfy("nie adres") == "invalid address"
+
 srv.shutdown()
+
 print("test_notify: OK")

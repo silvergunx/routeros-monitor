@@ -890,5 +890,14 @@
   "topo.group_switch": "Przełącznik · %s",
   "topo.vlan": "VLAN",
   "topo.rename_group": "Nazwa grupy (puste = domyślna):",
-  "topo.rename_hint": "dwuklik: zmień nazwę grupy"
+  "topo.rename_hint": "dwuklik: zmień nazwę grupy",
+  "set.nf.down_h": "Serwer ntfy nie odpowiada.",
+  "set.nf.down": "Powiadomienia przez ntfy nie dochodzą ({err}); zdarzenia czekają w kolejce ({n}) i zostaną wysłane z dopiskiem „(opóźnione)” po powrocie serwera. Od:",
+  "set.nf.up_ok": "Serwer ntfy działa. Ostatnie sprawdzenie:",
+  "nav.ntfy_down_title": "Serwer ntfy nie odpowiada; powiadomienia nie dochodzą",
+  "notif.ntfy_down.title": "Serwer ntfy nie odpowiada",
+  "notif.ntfy_down.msg": "Panel nie może połączyć się z serwerem ntfy. Powiadomienia przez ntfy nie dochodzą; zdarzenia czekają w kolejce.",
+  "notif.ntfy_up.title": "Serwer ntfy znów działa",
+  "notif.ntfy_up.msg": "Serwer ntfy nie działał ok. {min} min. Wysłane zaległe zdarzenia: {n}.",
+  "notif.delayed": "(opóźnione)"
 }
