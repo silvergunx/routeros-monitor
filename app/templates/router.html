@@ -282,7 +282,7 @@ window.onTab=t=>{if(t==='logs'){if(document.getElementById('lsub').dataset.tab==
 setInterval(()=>{if(!document.hidden&&document.getElementById('rtabs').dataset.tab==='logs'&&document.getElementById('lsub').dataset.tab==='list')loadLogs()},Math.max(REFRESH,5000));
 if(document.getElementById('rtabs').dataset.tab==='logs')window.onTab('logs');
 </script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="/static/chart.umd.min.js"></script>
 <script>const WAN={{wan|tojson}};const EDGE={{ 'true' if r.edge else 'false' }};</script>
 {% raw %}<script>
 const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();

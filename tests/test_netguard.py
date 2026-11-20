@@ -47,5 +47,11 @@ assert N.target_allowed("", True)[0] is False
 def boom(host, port):
     raise OSError("no such host")
 assert N.target_allowed("zly.example", True, boom) == (False, "unresolved")
+# --- dodatkowe dozwolone sieci routerów
+nets, bad = N.parse_nets("93.184.216.0/24, 203.0.113.7 zly/33" + chr(10) + "2001:db8::/32")
+assert len(nets) == 3 and bad == ["zly/33"]
+assert N.addr_allowed("192.168.1.5", ()) and not N.addr_allowed("93.184.216.34", ())
+assert N.addr_allowed("93.184.216.34", nets) and not N.addr_allowed("93.184.217.1", nets)
+assert N.addr_allowed("::ffff:93.184.216.34", nets) and not N.addr_allowed("nie-adres", nets)
 
 print("test_netguard: OK")

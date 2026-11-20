@@ -67,6 +67,17 @@ def _fetch():
     return r.json()
 
 
+_runtime = {"on": True}  # ustawienie z panelu (Prywatność); UPDATE_CHECK=0 w .env zawsze wyłącza
+
+
+def set_enabled(on):
+    _runtime["on"] = bool(on)
+
+
+def enabled():
+    return ENABLED and _runtime["on"]
+
+
 _state = {"info": None, "t": 0.0, "ttl": 0, "busy": False, "ok": None}
 _lock = threading.Lock()
 
@@ -84,14 +95,14 @@ def _refresh():
 
 def status():
     """Do diagnostyki: 'off' (wyłączone), 'not checked yet', 'ok' albo 'failed' (ostatnie zapytanie do GitHuba)."""
-    if not ENABLED:
+    if not enabled():
         return "off"
     return {None: "not checked yet", True: "ok", False: "failed"}[_state["ok"]]
 
 
 def update_info():
     """Zwraca {'v': '1.2.0', 'url': ...} gdy jest nowsze wydanie, inaczej None. Nigdy nie czeka na sieć."""
-    if not ENABLED:
+    if not enabled():
         return None
     with _lock:
         stale = time.time() - _state["t"] >= _state["ttl"]

@@ -60,8 +60,18 @@ document.getElementById('ivno').onclick=()=>{s.value=cur;d.close()};})();</scrip
 <form method="post" action="/settings/scope" id="scopeform">
 <p><label class="row" style="gap:6px"><input type="checkbox" name="local_only" value="1" {{'checked' if scope.local_only}}> <b>{{ t('set.scope.local') }}</b></label><br><small class="mut">{{ t('set.scope.local_help') }}</small></p>
 <p><label class="row" style="gap:6px"><input type="checkbox" name="targets_private" value="1" {{'checked' if scope.targets_private}}> <b>{{ t('set.scope.targets') }}</b></label><br><small class="mut">{{ t('set.scope.targets_help') }}</small></p>
+<p><b>{{ t('set.scope.nets') }}</b><br><textarea name="nets" rows="2" style="width:100%;max-width:420px" placeholder="203.0.113.0/24">{{ scope.nets }}</textarea><br><small class="mut">{{ t('set.scope.nets_help') }}</small></p>
+{% if scope.seen %}<p><b>{{ t('set.scope.seen') }}</b></p><ul class="mut" style="margin:0 0 10px 18px">{% for x in scope.seen %}<li>{{ x.name }}: <code>{{ x.ip }}</code> {% if x.local %}({{ t('set.scope.private') }}){% elif x.ok %}({{ t('set.scope.allowed') }}){% else %}<b style="color:var(--warn,#d97706)">{{ t('set.scope.notallowed') }}</b> <a href="#" onclick="var n=document.querySelector('[name=nets]');n.value=(n.value+' {{ x.ip }}').trim();return false">{{ t('set.scope.add') }}</a>{% endif %}</li>{% endfor %}</ul>{% endif %}
 <button class="p">{{ t('common.save') }}</button>{% if scope.blocked %} <small class="mut">{{ t('set.scope.blocked', n=scope.blocked) }}</small>{% endif %}</form>
 <script>(function(){const f=document.getElementById('scopeform'),c=f.querySelector('[name=local_only]'),was=c.checked;f.onsubmit=()=>{if(c.checked&&!was)return confirm({{ t('set.scope.confirm')|tojson }});return true}})();</script></div>
+<div class="card" id="privset"><h2>{{ t('set.priv.title') }}{{ hint('privacy') }}</h2>
+<p class="mut">{{ t('set.priv.intro') }}</p>
+<form method="post" action="/settings/privacy">
+<p><label class="row" style="gap:6px"><input type="checkbox" name="update" value="1" {{'checked' if scope.priv.update and scope.env_update}} {{'disabled' if not scope.env_update}}> <b>{{ t('set.priv.update') }}</b></label><br><small class="mut">{{ t('set.priv.update_help') }}{% if not scope.env_update %} {{ t('set.priv.env_off') }}{% endif %}</small></p>
+<p><label class="row" style="gap:6px"><input type="checkbox" name="ros" value="1" {{'checked' if scope.priv.ros}}> <b>{{ t('set.priv.ros') }}</b></label><br><small class="mut">{{ t('set.priv.ros_help') }}</small></p>
+<p><label class="row" style="gap:6px"><input type="checkbox" name="oui_auto" value="1" {{'checked' if scope.priv.oui and scope.env_oui}} {{'disabled' if not scope.env_oui}}> <b>{{ t('set.priv.oui') }}</b></label><br><small class="mut">{{ t('set.priv.oui_help') }}{% if not scope.env_oui %} {{ t('set.priv.env_off') }}{% endif %}</small></p>
+<p class="mut"><small>{{ t('set.priv.other') }}</small></p>
+<button class="p">{{ t('common.save') }}</button> <button class="s" name="mode" value="local">{{ t('set.priv.local') }}</button></form></div>
 <div class="card" id="blset"><h2>{{ t('set.bl.title') }}{{ hint('blacklist') }}</h2>
 <form method="post" action="/settings/blacklist" class="row"><label class="row" style="gap:6px"><input type="checkbox" name="on" value="1" {{'checked' if bl_enabled}}> {{ t('set.bl.on') }}</label><button class="p">{{ t('common.save') }}</button></form>
 <p><small class="mut">{{ t('set.bl.help') }}</small></p>

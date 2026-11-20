@@ -18,6 +18,7 @@ import httpx
 from fastapi import FastAPI, Request, Form, Depends, HTTPException, Body
 from fastapi.responses import JSONResponse, RedirectResponse, PlainTextResponse, Response, FileResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.concurrency import run_in_threadpool
 from sqlalchemy.engine import URL
@@ -43,6 +44,7 @@ else:
 engine = create_engine(DB_URL, pool_pre_ping=True, pool_size=10, max_overflow=10)  # niezależne zadania w tle + żądania WWW
 app = FastAPI()
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=86400 * 7)
+app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")), name="static")  # Chart.js dostarczany lokalnie: przeglądarka nie łączy się z CDN
 templates = Jinja2Templates(directory="templates")
 templates.env.globals["t"] = i18n.t
 
@@ -70,7 +72,10 @@ templates.env.globals["languages"] = i18n.languages
 
 
 # zasięg sieci: opcjonalne zamknięcie przyjmowania danych od routerów do sieci prywatnych i VPN (ustawienie w panelu)
-_SCOPE = {"local_only": False, "targets_private": True, "blocked": 0, "last": ""}
+_SCOPE = {"local_only": False, "targets_private": True, "blocked": 0, "last": "", "nets": []}
+# zapytania panelu do internetu (Prywatność): nowa instalacja zaczyna z wyłączonymi, istniejąca zachowuje dotychczasowe działanie
+_PRIV = {"update": True, "ros": True, "oui": True}
+PRIV_KEYS = {"update": "priv_update", "ros": "priv_ros", "oui": "priv_oui"}
 ROUTER_PATHS = {"/api/metrics", "/api/inventory", "/api/upgrade", "/api/live", "/api/speedtest", "/api/whitelist.rsc", "/api/blacklist.rsc", "/api/setup.rsc"}
 
 
@@ -78,7 +83,7 @@ ROUTER_PATHS = {"/api/metrics", "/api/inventory", "/api/upgrade", "/api/live", "
 async def router_scope(request: Request, call_next):
     if _SCOPE["local_only"] and request.url.path in ROUTER_PATHS:
         ip = request.client.host if request.client else ""
-        if not netguard.is_local_addr(ip):
+        if not netguard.addr_allowed(ip, _SCOPE["nets"]):
             _SCOPE["blocked"] += 1
             _SCOPE["last"] = ip
             return PlainTextResponse("forbidden: this panel accepts router data only from private networks", status_code=403)
@@ -535,6 +540,8 @@ def start():
                     s.add(AuditLog(ts=now(), action="użytkownik+", detail="%s (admin, z pliku .env)" % ADMIN_USER,
                                    who="system"))
                     s.commit()
+                priv_init(s)
+                scope_load(s)
             return
         except Exception as e:
             err = e
@@ -1755,7 +1762,7 @@ def oui_refresh(force=False):
             age = (now() - dt.datetime.fromisoformat(last)).days if last else None
         except ValueError:
             age = None
-        if not force and (not OUI_AUTO or (age is not None and age < OUI_DAYS)):
+        if not force and (not OUI_AUTO or not _PRIV["oui"] or (age is not None and age < OUI_DAYS)):
             return len(OUI), None
         try:
             data = oui.parse_ieee_csv(oui.download())
@@ -2142,7 +2149,7 @@ class SyslogProto(asyncio.DatagramProtocol):
     def datagram_received(self, data, addr):
         ip = addr[0]
         rid = _log_ipmap.get(ip)
-        if rid is not None and _SCOPE["local_only"] and not netguard.is_local_addr(ip):
+        if rid is not None and _SCOPE["local_only"] and not netguard.addr_allowed(ip, _SCOPE["nets"]):
             rid = None  # przy zamkniętym zasięgu logi z adresów publicznych też są odrzucane
         if rid is None:
             c = _log_rejected.setdefault(ip, [0, None])
@@ -2157,7 +2164,34 @@ class SyslogProto(asyncio.DatagramProtocol):
 def scope_load(s):
     _SCOPE["local_only"] = sget(s, "scope_local_only", "0") == "1"
     _SCOPE["targets_private"] = sget(s, "scope_targets_private", "1") == "1"
+    _SCOPE["nets"] = netguard.parse_nets(sget(s, "scope_nets", ""))[0]
+    for k, key in PRIV_KEYS.items():
+        _PRIV[k] = sget(s, key, "1") == "1"
+    appver.set_enabled(_PRIV["update"])
 
+
+def priv_init(s):
+    """Przy pierwszym starcie: instalacja z routerami zachowuje dotychczasowe zapytania do internetu, nowa zaczyna bez nich."""
+    if sget(s, "priv_init"):
+        return
+    keep = "1" if s.scalar(select(func.count(Router.id))) else "0"
+    for key in PRIV_KEYS.values():
+        if not s.get(Setting, key):
+            sset(s, key, keep)
+    sset(s, "priv_init", "1")
+    s.commit()
+
+
+def scope_ctx(s):
+    """Dane karty Zasięg sieci: ustawienia, dodatkowe sieci i adresy, z których routery faktycznie łączą się z panelem."""
+    seen = []
+    for r in ordered_routers(s):
+        if r.log_ip:
+            seen.append({"name": r.name, "ip": r.log_ip, "ok": netguard.addr_allowed(r.log_ip, _SCOPE["nets"]),
+                         "local": netguard.is_local_addr(r.log_ip)})
+    return {"local_only": _SCOPE["local_only"], "targets_private": _SCOPE["targets_private"], "blocked": _SCOPE["blocked"],
+            "nets": sget(s, "scope_nets", ""), "seen": seen, "priv": dict(_PRIV),
+            "env_update": appver.ENABLED, "env_oui": OUI_AUTO}
 
 def refresh_ipmap():
     global _log_ipmap
@@ -4163,6 +4197,8 @@ def vtuple(v):
 
 
 def latest_version(major, channel):
+    if not _PRIV["ros"]:
+        return None  # Prywatność: panel nie pyta serwera MikroTika o najnowszą wersję
     key = (major, channel)
     c = _VER.get(key)
     if c and time.time() - c[1] < (6 * 3600 if c[0] else 1800):
@@ -4562,8 +4598,10 @@ def _diag_notify(s):
     out.append("- Rules: router offline %s (after %d min), internet down %s (after %d min), backup %s, auto-ban %s" % (
         "on" if c["r_offline"] else "off", c["offline_min"], "on" if c["r_inet"] else "off", c["inet_min"],
         "on" if c["r_backup"] else "off", "on" if c["r_ban"] else "off"))
+    out.append("- Privacy: internet queries - panel update check %s, RouterOS version check %s, OUI auto-download %s" % tuple(
+        "on" if v else "off" for v in (appver.enabled(), _PRIV["ros"], _PRIV["oui"] and OUI_AUTO)))
     out.append("- Network scope: router data %s (blocked %d requests), server-initiated connections %s" % (
-        "from private networks only" if _SCOPE["local_only"] else "from anywhere", _SCOPE["blocked"],
+        "from private networks and %d extra" % len(_SCOPE["nets"]) if _SCOPE["local_only"] else "from anywhere", _SCOPE["blocked"],
         "to private addresses only" if _SCOPE["targets_private"] else "unrestricted"))
     out.append("- ntfy server: %s; delayed events waiting: %d" % (
         ("DOWN since %s (%s)" % (ago(_NTFY_H["since"]), _NTFY_H["err"])) if _NTFY_H["down"] else ("ok (checked %s)" % ago(_NTFY_H["checked"]) if _NTFY_H["checked"] else "not checked yet"),
@@ -4845,7 +4883,7 @@ def settings_view(request, s, msg="", ok=True):
         "off_mult": offline_mult(s), "topo_enabled": topo_on(s),
         "thr_rows": [{"id": r.id, "name": r.name, "gap": reporting_gap(r.id), "auto_nr": auto_no_response(r.id),
                       "auto_off": auto_offline(r.id), "own_nr": _THR.get(r.id, {}).get("nr"), "own_off": _THR.get(r.id, {}).get("off"),
-                      "eff_nr": no_response_after(r.id), "eff_off": online_after(r.id)} for r in ordered_routers(s)], "nf": notif_view(s), "scope": {"local_only": _SCOPE["local_only"], "targets_private": _SCOPE["targets_private"], "blocked": _SCOPE["blocked"]}, "ntfy_h": {"down": _NTFY_H["down"], "err": _NTFY_H["err"], "outbox": len(_OUTBOX),
+                      "eff_nr": no_response_after(r.id), "eff_off": online_after(r.id)} for r in ordered_routers(s)], "nf": notif_view(s), "scope": scope_ctx(s), "ntfy_h": {"down": _NTFY_H["down"], "err": _NTFY_H["err"], "outbox": len(_OUTBOX),
                  "since": dt.datetime.utcfromtimestamp(_NTFY_H["since"]).strftime("%Y-%m-%dT%H:%M:%S") if _NTFY_H["since"] else "",
                  "checked": dt.datetime.utcfromtimestamp(_NTFY_H["checked"]).strftime("%Y-%m-%dT%H:%M:%S") if _NTFY_H["checked"] else ""}, "langs": i18n.languages(),
         "mutes": [{"pat": m["pat"], "rid": m.get("rid"), "ts": m.get("ts", ""),
@@ -5327,7 +5365,11 @@ def settings_topology(request: Request, on: str = Form(""), s: Session = Depends
 
 
 @app.post("/settings/scope", dependencies=[Depends(admin)])
-def settings_scope(request: Request, local_only: str = Form(""), targets_private: str = Form(""), s: Session = Depends(db)):
+def settings_scope(request: Request, local_only: str = Form(""), targets_private: str = Form(""), nets: str = Form(""), s: Session = Depends(db)):
+    parsed, bad = netguard.parse_nets(nets)
+    if bad:
+        return settings_view(request, s, tr("msg.scope_bad_nets", v=", ".join(bad[:5])), False)
+    sset(s, "scope_nets", " ".join(str(n) for n in parsed))
     sset(s, "scope_local_only", "1" if local_only == "1" else "0")
     sset(s, "scope_targets_private", "1" if targets_private == "1" else "0")
     log(s, "zasięg sieci", "dane od routerów: %s; połączenia z serwera: %s" % (
@@ -5335,6 +5377,21 @@ def settings_scope(request: Request, local_only: str = Form(""), targets_private
     s.commit()
     scope_load(s)
     return settings_view(request, s, tr("msg.scope_saved"), True)
+
+
+@app.post("/settings/privacy", dependencies=[Depends(admin)])
+def settings_privacy(request: Request, mode: str = Form(""), update: str = Form(""), ros: str = Form(""), oui_auto: str = Form(""),
+                     s: Session = Depends(db)):
+    if mode == "local":
+        update = ros = oui_auto = ""
+        sset(s, "scope_targets_private", "1")
+    for k, v in (("update", update), ("ros", ros), ("oui", oui_auto)):
+        sset(s, PRIV_KEYS[k], "1" if v == "1" else "0")
+    log(s, "prywatność", "zapytania do internetu: aktualizacje panelu %s, wersje RouterOS %s, rejestr producentów %s" % tuple(
+        "tak" if v == "1" else "nie" for v in (update, ros, oui_auto)))
+    s.commit()
+    scope_load(s)
+    return settings_view(request, s, tr("msg.priv_local" if mode == "local" else "msg.priv_saved"), True)
 
 
 @app.post("/settings/blacklist", dependencies=[Depends(admin)])

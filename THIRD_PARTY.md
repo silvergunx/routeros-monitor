@@ -30,5 +30,5 @@ download off. The registry data belongs to the IEEE.
 ## Python and other packages
 
 The packages listed in `app/requirements.txt` are installed from PyPI under their own licences. The charts use
-[Chart.js](https://www.chartjs.org/) (MIT), loaded from the jsDelivr CDN in the browser. The database, Caddy and the base images
+[Chart.js](https://www.chartjs.org/) (MIT, v4.4.7, file `app/static/chart.umd.min.js`, bundled with the panel, so the browser never contacts a CDN). The database, Caddy and the base images
 come from their official Docker images.

@@ -65,6 +65,9 @@ time.sleep(0.3)
 assert V.update_info()["v"] == "9.0.0", "po błędzie zostaje poprzedni wynik"
 assert V._state["ttl"] == V.TTL_FAIL
 
+V.set_enabled(False)                         # przełącznik z panelu (Prywatność) wyłącza zapytania
+assert V.update_info() is None and V.status() == "off"
+V.set_enabled(True)
 V.ENABLED = False
 assert V.update_info() is None
 print("test_version: OK")

@@ -28,7 +28,7 @@
 <div class="card"><h3 style="margin:0 0 8px">{{ t('lv.clients_title') }} <span class="mut small">{{ t('lv.clients_hint') }}</span></h3><div id="lvcl" class="scroll"></div></div>
 <div class="card"><h3 style="margin:0 0 8px">{{ t('lv.spots_title') }}</h3><div id="lvsp" class="scroll"></div></div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="/static/chart.umd.min.js"></script>
 <script>const ADMIN={{ 'true' if me.is_admin else 'false' }};</script>
 <script>const T={router:{{ t('lv.router')|tojson }},gateway:{{ t('lv.gateway')|tojson }},latency:{{ t('lv.latency')|tojson }},loss:{{ t('lv.loss')|tojson }},name:{{ t('lv.name')|tojson }},qshort:{{ t('lv.q_short')|tojson }},signal:{{ t('lv.signal')|tojson }},iface:{{ t('lv.iface')|tojson }},place:{{ t('lv.place')|tojson }},dev:{{ t('lv.dev')|tojson }},rate:{{ t('lv.rate')|tojson }},when:{{ t('lv.when')|tojson }},link:{{ t('lv.link')|tojson }},dssig:{{ t('lv.ds_signal')|tojson }},dsrate:{{ t('lv.ds_rate')|tojson }},deflabel:{{ t('lv.def_label')|tojson }},better:{{ t('lv.better')|tojson }},worse:{{ t('lv.worse')|tojson }},stable:{{ t('lv.stable')|tojson }},active:{{ t('lv.active')|tojson }},inactive:{{ t('lv.inactive')|tojson }},pct:{{ t('lv.pct')|tojson }},age:{{ t('lv.age')|tojson }},stale:{{ t('lv.stale')|tojson }},gwempty:{{ t('lv.gw_empty')|tojson }},noclients:{{ t('lv.no_clients')|tojson }},nospots:{{ t('lv.no_spots')|tojson }},pick:{{ t('lv.pick')|tojson }},pickfirst:{{ t('lv.pick_first')|tojson }},saved:{{ t('lv.saved')|tojson }},savefail:{{ t('lv.save_fail')|tojson }},del:{{ t('common.delete')|tojson }}};</script>
 {% raw %}<script>

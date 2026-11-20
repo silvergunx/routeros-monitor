@@ -65,3 +65,30 @@ def target_allowed(host, private_only=True, resolver=None):
     if all(is_local_addr(x) for x in ips):
         return True, ""
     return False, "public address"
+
+
+def parse_nets(text):
+    """Lista sieci (CIDR lub pojedyncze adresy) rozdzielona spacją, przecinkiem lub nową linią -> (sieci, błędne wpisy)."""
+    import re
+    nets, bad = [], []
+    for tok in re.split(r"[\s,;]+", text or ""):
+        if not tok:
+            continue
+        try:
+            nets.append(ipaddress.ip_network(tok, strict=False))
+        except ValueError:
+            bad.append(tok)
+    return nets, bad
+
+
+def addr_allowed(ip, extra=()):
+    """Czy adres może wysyłać dane routera: sieć lokalna/prywatna/VPN albo jedna z dodatkowych sieci."""
+    if is_local_addr(ip):
+        return True
+    try:
+        a = ipaddress.ip_address(str(ip).split("%")[0])
+    except ValueError:
+        return False
+    if a.version == 6 and a.ipv4_mapped:
+        a = a.ipv4_mapped
+    return any(a.version == n.version and a in n for n in extra)
