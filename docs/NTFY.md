@@ -208,7 +208,10 @@ Panel co 2 minuty sprawdza serwer ntfy (`/v1/health`). Po dwóch nieudanych pró
 
 Najczęstsza przyczyna na małym urządzeniu (Raspberry Pi Zero W) to zawieszenie się systemu albo zerwane połączenie Wi-Fi. Co pomaga:
 
-1. **Sprzętowy watchdog**: zawieszony Pi sam się zrestartuje. W `/etc/systemd/system.conf` ustaw `RuntimeWatchdogSec=15` i `ShutdownWatchdogSec=2min` (odkomentuj linie), potem `sudo systemctl daemon-reexec`. Sprawdzenie: `ls /dev/watchdog*` i `systemctl show -p RuntimeWatchdogUSec`.
+1. **Sprzętowy watchdog**: zawieszony Pi sam się zrestartuje. Zamiast edytować `/etc/systemd/system.conf` (niektóre wersje systemd nie mają tam wszystkich linii) dodaj osobny plik: `sudo mkdir -p /etc/systemd/system.conf.d`, potem `printf '[Manager]
+RuntimeWatchdogSec=15
+ShutdownWatchdogSec=2min
+' | sudo tee /etc/systemd/system.conf.d/watchdog.conf` i `sudo systemctl daemon-reexec`. Sprawdzenie: `systemctl show -p RuntimeWatchdogUSec` powinno pokazać `15s`. Jeśli pokazuje `0`, sprawdź `ls /dev/watchdog*`; gdy urządzenia nie ma, `sudo modprobe bcm2835_wdt` i dopisz `bcm2835_wdt` do `/etc/modules`.
 2. **Wyłączone oszczędzanie energii Wi-Fi** (częsta przyczyna znikającej sieci): `sudo iw dev wlan0 set power_save off`; na stałe w NetworkManager plik `/etc/NetworkManager/conf.d/wifi-powersave.conf` z treścią `[connection]` i `wifi.powersave = 2`, albo polecenie `iw` w `@reboot` w crontabie.
 3. **Samonaprawa sieci**: skrypt, który co 5 minut pinguje bramę, restartuje `wlan0`, a gdy to nie pomoże, restartuje Pi (patrz niżej).
 4. **Zasilanie i karta**: zasilacz 5 V / 2,5 A i dobra karta SD. Niedobór napięcia pokazuje `vcgencmd get_throttled` (powinno być `0x0`) i `dmesg | grep -i under-voltage`.
