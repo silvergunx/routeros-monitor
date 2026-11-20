@@ -2,6 +2,15 @@
 
 Thank you for your interest! Bug reports, ideas, translations and pull requests are welcome.
 
+## Principles behind the project
+
+Before proposing a change it helps to check it against these ideas (the full text is in the README):
+
+- Can a beginner use it without knowing RouterOS (automatic detection, plain wording, a short explanation)?
+- Does it leave security alone (the application never knows router passwords and never changes the firewall), and is it clear what it does on a router?
+- Does it help people learn (tooltips, documentation in Polish and English)?
+- Does it keep the project free and open (no telemetry, no closed components)?
+
 ## Reporting a problem or suggesting something
 
 Open an issue and include: the application version (file `app/VERSION`, also shown in the page footer), the RouterOS version of the router involved,

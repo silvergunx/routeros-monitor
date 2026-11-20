@@ -60,6 +60,16 @@ Interfejs jest dostępny po polsku i angielsku, działa w trybie jasnym i ciemny
 - automatyczne kopie zapasowe bazy z pobieraniem i usuwaniem w panelu oraz opcjonalnym limitem rozmiaru przechowywanych kopii
 - HTTPS jednym kliknięciem: podajesz domenę w Ustawieniach, certyfikat Let's Encrypt wystawia się sam (Caddy)
 
+## Zasady projektu
+
+RouterOS Monitor jest darmowy, ma otwarty kod (MIT) i tak ma pozostać. Opiera się na kilku założeniach:
+
+- **Przyjazny dla początkujących.** Nie trzeba znać RouterOS, żeby dostać użyteczny obraz swojej sieci: jedna komenda do wklejenia, komunikaty prostym językiem, rozsądne ustawienia domyślne i krótkie wyjaśnienie wszędzie tam, gdzie pojęcie jest nowe.
+- **Bez ingerencji w bezpieczeństwo.** Aplikacja nigdy nie zna haseł do routerów i sama nie zmienia firewalla. Wszystko, co instaluje na routerze, jest wypisane w [docs/ROUTERY.md](docs/ROUTERY.md) i łatwo to usunąć.
+- **Pozytywne zaskoczenie.** Dobre ustawienia domyślne, automatyczne wykrywanie zamiast ręcznej konfiguracji i wizualizacje, dzięki którym sieć widać na pierwszy rzut oka.
+- **Darmowy i otwarty, bez ukrytych elementów.** Bez telemetrii, bez płatnego wariantu i bez zamkniętych składników w obrazie (opcjonalne programy innych autorów są wypisane w [THIRD_PARTY.md](THIRD_PARTY.md)).
+- **Nauka i dzielenie się wiedzą.** RouterOS pozwala mieć za rozsądną cenę monitoring z rodziny rozwiązań, które zwykle kojarzą się z big data. Chcemy, żeby jak najwięcej osób mogło się z tego uczyć i dzielić tym, co zbudują, więc kod, dokumentacja i uzasadnienia są publiczne. Pytania, pomysły i pomoc są mile widziane.
+
 ## Wymagania
 
 - serwer z Linuksem (testowane na Ubuntu 26.04 LTS) i Dockerem z wtyczką Compose
@@ -221,6 +231,7 @@ Interfejs działa po polsku i angielsku (przełącznik PL / EN w menu i na ekran
 | Dokument | Co zawiera |
 |---|---|
 | [Releases](https://github.com/silvergunx/routeros-monitor/releases) i [CHANGELOG.pl.md](CHANGELOG.pl.md) | co zmieniło się w każdej wersji i co trzeba zrobić na routerach lub serwerze po aktualizacji |
+| [docs/START.md](docs/START.md) | pierwsze 5 minut dla kogoś, kto nie zna RouterOS: od instalacji do pierwszego obrazu sieci |
 | [docs/ROUTERY.md](docs/ROUTERY.md) | co instaluje komenda konfiguracyjna na routerze, reguły firewalla dla whitelisty i blacklisty, routery poza siecią lokalną |
 | [docs/NTFY.md](docs/NTFY.md) | powiadomienia przez własny serwer ntfy: jak to działa, przetestowane wersje i minima, instalacja, konta, telefon (Android, iPhone), dostęp spoza domu, rozwiązywanie problemów |
 | [docs/BEZPIECZENSTWO.md](docs/BEZPIECZENSTWO.md) i [SECURITY.md](SECURITY.md) | zalecenia bezpieczeństwa i zgłaszanie błędów bezpieczeństwa |

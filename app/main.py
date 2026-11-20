@@ -5,6 +5,8 @@ import statistics
 import os, re, csv, io, json, math, asyncio, socket, hashlib, hmac, secrets, time, ipaddress, datetime as dt
 from urllib.parse import quote, urlparse, urlencode
 import i18n
+from jinja2 import pass_context
+from markupsafe import Markup, escape
 import version as appver
 import speedengines
 import netguard
@@ -43,6 +45,16 @@ app = FastAPI()
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=86400 * 7)
 templates = Jinja2Templates(directory="templates")
 templates.env.globals["t"] = i18n.t
+
+
+@pass_context
+def hint(ctx, key):
+    """Ikona ⓘ z krotkim wyjasnieniem pojecia (tekst w locales: hint.<klucz>). Tryb Pro ukrywa ikony (CSS), tryb Uczę się je pokazuje."""
+    return Markup('<button type="button" class="hint" data-h="%s" aria-label="%s">ⓘ</button>' % (
+        escape(i18n.t(ctx, "hint." + key)), escape(i18n.t(ctx, "hint.aria"))))
+
+
+templates.env.globals["hint"] = hint
 tr = i18n._
 
 

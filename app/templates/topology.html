@@ -36,7 +36,7 @@
 #tmap.hl .tnode:not(.on){opacity:.22}#tmap.hl .tlink:not(.on){opacity:.07}
 .tmleg{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-size:12px;color:var(--mut);align-items:center}
 </style>
-<div class="card" id="tview" data-v="map"><div class="row" style="justify-content:space-between;margin-bottom:10px"><h2 style="margin:0">{{ t('topo.title') }}</h2>
+<div class="card" id="tview" data-v="map"><div class="row" style="justify-content:space-between;margin-bottom:10px"><h2 style="margin:0">{{ t('topo.title') }}{{ hint('topology') }}</h2>
 <div class="vsw"><button type="button" data-v="map" onclick="topoView('map')">{{ t('topo.v_map') }}</button><button type="button" data-v="tree" onclick="topoView('tree')">{{ t('topo.v_tree') }}</button></div></div>
 {% if has %}<div id="tmapwrap"><svg id="tmap" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="{{ t('topo.title') }}"></svg>
 <div class="tctl"><button type="button" id="tzin" aria-label="+">+</button><button type="button" id="tzout" aria-label="-">−</button><button type="button" id="tfit" title="{{ t('topo.fit') }}">⤢</button><button type="button" id="treset" title="{{ t('topo.reset') }}">⟲</button></div><div id="ttip"></div></div>{% endif %}
@@ -47,7 +47,7 @@
 {% if topo.orphans %}<h3 style="margin:18px 0 6px">{{ t('topo.orphans') }}</h3><div class="tree"><ul>{% for o in topo.orphans %}{{ tree(o) }}{% endfor %}</ul></div>{% endif %}</div>
 <script type="application/json" id="tgraph">{{ topo.graph|tojson }}</script>
 <div class="tmleg" id="tvl"></div>
-<div class="tmleg"><span><svg width="26" height="8"><path d="M1 4h24" class="tlink flow" stroke-width="3"/></svg> {{ t('topo.leg_flow') }}</span><span><svg width="26" height="8"><path d="M1 4h24" class="tlink wifi"/></svg> {{ t('topo.leg_wifi') }}</span><span><svg width="26" height="8"><path d="M1 4h24" class="tlink wired"/></svg> {{ t('topo.leg_wired') }}</span><span><svg width="30" height="10"><path d="M1 5h28" class="tlink vpn" /></svg> {{ t('topo.leg_vpn') }}</span><span><span class="qd ok"></span> {{ t('topo.leg_good') }}</span><span><span class="qd bad" style="outline:2px dotted var(--bad);outline-offset:1px;background:none"></span> {{ t('topo.leg_failed') }}</span><span><span class="qd warn"></span> {{ t('topo.leg_mid') }}</span><span><span class="qd bad"></span> {{ t('topo.leg_bad') }}</span></div>
+<div class="tmleg"><span><svg width="26" height="8"><path d="M1 4h24" class="tlink flow" stroke-width="3"/></svg> {{ t('topo.leg_flow') }}</span><span><svg width="26" height="8"><path d="M1 4h24" class="tlink wifi"/></svg> {{ t('topo.leg_wifi') }}</span><span><svg width="26" height="8"><path d="M1 4h24" class="tlink wired"/></svg> {{ t('topo.leg_wired') }}</span><span><svg width="30" height="10"><path d="M1 5h28" class="tlink vpn" /></svg> {{ t('topo.leg_vpn') }}{{ hint('vpn_name') }}</span><span><svg width="26" height="12"><circle cx="13" cy="6" r="5" fill="none" stroke="currentColor" stroke-dasharray="3 2"/></svg> {{ t('topo.leg_ext') }}{{ hint('dashed_nbr') }}</span><span><span class="qd ok"></span> {{ t('topo.leg_good') }}</span><span><span class="qd bad" style="outline:2px dotted var(--bad);outline-offset:1px;background:none"></span> {{ t('topo.leg_failed') }}</span><span><span class="qd warn"></span> {{ t('topo.leg_mid') }}</span><span><span class="qd bad"></span> {{ t('topo.leg_bad') }}</span></div>
 {% endif %}</div>
 <p class="mut small" style="margin-top:12px">{{ t('topo.help') }}</p></div>
 {% if has %}<script>

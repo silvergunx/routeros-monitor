@@ -60,6 +60,16 @@ The interface is available in Polish and English, works in light and dark mode a
 - automatic database backups with download and delete in the panel, and an optional size limit for the stored backups
 - HTTPS in one click: enter a domain in Settings and a Let's Encrypt certificate is issued automatically (Caddy)
 
+## Principles
+
+RouterOS Monitor is free, open source (MIT) and is meant to stay that way. It is built around a few ideas:
+
+- **Easy for beginners.** You should not need to know RouterOS to get a useful picture of your network: one command to paste, plain-language messages, sensible defaults and a short explanation wherever a concept is new.
+- **No interference with security.** The application never knows your router passwords and never changes your firewall. Everything it installs on a router is listed in [docs/ROUTERY.md](docs/ROUTERY.md) and is easy to remove.
+- **Pleasant surprises.** Good defaults, automatic detection instead of manual setup, and visualisations that make a network understandable at a glance.
+- **Free and open, with no hidden parts.** No telemetry, no paywall and no closed components in the image (optional third-party programs are listed in [THIRD_PARTY.md](THIRD_PARTY.md)).
+- **Learning and sharing.** RouterOS makes it possible to get monitoring of the kind usually associated with big data at a sensible price. We want as many people as possible to learn from it and to share what they build, so the code, the documentation and the reasoning stay public. Questions, ideas and contributions are welcome.
+
 ## Requirements
 
 - a Linux server (tested on Ubuntu 26.04 LTS) with Docker and the Compose plugin
@@ -222,6 +232,7 @@ More languages are added with a single JSON file and no code changes: [docs/TRAN
 | Document | What is in it |
 |---|---|
 | [Releases](https://github.com/silvergunx/routeros-monitor/releases) and [CHANGELOG.md](CHANGELOG.md) | what changed in each version, and what has to be done on the routers or the server after an update |
+| [docs/START.md](docs/START.md) (Polish) | the first 5 minutes for someone who does not know RouterOS: from installation to the first view of the network |
 | [docs/ROUTERY.md](docs/ROUTERY.md) (Polish) | what the configuration command installs on a router, firewall rules for the whitelist and the blacklist, routers outside the local network |
 | [docs/NTFY.md](docs/NTFY.md) (Polish) | notifications through your own ntfy server: how it works, tested versions and minimum requirements, installation, accounts, phone setup (Android, iPhone), access from outside, troubleshooting |
 | [docs/BEZPIECZENSTWO.md](docs/BEZPIECZENSTWO.md) (Polish) and [SECURITY.md](SECURITY.md) | hardening notes and how to report a vulnerability |

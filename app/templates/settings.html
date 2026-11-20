@@ -43,17 +43,17 @@ document.getElementById('ivno').onclick=()=>{s.value=cur;d.close()};})();</scrip
 <form class="i" method="post" action="/routers/{{x.id}}/move"><input type="hidden" name="dir" value="down"><button {{'disabled' if loop.last}} title="{{ t('set.order.down') }}">▼</button></form></td></tr>
 {% else %}<tr><td class="mut">{{ t('rt.none') }}</td></tr>{% endfor %}</table>
 <p><small class="mut">{{ t('set.order.help') }}</small></p></div>
-<div class="card" id="toposet"><h2>{{ t('set.topo.title') }}</h2>
+<div class="card" id="toposet"><h2>{{ t('set.topo.title') }}{{ hint('topology') }}</h2>
 <form method="post" action="/settings/topology" class="row"><label class="row" style="gap:6px"><input type="checkbox" name="on" value="1" {{'checked' if topo_enabled}}> {{ t('set.topo.on') }}</label><button class="p">{{ t('common.save') }}</button></form>
 <p><small class="mut">{{ t('set.topo.help') }}</small></p></div>
-<div class="card" id="ouiset"><h2>{{ t('set.oui.title') }}</h2>
+<div class="card" id="ouiset"><h2>{{ t('set.oui.title') }}{{ hint('oui') }}</h2>
 <p>{% if oui_n %}{{ t('set.oui.state', n=oui_n) }}{% if oui_updated %} {{ t('set.oui.when', d=oui_updated[:10]) }}{% endif %}{% else %}{{ t('set.oui.none') }}{% endif %}</p>
 {% if oui_error %}<p class="err small">{{ t('set.oui.err') }} {{ oui_error }}</p>{% endif %}
 <form method="post" action="/settings/oui/update"><button class="p">{{ t('set.oui.update') }}</button></form>
 <p><small class="mut">{{ t('set.oui.help') }}{% if not oui_auto %} {{ t('set.oui.auto_off') }}{% endif %}</small></p></div>
 </div>
 <div class="sp sp-sec">
-<div class="card" id="wlset"><h2>{{ t('set.wl.title') }}</h2>
+<div class="card" id="wlset"><h2>{{ t('set.wl.title') }}{{ hint('whitelist') }}</h2>
 <form method="post" action="/settings/whitelist" class="row"><label class="row" style="gap:6px"><input type="checkbox" name="on" value="1" {{'checked' if wl_enabled}}> {{ t('set.wl.on') }}</label><button class="p">{{ t('common.save') }}</button></form>
 <p><small class="mut">{{ t('set.wl.help') }}</small></p></div>
 <div class="card" id="blset"><h2>{{ t('set.bl.title') }}</h2>
@@ -69,7 +69,7 @@ document.getElementById('ivno').onclick=()=>{s.value=cur;d.close()};})();</scrip
 f.onsubmit=()=>{if(c.checked&&!was)return confirm({{ t('set.ab.confirm')|tojson }});return true}})();</script></div>
 </div>
 <div class="sp sp-not">
-<div class="card" id="nfset"><h2>{{ t('set.nf.title') }}</h2>
+<div class="card" id="nfset"><h2>{{ t('set.nf.title') }}{{ hint('ntfy') }}</h2>
 {% if ntfy_h.down %}<p class="err" style="border-left:3px solid var(--bad);padding-left:10px"><b>{{ t('set.nf.down_h') }}</b> {{ t('set.nf.down', err=ntfy_h.err, n=ntfy_h.outbox) }} <span class="t" data-t="{{ ntfy_h.since }}Z"></span></p>
 {% elif ntfy_h.checked and nf.on %}<p class="ok small">{{ t('set.nf.up_ok') }} <span class="t" data-t="{{ ntfy_h.checked }}Z"></span></p>{% endif %}
 <p><small class="mut">{{ t('set.nf.help') }}</small></p>
