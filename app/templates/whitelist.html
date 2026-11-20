@@ -1,7 +1,7 @@
 {% extends "base.html" %}{% block c %}
 {% set black = kind == 'black' %}
 <div class="ltabs">{% if wl_enabled or not black %}<a href="/whitelist" class="{{'on' if not black}}">{{ t('wl.title') }}</a>{% endif %}{% if bl_enabled or black %}<a href="/blacklist" class="{{'on' if black}}">{{ t('bl.title') }}</a>{% endif %}</div>
-<div class="card"><h2>{{ t('bl.title') if black else t('wl.title') }}</h2>
+<div class="card"><h2>{{ t('bl.title') if black else t('wl.title') }}{{ hint('whitelist') }}</h2>
 <p class="mut">{{ th('bl.help.html') if black else th('wl.help.html') }}</p>
 {% if err %}<p class="err">{{err}}</p>{% endif %}{% if ok %}<p class="ok">{{ok}}</p>{% endif %}
 {% if request.state.user.is_admin %}<form method="post" action="{{base}}" class="row"><input name="ip" placeholder="{{ t('wl.ip_ph') }}" style="width:220px" required> <input name="comment" placeholder="{{ t('bl.reason_ph') if black else t('wl.comment_ph') }}">

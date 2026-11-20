@@ -1,6 +1,6 @@
 {% extends "base.html" %}{% block c %}
 {% set on = routers|selectattr('online')|list|length %}
-<div class="row" style="justify-content:space-between;margin-bottom:12px"><h2 style="margin:0">{{ t('rt.title') }} <span class="mut" style="font-weight:400" id="live-count" data-live>{{ t('rt.online_count', on=on, total=routers|length) }}</span></h2>
+<div class="row" style="justify-content:space-between;margin-bottom:12px"><h2 style="margin:0">{{ t('rt.title') }}{{ hint('routers_list') }} <span class="mut" style="font-weight:400" id="live-count" data-live>{{ t('rt.online_count', on=on, total=routers|length) }}</span></h2>
 {% if request.state.user.is_admin %}<button type="button" class="p" onclick="document.getElementById('addr').showModal();document.getElementById('addname').focus()">{{ t('rt.add') }}</button>
 <dialog id="addr" class="dlg"><form method="post" action="/routers">
 <div class="row" style="justify-content:space-between"><h3 style="margin:0">{{ t('rt.new') }}</h3><button type="button" onclick="this.closest('dialog').close()" aria-label="{{ t('common.close') }}">✕</button></div>

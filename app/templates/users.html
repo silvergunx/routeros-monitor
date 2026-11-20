@@ -1,5 +1,5 @@
 {% extends "base.html" %}{% block c %}
-<div class="card"><h2>{{ t('users.title') }}</h2>
+<div class="card"><h2>{{ t('users.title') }}{{ hint('roles') }}</h2>
 {% if msg %}<p class="{{'ok' if ok else 'err'}}">{{msg}}</p>{% endif %}
 <p class="mut">{{ th('users.help.html') }}</p>
 <div style="overflow-x:auto"><table><tr><th>{{ t('users.login') }}</th><th>{{ t('users.role') }}</th><th>{{ t('users.status') }}</th><th>{{ t('users.last_login') }}</th><th>{{ t('users.actions') }}</th></tr>

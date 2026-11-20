@@ -5,27 +5,27 @@
 <h2 style="margin:0">{{r.name}} <span id="live-badge" data-live><span class="badge {{'upg' if r.upgrading else 'bad' if not r.online else 'warn' if r.no_response else 'ok'}}" style="font-weight:400">{{ t('rt.upgrading') if r.upgrading else t('rt.offline') if not r.online else t('rt.noresp') if r.no_response else t('rt.online') }}</span>{% if not r.online or r.no_response %} <small class="mut" style="font-weight:400" title="{{ r.last_seen|iso }}Z">{{ t('rt.last_seen', ago=ago(r.last_seen)) if r.last_seen else t('rt.never_seen') }}</small>{% endif %}</span></h2>
 <div class="rinfo" id="live-info" data-live><span class="mut">{% if si.model %}{{si.model}} · {% endif %}{{r.ident or '-'}} · RouterOS {{r.ver or '-'}}{% if si.fw %} · {{ t('rp.firmware') }} {{si.fw}}{% endif %} · {{ t('rp.uptime_l') }} {{r.uptime or '-'}}</span>
 {% if si.role or upd or stale %}<span class="badges">{% if si.role %}<span class="badge caps">📡 {{si.role}}</span>{{ hint('capsman') }}{% endif %}{% if upd %}<span class="badge warn">{{ t('rp.upd_avail', v=upd) }}</span>{% endif %}{% if stale %}<a class="badge warn" href="#cfg" onclick="rTab('cfg')">{{ t('rp.script_old') }}</a>{% endif %}</span>{% endif %}</div></div>
-{% macro tile(label, value, cls='', bar=none, unit='', tip='', sub='') %}<div class="tile"{% if tip %} title="{{tip}}"{% endif %}><span>{{label}}</span><b class="{{cls}}">{{value}}</b>{% if unit %} <small>{{unit}}</small>{% endif %}{% if sub %}<div class="tsub">{{sub}}</div>{% endif %}{% if bar is not none %}<div class="bar"><i class="{{cls or 'ok'}}" style="width:{{[bar,100]|min}}%"></i></div>{% endif %}</div>{% endmacro %}
+{% macro tile(label, value, cls='', bar=none, unit='', tip='', sub='', h='') %}<div class="tile"{% if tip %} title="{{tip}}"{% endif %}><span>{{label}}{% if h %}{{ hint(h) }}{% endif %}</span><b class="{{cls}}">{{value}}</b>{% if unit %} <small>{{unit}}</small>{% endif %}{% if sub %}<div class="tsub">{{sub}}</div>{% endif %}{% if bar is not none %}<div class="bar"><i class="{{cls or 'ok'}}" style="width:{{[bar,100]|min}}%"></i></div>{% endif %}</div>{% endmacro %}
 {% macro lvl(v, w, b) %}{{ '' if v is none else ('bad' if v >= b else 'warn' if v >= w else 'ok') }}{% endmacro %}
 <div id="live-tiles" data-live>{% if m %}<div class="tiles">
-{{ tile('CPU', fm(m.cpu,'%'), lvl(m.cpu,60,85), m.cpu or 0) }}
-{{ tile('RAM' ~ (' (wifi-qcom)' if si.qcom else ''), fm(m.mem,'%'), lvl(m.mem, si.ram_w, si.ram_b), m.mem or 0, ram_mb(m, si)) }}
-{{ tile(t('rp.temp'), fm(m.temp,'°C') if m.temp is not none else t('rp.none_val'), lvl(m.temp,70,85) if m.temp is not none else 'txt') }}
+{{ tile('CPU', fm(m.cpu,'%'), lvl(m.cpu,60,85), m.cpu or 0, h='cpu') }}
+{{ tile('RAM' ~ (' (wifi-qcom)' if si.qcom else ''), fm(m.mem,'%'), lvl(m.mem, si.ram_w, si.ram_b), m.mem or 0, ram_mb(m, si), h='ram') }}
+{{ tile(t('rp.temp'), fm(m.temp,'°C') if m.temp is not none else t('rp.none_val'), lvl(m.temp,70,85) if m.temp is not none else 'txt', h='temp') }}
 {{ tile(t('rp.uptime'), r.uptime or '-', 'txt') }}
 {{ tile('↓ WAN', fm(w.rx_mbps if w else none,'',1), '', none, 'Mb/s') }}
 {{ tile('↑ WAN', fm(w.tx_mbps if w else none,'',1), '', none, 'Mb/s') }}
 {% if r.edge %}{{ tile(t('rp.dns_latency'), fm(m.inet_rtt,'',1), lvl(m.inet_rtt,50,150), none,
    'ms' ~ (' · ' ~ t('rp.jitter_l') ~ ' ' ~ fm(m.inet_jit,'',1) ~ ' ms' if m.inet_jit is not none else ''),
    t('rp.tip_dns'),
-   t('rp.gateway_l') ~ ' ' ~ fm(m.gw_rtt,'',1) ~ ' ms' if m.gw_rtt is not none else '') }}
+   t('rp.gateway_l') ~ ' ' ~ fm(m.gw_rtt,'',1) ~ ' ms' if m.gw_rtt is not none else '', h='latency_dns') }}
 {% else %}{{ tile(t('rp.gw_latency'), fm(m.gw_rtt,'',1), lvl(m.gw_rtt,10,50), none,
    'ms' ~ (' · ' ~ t('rp.jitter_l') ~ ' ' ~ fm(m.gw_jit,'',1) ~ ' ms' if m.gw_jit is not none else ''),
-   t('rp.tip_gw')) }}{% endif %}
-{{ tile(t('rp.pkt_loss'), fm(m.loss,'%'), lvl(m.loss,1,5), none, '', t('rp.tip_loss')) }}
-{{ tile(t('rt.conns'), fm(m.conns)) }}
-{{ tile(t('rt.devices_online'), (inv.dev_on ~ ' / ' ~ inv.devices|length) if inv.updated else fm(m.dhcp), '' if inv.updated else 'txt') }}
+   t('rp.tip_gw'), h='latency_gw') }}{% endif %}
+{{ tile(t('rp.pkt_loss'), fm(m.loss,'%'), lvl(m.loss,1,5), none, '', t('rp.tip_loss'), h='loss') }}
+{{ tile(t('rt.conns'), fm(m.conns), h='conns') }}
+{{ tile(t('rt.devices_online'), (inv.dev_on ~ ' / ' ~ inv.devices|length) if inv.updated else fm(m.dhcp), '' if inv.updated else 'txt', h='devices_online') }}
 {{ tile(t('rp.wifi_clients'), inv.wifi|length if inv.updated else '-') }}
-{{ tile(t('rt.vpn_online'), (inv.vpn_on ~ ' / ' ~ inv.vpn|length) if inv.updated else '-') }}
+{{ tile(t('rt.vpn_online'), (inv.vpn_on ~ ' / ' ~ inv.vpn|length) if inv.updated else '-', h='vpn_online') }}
 </div>{% endif %}</div>
 <div id="rtabs" data-tab="charts">
 <div class="tabs rt">
