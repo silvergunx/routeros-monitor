@@ -179,13 +179,14 @@ def build(s):
         3: [("ether1", "true", "false", "1Gbps", "true", "", ""), ("ether2", "true", "false", "100Mbps", "false", "bridge", "Old phone"),
             ("ether3", "false", "false", "", "", "bridge", "")]}
     # sąsiedzi MNDP/LLDP (karta Topologia): router -> (port lokalny, identity, model, adres)
+    SD = {"nas-synology": "Linux DS918+ 4.4.302+", "unifi-usw8": "USW-Lite-8-PoE, 6.6.65"}   # opis systemu z LLDP
     NBR = {0: [("ether2", "ap-upstairs", "hAP ax3", "192.168.88.2"), ("ether5", "ap-garage", "cAP ac", "192.168.88.3"),
-               ("sfp-sfpplus1", "switch-office", "CRS326-24G-2S+", "192.168.88.9"), ("ether6", "nas-synology", "", "192.168.88.40")],
+               ("sfp-sfpplus1", "switch-office", "CRS326-24G-2S+", "192.168.88.9"), ("ether6", "nas-synology", "", "192.168.88.40"), ("ether7", "unifi-usw8", "", "192.168.88.12")],
            1: [("ether1", "master", "RB5009UG+S+IN", "192.168.88.1")], 2: [("ether1", "master", "RB5009UG+S+IN", "192.168.88.1")]}
     for ri, nl_ in NBR.items():
         for k, (port, ident, board, ip) in enumerate(nl_):
             m = "48:A9:8A:%02X:%02X:%02X" % (ri, k, 7)
-            inv(rs[ri], "nbr", m + "|" + port, dict(mac=m, id=ident, ip=ip, pl="MikroTik" if board else "", bd=board, **{"if": port}))
+            inv(rs[ri], "nbr", m + "|" + port, dict(mac=m, id=ident, ip=ip, pl="MikroTik" if board else "", bd=board, sd=SD.get(ident, ""), **{"if": port}))
     # urządzenia na kablu (tabela hostów bridge): 7 na Masterze i jedno na AP
     wired_idx = [i for i, d in enumerate(DEVICES) if not d[3]]
     for k, i in enumerate(wired_idx[:7]):
@@ -213,7 +214,7 @@ def build(s):
     for i, (comment, host, last, wifi, static) in enumerate(DEVICES):
         ip = "192.168.88.%d" % last
         online = i % 7 != 5
-        LEASES[i] = dict(ip=ip, host=host, comment=comment, status="bound", arp="reachable" if online else "stale",
+        LEASES[i] = dict(cid="MSFT 5.0" if ("PC" in comment or "laptop" in comment.lower()) else ("android-dhcp-13" if "Android" in comment else ""), ip=ip, host=host, comment=comment, status="bound", arp="reachable" if online else "stale",
                          bh="1" if online else "0", last="%dm%02ds" % (rnd.randint(0, 40), rnd.randint(0, 59)), dyn="false" if static else "true")
         inv(rs[0], "dhcp", mac(i + 1), LEASES[i])
     for i in range(1, 6):
