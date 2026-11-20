@@ -60,7 +60,7 @@ try{pins=JSON.parse(localStorage.getItem('topoPins')||'{}')}catch(e){pins={}}
 function gdim(n){const m=Math.min(n.n,16),k=Math.min(4,Math.ceil(Math.sqrt(m))),rows=Math.ceil(m/k);return{k,rows,w:Math.max(92,k*24+16),h:rows*24+40}}
 const R=n=>n.type==='inet'?52:n.type==='router'?28:n.type==='nbr'?21:n.type==='group'?(g=>Math.hypot(g.w,g.h)/2)(gdim(n)):13;
 const VC=['#f59e0b','#a855f7','#14b8a6','#ec4899','#84cc16','#06b6d4','#f97316','#8b5cf6'];let VL=[],vf=null;
-const vcol=id=>VC[Math.max(0,VL.findIndex(v=>v.id===id))%VC.length];
+const vcol=id=>VC[id%VC.length];
 const VN=id=>{const v=VL.find(x=>x.id===id);return v?v.name:''};
 const hasVlan=(n,v)=>n.vlan===v||(n.items||[]).some(i=>i.vlan===v);
 function el(tag,at,par){const e=document.createElementNS(NS,tag);for(const k in at)e.setAttribute(k,at[k]);if(par)par.appendChild(e);return e}

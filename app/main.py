@@ -1838,8 +1838,32 @@ def ports_view(s, r, rows, wan):
     return out
 
 
+def site_vlans(s):
+    """(nazwy VLAN-ów {id: nazwa}, VLAN urządzeń kablowych {MAC: id}) ze wszystkich routerów; liczone raz na sesję bazy."""
+    c = s.info.get("site_vlans")
+    if c is None:
+        vn, mv = {}, {}
+        for x in s.scalars(select(Inv).where(Inv.kind.in_(("vlan", "brh")))):
+            if x.kind == "brh" and (now() - x.updated).total_seconds() > 300:
+                continue
+            try:
+                d = json.loads(x.data)
+            except ValueError:
+                continue
+            if x.kind == "vlan":
+                for part in (d.get("txt") or "").split(";"):
+                    vid, _, nm = part.partition("=")
+                    if vid.strip().isdigit() and nm:
+                        vn.setdefault(int(vid), re.sub(r"^vlan[-_ ]?\d*[-_ ]*", "", nm, flags=re.I).strip("-_ "))
+            elif (d.get("vid") or "").strip().isdigit():
+                mv.setdefault((d.get("key") or "").upper(), int(d["vid"]))
+        c = s.info["site_vlans"] = (vn, mv)
+    return c
+
+
 def inventory_view(s, r):
     names = device_names(s)
+    vnames, mvlan = site_vlans(s)
     # adresy monitorowanych routerów/AP, które są online - jeśli występują w DHCP tego routera, to na pewno są aktywne
     online_ips = {x.log_ip for x in s.scalars(select(Router)).all() if x.log_ip and x.online}
     rows = s.scalars(select(Inv).where(Inv.router_id == r.id)).all()
@@ -1867,7 +1891,10 @@ def inventory_view(s, r):
         wname, wsub = device_label(mac, l.get("comment"), l.get("host"), names.get(oui.normalize(mac)))
         wifi.append({"mac": mac, "name": wname, "sub": wsub, "custom": oui.normalize(mac) in names,
                      "ip": l.get("ip") or d.get("last-ip") or d.get("lastip") or "-",
-                     "iface": d.get("interface") or d.get("iface", ""), "uptime": d.get("uptime") or "-", **wq})
+                     "iface": d.get("interface") or d.get("iface", ""), "uptime": d.get("uptime") or "-",
+                     "vlan": int(num(d.get("vlan-id"))) if num(d.get("vlan-id")) else None, **wq})
+    for w in wifi:
+        w["vname"] = vnames.get(w["vlan"], "") if w["vlan"] else ""
     wifi.sort(key=lambda w: (-(w["q"] if w["q"] is not None else -1), -(w["signal"] if w["signal"] is not None else -999)))
     wmacs = {w["mac"]: w for w in wifi}
     devices = []
@@ -1891,7 +1918,10 @@ def inventory_view(s, r):
         dname, dsub = device_label(mac, d.get("comment"), d.get("host"), names.get(oui.normalize(mac)))
         devices.append({"state": state, "name": dname, "host": dsub, "custom": oui.normalize(mac) in names, "ip": d.get("ip") or "-", "mac": mac,
                         "nodhcp": d.get("src") == "arp", "static": d.get("dyn") == "false", "last": d.get("last") or "-",
-                        "signal": w["signal"] if w else None, "sc": w["sc"] if w else ""})
+                        "signal": w["signal"] if w else None, "sc": w["sc"] if w else "",
+                        "vlan": (w["vlan"] if w else None) or mvlan.get(oui.normalize(mac))})
+    for dv in devices:
+        dv["vname"] = vnames.get(dv.get("vlan"), "") if dv.get("vlan") else ""
     order = {"online": 0, "idle": 1, "offline": 2}
     devices.sort(key=lambda x: (order[x["state"]], x["name"].lower()))
     vpn = []
